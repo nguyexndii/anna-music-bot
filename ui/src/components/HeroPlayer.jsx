@@ -53,12 +53,12 @@ export default function HeroPlayer({ player, onAction }) {
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-anna-bg/60 border border-anna-border/60 text-xs font-semibold text-anna-text">
             {isPlaying ? (
               <>
-                <span className="w-2 h-2 rounded-full bg-anna-green animate-ping"></span>
+                <span className="w-2 h-2 rounded-full bg-anna-green animate-ping" aria-hidden="true"></span>
                 <span>Đang phát</span>
               </>
             ) : (
               <>
-                <span className="w-2 h-2 rounded-full bg-anna-yellow"></span>
+                <span className="w-2 h-2 rounded-full bg-anna-yellow" aria-hidden="true"></span>
                 <span>Tạm dừng</span>
               </>
             )}
@@ -66,7 +66,7 @@ export default function HeroPlayer({ player, onAction }) {
 
           {player?.mode247 && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-anna-pink/10 border border-anna-pink/30 text-xs font-bold text-anna-pink">
-              <Infinity className="w-3.5 h-3.5" />
+              <Infinity className="w-3.5 h-3.5" aria-hidden="true" />
               <span>24/7 Lofi</span>
             </div>
           )}
@@ -74,14 +74,18 @@ export default function HeroPlayer({ player, onAction }) {
 
         {/* Vinyl Disc / Thumbnail */}
         <div className="relative my-4 group">
-          <div className={`w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-[#0a0a0a] border-4 border-[#222] shadow-2xl flex items-center justify-center p-3 relative ${isPlaying ? 'vinyl-spinning' : 'vinyl-paused'}`}>
+          <div
+            className={`w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-[#0a0a0a] border-4 border-[#222] shadow-2xl flex items-center justify-center p-3 relative transition-transform duration-500 ${
+              isPlaying ? 'vinyl-spinning' : 'vinyl-paused'
+            }`}
+          >
             <div className="absolute inset-2 rounded-full border border-white/5 pointer-events-none"></div>
             <div className="absolute inset-6 rounded-full border border-white/5 pointer-events-none"></div>
             <div className="absolute inset-10 rounded-full border border-white/5 pointer-events-none"></div>
             
             <img
               src={current?.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500'}
-              alt={current?.title || 'Music'}
+              alt={current?.title ? `Ảnh bìa ${current.title}` : 'Ảnh bìa bài hát'}
               className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover shadow-inner ring-4 ring-[#111]"
             />
             <div className="absolute w-6 h-6 rounded-full bg-anna-surface border-2 border-anna-border shadow-inner"></div>
@@ -94,21 +98,31 @@ export default function HeroPlayer({ player, onAction }) {
             {current?.title || 'Chưa có bài hát đang phát'}
           </h2>
           <p className="text-xs sm:text-sm font-medium text-anna-muted mt-1 flex items-center justify-center gap-1.5">
-            <Music className="w-3.5 h-3.5 text-anna-accent" />
+            <Music className="w-3.5 h-3.5 text-anna-accent" aria-hidden="true" />
             <span>{current?.artist || 'Anna Music DJ AI'}</span>
           </p>
 
           {/* Requester Badge */}
           <div className="mt-3 inline-flex items-center gap-2 bg-anna-bg/80 border border-anna-border/60 px-3 py-1 rounded-full text-xs text-anna-muted">
             {current?.requestedByAvatar && (
-              <img src={current.requestedByAvatar} alt="" className="w-4 h-4 rounded-full object-cover" />
+              <img
+                src={current.requestedByAvatar}
+                alt=""
+                className="w-4 h-4 rounded-full object-cover"
+                aria-hidden="true"
+              />
             )}
             <span>Yêu cầu bởi: <b className="text-white">{current?.requestedBy || 'Hệ thống (24/7)'}</b></span>
           </div>
         </div>
 
         {/* Audio Visualizer */}
-        <div className={`w-full flex items-center justify-center gap-1 my-5 h-8 px-4 ${isPlaying ? 'animating' : ''}`}>
+        <div
+          className={`w-full flex items-center justify-center gap-1 my-5 h-8 px-4 ${
+            isPlaying ? 'animating' : ''
+          }`}
+          aria-hidden="true"
+        >
           <span className="v-bar h-2 w-1 rounded-full bg-anna-accent"></span>
           <span className="v-bar h-5 w-1 rounded-full bg-anna-accent"></span>
           <span className="v-bar h-7 w-1 rounded-full bg-anna-pink"></span>
@@ -124,7 +138,14 @@ export default function HeroPlayer({ player, onAction }) {
 
         {/* Progress Bar */}
         <div className="w-full z-10 space-y-1.5">
-          <div className="relative w-full bg-anna-border/50 h-1.5 rounded-full overflow-hidden">
+          <div
+            className="relative w-full bg-anna-border/50 h-1.5 rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={Math.round(percent)}
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-label="Tiến trình phát nhạc"
+          >
             <div
               className="h-full bg-gradient-to-r from-anna-accent to-anna-pink rounded-full transition-all duration-300"
               style={{ width: `${percent}%` }}
@@ -140,40 +161,49 @@ export default function HeroPlayer({ player, onAction }) {
         <div className="w-full flex items-center justify-center gap-3 sm:gap-4 mt-5 z-10">
           <button
             onClick={() => onAction('shuffle')}
+            aria-label="Xáo trộn hàng chờ bài hát"
             title="Xáo trộn hàng chờ"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95"
+            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
             <Shuffle className="w-4 h-4" />
           </button>
           
           <button
             onClick={() => onAction('resume')}
+            aria-label="Phát lại từ đầu"
             title="Phát lại từ đầu"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95"
+            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
             <SkipBack className="w-5 h-5" />
           </button>
 
           <button
             onClick={() => onAction(isPlaying ? 'pause' : 'resume')}
+            aria-label={isPlaying ? 'Tạm dừng bài hát' : 'Tiếp tục phát bài hát'}
             title={isPlaying ? 'Tạm dừng' : 'Phát tiếp'}
-            className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-anna-accent to-anna-pink hover:opacity-90 text-white flex items-center justify-center shadow-lg shadow-anna-accent/30 transition active:scale-95"
+            className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-anna-accent to-anna-pink hover:opacity-90 text-white flex items-center justify-center shadow-lg shadow-anna-accent/30 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
           >
-            {isPlaying ? <Pause className="w-7 h-7 fill-current" /> : <Play className="w-7 h-7 fill-current ml-0.5" />}
+            {isPlaying ? (
+              <Pause className="w-7 h-7 fill-current" />
+            ) : (
+              <Play className="w-7 h-7 fill-current ml-0.5" />
+            )}
           </button>
 
           <button
             onClick={() => onAction('skip')}
+            aria-label="Chuyển sang bài hát tiếp theo"
             title="Chuyển bài tiếp theo"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95"
+            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
             <SkipForward className="w-5 h-5" />
           </button>
 
           <button
             onClick={() => onAction('loop')}
+            aria-label="Thay đổi chế độ lặp lại"
             title="Chế độ lặp lại"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 relative"
+            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 relative focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
             <Repeat className="w-4 h-4" />
             {player?.loop === 'track' && (
@@ -192,14 +222,15 @@ export default function HeroPlayer({ player, onAction }) {
         {/* Volume & 24/7 Controls */}
         <div className="w-full flex items-center justify-between gap-4 mt-6 pt-4 border-t border-anna-border/50 text-xs z-10">
           <div className="flex items-center gap-2 flex-1">
-            <Volume2 className="w-4 h-4 text-anna-muted" />
+            <Volume2 className="w-4 h-4 text-anna-muted" aria-hidden="true" />
             <input
               type="range"
               min="0"
               max="150"
               value={player?.volume || 100}
               onChange={(e) => onAction('volume', e.target.value)}
-              className="w-full accent-anna-accent h-1.5 bg-anna-border rounded-lg cursor-pointer"
+              aria-label="Điều chỉnh âm lượng bot nhạc"
+              className="w-full accent-anna-accent h-1.5 bg-anna-border rounded-lg cursor-pointer focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
             />
             <span className="text-xs font-mono text-anna-muted w-8 text-right">
               {player?.volume || 100}%
@@ -208,13 +239,14 @@ export default function HeroPlayer({ player, onAction }) {
 
           <button
             onClick={() => onAction('toggle247')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition font-medium text-xs ${
+            aria-label="Bật hoặc tắt chế độ treo 24/7 Lofi"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition font-medium text-xs focus-visible:ring-2 focus-visible:ring-anna-pink focus-visible:outline-none ${
               player?.mode247
                 ? 'bg-anna-pink/10 border-anna-pink/40 text-anna-pink'
                 : 'bg-anna-bg hover:bg-anna-hover border-anna-border text-anna-text'
             }`}
           >
-            <Radio className="w-3.5 h-3.5" />
+            <Radio className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Treo 24/7</span>
           </button>
         </div>
@@ -225,7 +257,7 @@ export default function HeroPlayer({ player, onAction }) {
       <div className="bg-anna-surface border border-anna-border/80 rounded-2xl p-4 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-anna-green/10 text-anna-green border border-anna-green/20 flex items-center justify-center">
-            <Mic className="w-4 h-4" />
+            <Mic className="w-4 h-4" aria-hidden="true" />
           </div>
           <div>
             <div className="text-xs font-bold text-white flex items-center gap-2">
@@ -242,6 +274,7 @@ export default function HeroPlayer({ player, onAction }) {
             <img
               key={idx}
               src={m.avatar}
+              alt={m.name}
               title={m.name}
               className="w-6 h-6 rounded-full border-2 border-anna-surface object-cover"
             />

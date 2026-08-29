@@ -75,3 +75,23 @@
   text-shadow: 0 0 20px rgba(88, 101, 242, 0.7);
   transform: scale(1.03);
 }
+
+/* Reduced Motion Support (A11y) */
+@media (prefers-reduced-motion: reduce) {
+  .vinyl-spinning {
+    animation: none;
+  }
+  .animating .v-bar {
+    animation: none;
+  }
+  .animate-spin,
+  .animate-spin-slow,
+  .animate-ping,
+  .animate-pulse {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

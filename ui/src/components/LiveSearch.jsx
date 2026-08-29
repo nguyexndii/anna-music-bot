@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Loader2, Sparkles, Plus, Play } from 'lucide-react';
+import { Search, X, Loader2, Sparkles, Plus } from 'lucide-react';
 
 export default function LiveSearch({ onOrderSong }) {
   const [query, setQuery] = useState('');
@@ -41,18 +41,20 @@ export default function LiveSearch({ onOrderSong }) {
     <div className="flex-1 flex flex-col gap-4">
       {/* Search Input Bar */}
       <div className="relative flex items-center">
-        <Search className="absolute left-4 w-5 h-5 text-anna-muted pointer-events-none" />
+        <Search className="absolute left-4 w-5 h-5 text-anna-muted pointer-events-none" aria-hidden="true" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Tìm bài hát, nghệ sĩ hoặc dán link YouTube/Spotify..."
+          aria-label="Tìm bài hát hoặc dán link YouTube, Spotify"
           className="w-full bg-anna-surface border border-anna-border focus:border-anna-accent rounded-2xl pl-12 pr-12 py-3.5 text-sm text-white placeholder-anna-muted focus:outline-none focus:ring-2 focus:ring-anna-accent/30 transition shadow-inner"
         />
         {query && (
           <button
             onClick={() => setQuery('')}
-            className="absolute right-4 text-anna-muted hover:text-white"
+            aria-label="Xóa nội dung tìm kiếm"
+            className="absolute right-4 text-anna-muted hover:text-white focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none rounded-lg p-1"
           >
             <X className="w-4 h-4" />
           </button>
@@ -66,7 +68,7 @@ export default function LiveSearch({ onOrderSong }) {
           <button
             key={tag}
             onClick={() => setQuery(tag)}
-            className="px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition flex-shrink-0"
+            className="px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition flex-shrink-0 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
             {tag}
           </button>
@@ -78,7 +80,11 @@ export default function LiveSearch({ onOrderSong }) {
         
         {/* Loading Overlay */}
         {loading && (
-          <div className="absolute inset-0 bg-anna-surface/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2">
+          <div
+            className="absolute inset-0 bg-anna-surface/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2"
+            role="status"
+            aria-live="polite"
+          >
             <Loader2 className="w-7 h-7 text-anna-accent animate-spin" />
             <span className="text-xs text-anna-muted font-medium">Đang tìm kiếm bài hát...</span>
           </div>
@@ -88,7 +94,7 @@ export default function LiveSearch({ onOrderSong }) {
         {!loading && results.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-anna-muted">
             <div className="w-12 h-12 rounded-2xl bg-anna-card border border-anna-border flex items-center justify-center mb-3">
-              <Sparkles className="w-6 h-6 text-anna-accent" />
+              <Sparkles className="w-6 h-6 text-anna-accent" aria-hidden="true" />
             </div>
             <p className="text-sm font-semibold text-white">Tìm kiếm bài hát tức thời</p>
             <p className="text-xs text-anna-muted mt-1 max-w-xs">
@@ -108,7 +114,7 @@ export default function LiveSearch({ onOrderSong }) {
                 <div className="flex items-center gap-3 min-w-0">
                   <img
                     src={track.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}
-                    alt={track.title}
+                    alt={`Ảnh bìa ${track.title}`}
                     className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
                   />
                   <div className="min-w-0">
@@ -124,9 +130,10 @@ export default function LiveSearch({ onOrderSong }) {
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
                     onClick={() => onOrderSong(track)}
-                    className="px-3 py-1.5 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition flex items-center gap-1 shadow-sm shadow-anna-accent/20 active:scale-95"
+                    aria-label={`Thêm bài hát ${track.title} vào hàng chờ`}
+                    className="px-3 py-1.5 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition flex items-center gap-1 shadow-sm shadow-anna-accent/20 active:scale-95 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Thêm</span>
                   </button>
                 </div>
