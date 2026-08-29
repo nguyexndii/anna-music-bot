@@ -7,6 +7,7 @@ import {
   Shuffle,
   Repeat,
   Volume2,
+  VolumeX,
   Radio,
   Infinity,
   Mic,
@@ -19,6 +20,7 @@ export default function HeroPlayer({ player, onAction }) {
 
   // Local progress interpolation for smooth 1-second ticks
   const [progressMs, setProgressMs] = useState(0);
+  const [previousVolume, setPreviousVolume] = useState(100);
   const totalMs = parseDurationToMs(current?.duration);
 
   useEffect(() => {
@@ -36,6 +38,31 @@ export default function HeroPlayer({ player, onAction }) {
     }, 1000);
     return () => clearInterval(timer);
   }, [isPlaying, totalMs]);
+
+  // Global Keyboard Shortcuts (Space: Play/Pause, M: Mute)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        onAction(isPlaying ? 'pause' : 'resume');
+      } else if (e.code === 'KeyM') {
+        e.preventDefault();
+        toggleMute();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, player?.volume]);
+
+  const toggleMute = () => {
+    if ((player?.volume || 0) > 0) {
+      setPreviousVolume(player?.volume || 100);
+      onAction('volume', 0);
+    } else {
+      onAction('volume', previousVolume || 100);
+    }
+  };
 
   const percent = totalMs > 0 ? Math.min(100, (progressMs / totalMs) * 100) : 0;
 
@@ -179,8 +206,8 @@ export default function HeroPlayer({ player, onAction }) {
 
           <button
             onClick={() => onAction(isPlaying ? 'pause' : 'resume')}
-            aria-label={isPlaying ? 'Tạm dừng bài hát' : 'Tiếp tục phát bài hát'}
-            title={isPlaying ? 'Tạm dừng' : 'Phát tiếp'}
+            aria-label={isPlaying ? 'Tạm dừng bài hát (Space)' : 'Tiếp tục phát bài hát (Space)'}
+            title={isPlaying ? 'Tạm dừng (Phím cách)' : 'Phát tiếp (Phím cách)'}
             className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-anna-accent to-anna-pink hover:opacity-90 text-white flex items-center justify-center shadow-lg shadow-anna-accent/30 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
           >
             {isPlaying ? (
@@ -222,18 +249,29 @@ export default function HeroPlayer({ player, onAction }) {
         {/* Volume & 24/7 Controls */}
         <div className="w-full flex items-center justify-between gap-4 mt-6 pt-4 border-t border-anna-border/50 text-xs z-10">
           <div className="flex items-center gap-2 flex-1">
-            <Volume2 className="w-4 h-4 text-anna-muted" aria-hidden="true" />
+            <button
+              onClick={toggleMute}
+              aria-label={(player?.volume || 0) === 0 ? "Bật âm thanh (Phím M)" : "Tắt tiếng (Phím M)"}
+              title={(player?.volume || 0) === 0 ? "Bật âm thanh (M)" : "Tắt tiếng (M)"}
+              className="text-anna-muted hover:text-white transition p-1 rounded-lg focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
+            >
+              {(player?.volume || 0) === 0 ? (
+                <VolumeX className="w-4 h-4 text-anna-red" />
+              ) : (
+                <Volume2 className="w-4 h-4" />
+              )}
+            </button>
             <input
               type="range"
               min="0"
               max="150"
-              value={player?.volume || 100}
+              value={player?.volume || 0}
               onChange={(e) => onAction('volume', e.target.value)}
               aria-label="Điều chỉnh âm lượng bot nhạc"
               className="w-full accent-anna-accent h-1.5 bg-anna-border rounded-lg cursor-pointer focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
             />
             <span className="text-xs font-mono text-anna-muted w-8 text-right">
-              {player?.volume || 100}%
+              {player?.volume || 0}%
             </span>
           </div>
 
