@@ -21,13 +21,17 @@ module.exports = {
     // 2. Kiểm tra kênh Voice
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
-      return message.reply('Bạn cần tham gia vào một kênh Voice trước!');
+      return message.reply('Bạn cần tham gia vào một kênh Voice trước!').then(msg => {
+        setTimeout(() => { msg.delete().catch(() => {}); if (message.deletable) message.delete().catch(() => {}); }, 7000);
+      }).catch(() => {});
     }
 
-    // 3. Kiểm tra kênh Voice bị khóa (Admin bypass)
+    // 3. Kiểm tra kênh Voice bị khóa (Admin bypass - Tự động xóa sau 7s)
     if (!isAllowedVoiceChannel(message.member)) {
       const guildSettings = settingsManager.get(message.guild.id);
-      return message.reply(`Máy chủ đã khóa kênh Voice cố định! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`);
+      return message.reply(`Máy chủ đã khóa kênh Voice cố định! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`).then(msg => {
+        setTimeout(() => { msg.delete().catch(() => {}); if (message.deletable) message.delete().catch(() => {}); }, 7000);
+      }).catch(() => {});
     }
 
     const permissions = voiceChannel.permissionsFor(message.client.user);

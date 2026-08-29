@@ -1,59 +1,112 @@
 const crypto = require('crypto');
 const config = require('../config');
 
-// Use bot token as secret for HMAC
-const SECRET_KEY = crypto.createHash('sha256').update(config.token || 'anna-music-secret-key-2026').digest();
+// In-memory global token/PIN store with auto cleanup
+global._tokenStore = global._tokenStore || new Map();
+const tokenStore = global._tokenStore;
+
+// Periodic cleanup of expired tokens every 1 minute
+if (!global._tokenStoreCleaner) {
+  global._tokenStoreCleaner = setInterval(() => {
+    const now = Date.now();
+    for (const [key, data] of tokenStore.entries()) {
+      if (data.exp < now) {
+        tokenStore.delete(key);
+      }
+    }
+  }, 60 * 1000);
+}
+
+let secretKeySource = config.webJwtSecret || process.env.WEB_JWT_SECRET;
+if (!secretKeySource) {
+  if (!global._warnedWebJwtSecret) {
+    console.warn('[TokenHelper] Cảnh báo: Chưa cấu hình WEB_JWT_SECRET trong biến môi trường, đang fallback về token bot.');
+    global._warnedWebJwtSecret = true;
+  }
+  secretKeySource = config.token || 'anna-music-secret-key-2026';
+}
+
+const SECRET_KEY = crypto.createHash('sha256').update(secretKeySource).digest();
 
 /**
- * Tạo Magic Token mã hóa cho User khi gõ lệnh .web
+ * Tạo Mã PIN 6 số và Token cho User khi gõ lệnh .web
  * @param {Object} userData - { userId, username, displayName, avatar, guildId, guildName }
- * @param {number} expiresInMinutes - Thời hạn token (mặc định 2 phút)
- * @returns {string} token
+ * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 2 phút)
+ * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập HMAC (mặc định 12 tiếng)
+ * @returns {{ token: string, pin: string }}
  */
-function generateWebToken(userData, expiresInMinutes = 2) {
-  const payload = {
-    userId: userData.userId,
+function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 12) {
+  const pinExp = Date.now() + pinExpiryMinutes * 60 * 1000;
+  const sessionExp = Date.now() + sessionExpiryHours * 60 * 60 * 1000;
+
+  // 1. Tạo mã PIN 6 số ngẫu nhiên (hiệu lực ngắn)
+  const pin = Math.floor(100000 + Math.random() * 900000).toString();
+
+  const pinPayload = {
+    userId: String(userData.userId),
     username: userData.username,
     displayName: userData.displayName || userData.username,
     avatar: userData.avatar,
-    guildId: userData.guildId,
+    guildId: String(userData.guildId),
     guildName: userData.guildName || 'Server',
-    exp: Date.now() + expiresInMinutes * 60 * 1000
+    pin,
+    exp: pinExp
   };
 
-  const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  // 2. Tạo HMAC session token (hiệu lực dài - dùng cho nút bấm)
+  const sessionPayload = { ...pinPayload, exp: sessionExp };
+  const base64Payload = Buffer.from(JSON.stringify(sessionPayload)).toString('base64url');
   const signature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
+  const token = `${base64Payload}.${signature}`;
 
-  return `${base64Payload}.${signature}`;
+  // Lưu PIN vào store (ngắn hạn), Token lưu để HMAC fallback verify không cần store
+  tokenStore.set(pin, pinPayload);
+  tokenStore.set(token, sessionPayload);
+
+  return { token, pin };
 }
 
 /**
- * Xác thực Magic Token từ Web
- * @param {string} token
+ * Xác thực PIN 6 số hoặc Token từ Web
+ * @param {string|number} tokenOrPin
  * @returns {Object|null} Payload nếu hợp lệ, null nếu không hợp lệ
  */
-function verifyWebToken(token) {
-  if (!token || typeof token !== 'string' || !token.includes('.')) {
+function verifyWebToken(tokenOrPin) {
+  if (!tokenOrPin) {
     return null;
   }
 
-  const [base64Payload, signature] = token.split('.');
-  if (!base64Payload || !signature) return null;
+  const cleanInput = String(tokenOrPin).trim().replace(/\s+/g, '');
+  if (!cleanInput) return null;
 
-  const expectedSignature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
-  if (signature !== expectedSignature) {
-    return null; // Token bị giả mạo
-  }
-
-  try {
-    const payload = JSON.parse(Buffer.from(base64Payload, 'base64url').toString('utf8'));
-    if (Date.now() > payload.exp) {
-      return null; // Token đã hết hạn
+  // 1. Kiểm tra trong memory store (PIN 6 số hoặc Token)
+  const stored = tokenStore.get(cleanInput);
+  if (stored) {
+    if (Date.now() > stored.exp) {
+      tokenStore.delete(cleanInput);
+      return null;
     }
-    return payload;
-  } catch (e) {
-    return null;
+    return stored;
   }
+
+  // 2. Fallback kiểm tra HMAC signature nếu là token dài
+  if (cleanInput.includes('.')) {
+    const [base64Payload, signature] = cleanInput.split('.');
+    if (!base64Payload || !signature) return null;
+
+    const expectedSignature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
+    if (signature !== expectedSignature) return null;
+
+    try {
+      const payload = JSON.parse(Buffer.from(base64Payload, 'base64url').toString('utf8'));
+      if (Date.now() > payload.exp) return null;
+      return payload;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 module.exports = {

@@ -16,5 +16,6 @@ module.exports = {
   successColor: '#2ecc71',
   warningColor: '#f1c40f',
   geminiApiKeys: cleanEnv(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY).split(',').map(k => cleanEnv(k)).filter(Boolean),
-  mongoUri: cleanEnv(process.env.MONGODB_URI)
+  mongoUri: cleanEnv(process.env.MONGODB_URI),
+  webJwtSecret: cleanEnv(process.env.WEB_JWT_SECRET)
 };

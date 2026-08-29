@@ -65,6 +65,7 @@ client.musicManager = musicManager;
 const app = express();
 const createApiRouter = require('./routes/api');
 
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use('/api', createApiRouter(client));
 app.use(express.static(path.join(__dirname, '../public')));
@@ -464,6 +465,16 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
+      const { isAllowedVoiceChannel } = require('./utils/permissionHelper');
+      const settingsManager = require('./structures/SettingsManager');
+      const guildSettings = settingsManager.get(interaction.guild.id);
+      if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(interaction.member)) {
+        return interaction.reply({
+          embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)],
+          flags: 64
+        });
+      }
+
       const { generateWebToken } = require('./utils/tokenHelper');
       const avatarUrl = interaction.user.displayAvatarURL({ dynamic: true, size: 256 });
       const userData = {
@@ -475,7 +486,7 @@ client.on('interactionCreate', async (interaction) => {
         guildName: interaction.guild.name
       };
 
-      const token = generateWebToken(userData, 2);
+      const { token, pin } = generateWebToken(userData, 2);
       const baseUrl = (process.env.WEB_URL || 'https://anna-music-bot-ui.pages.dev').replace(/\/$/, '');
       const webUrl = `${baseUrl}/?token=${token}&guild=${interaction.guild.id}`;
 
@@ -483,8 +494,12 @@ client.on('interactionCreate', async (interaction) => {
         .setColor(config.embedColor || '#5865F2')
         .setAuthor({ name: 'ANNA MUSIC', iconURL: client.user.displayAvatarURL() })
         .setTitle('Bảng Điều Khiển Web Player')
-        .setDescription(`Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.\n\n🔊 **Kênh Voice:** <#${memberVoice.id}>`)
-        .setFooter({ text: 'Liên kết có hiệu lực trong 2 phút' });
+        .setDescription(
+          `Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.\n\n` +
+          `🔊 **Kênh Voice:** <#${memberVoice.id}>\n` +
+          `🔑 **Mã PIN:** \`${pin}\``
+        )
+        .setFooter({ text: 'Mã PIN có hiệu lực trong 2 phút' });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()

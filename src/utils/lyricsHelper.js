@@ -17,22 +17,33 @@ function cleanSearchVariants(rawTitle, artist = '') {
       const parts = seg.split(/\s+(?:ft\.?|feat\.?|x|&)\s+/i).map(s => s.trim());
       if (parts.length >= 2) {
         queries.push({ track: parts[0], artist: parts[1], titleKey: parts[0] });
+        queries.push({ track: parts[1], artist: parts[0], titleKey: parts[1] });
         queries.push({ q: `${parts[0]} ${parts[1]}`, titleKey: parts[0] });
+        queries.push({ q: `${parts[1]} ${parts[0]}`, titleKey: parts[1] });
       }
     }
   }
 
   if (segments.length >= 2) {
-    const titlePart = segments[0];
-    const artistPart = segments[1].split(/\s+(?:ft\.?|feat\.?|x|&)\s+/i)[0].trim();
-    queries.push({ track: titlePart, artist: artistPart, titleKey: titlePart });
-    queries.push({ q: `${titlePart} ${artistPart}`, titleKey: titlePart });
-    queries.push({ q: `${titlePart} ${segments[1]}`, titleKey: titlePart });
+    const partA = segments[0];
+    const partB = segments[1].split(/\s+(?:ft\.?|feat\.?|x|&)\s+/i)[0].trim();
+    // Thử cả 2 hướng: Track A - Artist B và Track B - Artist A (phổ biến trên YouTube: Ca sĩ - Tên bài)
+    queries.push({ track: partA, artist: partB, titleKey: partA });
+    queries.push({ track: partB, artist: partA, titleKey: partB });
+    queries.push({ q: `${partA} ${partB}`, titleKey: partA });
+    queries.push({ q: `${partB} ${partA}`, titleKey: partB });
+    queries.push({ q: `${partA} ${segments[1]}`, titleKey: partA });
+    queries.push({ q: `${segments[1]} ${partA}`, titleKey: segments[1] });
   }
 
   queries.push({ q: clean, titleKey: segments[0] || clean });
   if (artist) {
     queries.push({ q: `${clean} ${artist}`, titleKey: segments[0] || clean });
+    queries.push({ track: clean, artist, titleKey: clean });
+    if (segments.length > 0) {
+      queries.push({ track: segments[0], artist, titleKey: segments[0] });
+      if (segments[1]) queries.push({ track: segments[1], artist, titleKey: segments[1] });
+    }
   }
 
   // Deduplicate
@@ -68,6 +79,26 @@ function isGoodMatch(searchItem, match) {
   return true;
 }
 
+function parseLrc(lrcString) {
+  if (!lrcString || typeof lrcString !== 'string') return null;
+  const lines = lrcString.split('\n');
+  const result = [];
+  for (const line of lines) {
+    const match = line.match(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]\s*(.*)/);
+    if (match) {
+      const min = parseInt(match[1], 10);
+      const sec = parseInt(match[2], 10);
+      const ms = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+      const timeMs = min * 60000 + sec * 1000 + ms;
+      const text = match[4].trim();
+      if (text) {
+        result.push({ time: timeMs, text });
+      }
+    }
+  }
+  return result.length > 0 ? result : null;
+}
+
 /**
  * Lấy lời bài hát chuẩn xác 100% từ Spotify / Musixmatch (qua LRCLIB)
  */
@@ -89,7 +120,8 @@ async function fetchLyrics(rawTitle, artist = '') {
             return {
               title: match.trackName || rawTitle,
               artist: match.artistName || artist || '',
-              lyrics: cleanLyrics
+              lyrics: cleanLyrics,
+              syncedLyrics: parseLrc(match.syncedLyrics)
             };
           }
         }
@@ -111,7 +143,8 @@ async function fetchLyrics(rawTitle, artist = '') {
               return {
                 title: match.trackName || rawTitle,
                 artist: match.artistName || artist || '',
-                lyrics: cleanLyrics
+                lyrics: cleanLyrics,
+                syncedLyrics: parseLrc(match.syncedLyrics)
               };
             }
           }
@@ -124,5 +157,7 @@ async function fetchLyrics(rawTitle, artist = '') {
 
 module.exports = {
   cleanSearchVariants,
-  fetchLyrics
+  fetchLyrics,
+  getLyrics: fetchLyrics
 };
+

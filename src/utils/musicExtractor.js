@@ -659,7 +659,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   }
 
   ffmpegArgs.push(
-    '-re',
     '-i', 'pipe:0',
     '-vn'
   );

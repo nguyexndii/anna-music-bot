@@ -152,7 +152,8 @@ class MusicQueue {
       console.error(`[AudioPlayer Error] Guild ${this.guild.name}:`, error);
       if (this.textChannel) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)]
+          embeds: [createErrorEmbed(`Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
+          flags: 4096
         }).catch(() => {});
       }
       this._handleSongEnd();
@@ -189,6 +190,15 @@ class MusicQueue {
     const guildSettings = settingsManager.get(this.guild.id);
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
 
+    // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
+    if (this.prefetchedSong && humanMembers.size > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
+      const nextTrack = this.prefetchedSong;
+      this.prefetchedSong = null;
+      this.songs.push(nextTrack);
+      await this.playNext();
+      return;
+    }
+
     // 1. KHI CÒN NGƯỜI TRONG PHÒNG VOICE (humanMembers.size > 0):
     if (humanMembers.size > 0) {
       // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay (DJ AI) gợi ý bài tương tự!
@@ -197,6 +207,7 @@ class MusicQueue {
         console.log(`[Autoplay DJ AI] Phòng có ${humanMembers.size} người nghe, tiếp tục tìm bài tương tự sau "${lastSong.title}"...`);
         const relatedTrack = await getRelatedTrack(lastSong, this.guild.id, useAi);
         if (relatedTrack) {
+          relatedTrack.requestedBy = 'DJ AI (Gợi ý)';
           this.songs.push(relatedTrack);
           await this.playNext();
           return;
@@ -257,7 +268,8 @@ class MusicQueue {
       if (!this.currentSong && this.songs.length === 0 && !this.mode247) {
         if (this.textChannel) {
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')]
+            embeds: [createEmbed('👋 Rời phòng', 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
+            flags: 4096
           }).catch(() => {});
         }
         this.destroy();
@@ -309,7 +321,8 @@ class MusicQueue {
       if (!this.mode247) {
         if (this.textChannel) {
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)]
+            embeds: [createEmbed('👋 Rời phòng', `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
+            flags: 4096
           }).catch(() => {});
         }
         this.destroy();
@@ -462,43 +475,49 @@ class MusicQueue {
 
       // Gửi hoặc Cập nhật Banner bài đang phát (Siêu tinh gọn & hiện đại)
       if (this.textChannel && guildSettings.announceSongs !== false) {
-        const banner = createNowPlayingBanner(this.currentSong, this);
+        try {
+          const banner = createNowPlayingBanner(this.currentSong, this);
 
-        let edited = false;
-        if (this.nowPlayingMessage) {
-          try {
-            const lastMessages = await this.textChannel.messages.fetch({ limit: 1 }).catch(() => null);
-            const isLastMessage = lastMessages && lastMessages.first()?.id === this.nowPlayingMessage.id;
+          let edited = false;
+          if (this.nowPlayingMessage) {
+            try {
+              const lastMessages = await this.textChannel.messages.fetch({ limit: 1 }).catch(() => null);
+              const isLastMessage = lastMessages && lastMessages.first()?.id === this.nowPlayingMessage.id;
 
-            if (isLastMessage) {
-              await this.nowPlayingMessage.edit({
-                content: banner.content,
-                embeds: [],
-                components: banner.components
-              });
-              edited = true;
-            } else {
-              await this.nowPlayingMessage.delete().catch(() => {});
+              if (isLastMessage) {
+                await this.nowPlayingMessage.edit({
+                  content: banner.content,
+                  embeds: [],
+                  components: banner.components
+                });
+                edited = true;
+              } else {
+                await this.nowPlayingMessage.delete().catch(() => {});
+                this.nowPlayingMessage = null;
+              }
+            } catch (e) {
               this.nowPlayingMessage = null;
             }
-          } catch (e) {
-            this.nowPlayingMessage = null;
           }
-        }
 
-        if (!edited) {
-          const msg = await this.textChannel.send({
-            content: banner.content,
-            components: banner.components
-          });
-          this.nowPlayingMessage = msg;
+          if (!edited) {
+            const msg = await this.textChannel.send({
+              content: banner.content,
+              components: banner.components,
+              flags: 4096
+            });
+            this.nowPlayingMessage = msg;
+          }
+        } catch (bannerError) {
+          console.warn(`[Banner Send Warning] Không thể gửi banner tới kênh ${this.textChannel.id}:`, bannerError.message);
         }
       }
     } catch (error) {
       console.error(`[Play Error] ${this.currentSong.title}:`, error);
       if (this.textChannel) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong.title}**: ${error.message}`)]
+          embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong.title}**: ${error.message}`)],
+          flags: 4096
         }).catch(() => {});
       }
       this._handleSongEnd();
@@ -672,8 +691,8 @@ class MusicQueue {
     const guildSettings = settingsManager.get(this.guild.id);
     if (!guildSettings.autoplay || !this.currentSong) return;
 
-    // Nếu bật 24/7 hoặc bài hiện tại là bài 24/7 Lofi nền: TUYỆT ĐỐI không prefetch nhạc pop autoplay
-    if (this.mode247 || this.currentSong.requestedBy === 'Auto (24/7)') return;
+    // Không prefetch nếu bài hiện tại là Lofi 24/7 HOẶC phòng không có ai nghe
+    if (this.currentSong.requestedBy === 'Auto (24/7)') return;
     if (this.voiceChannel && this.voiceChannel.members.filter(m => !m.user.bot).size === 0) return;
 
     if (this.songs.length === 0 && !this.prefetchedSong) {
@@ -682,7 +701,7 @@ class MusicQueue {
         const useAi = guildSettings.useAiAssistant !== false;
         const nextTrack = await getRelatedTrack(this.currentSong, this.guild.id, useAi);
         if (nextTrack) {
-          nextTrack.requestedBy = 'Auto';
+          nextTrack.requestedBy = 'DJ AI (Gợi ý)';
           this.prefetchedSong = nextTrack;
           // Tải trước ngầm luồng âm thanh vào RAM
           this._preloadNextTrackResource();
