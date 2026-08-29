@@ -60,13 +60,27 @@ if (fs.existsSync(commandsPath)) {
   }
 }
 
-// 3. Keep-Alive Web Server (Express) chống trùng Port
+// 3. Keep-Alive Web Server (Express) & API Routes
+client.musicManager = musicManager;
 const app = express();
-app.get('/', (req, res) => {
-  res.send('🎵 Anna Music Bot (24/7) đang hoạt động ổn định!');
-});
+const createApiRouter = require('./routes/api');
+
+app.use(express.json());
+app.use('/api', createApiRouter(client));
+app.use(express.static(path.join(__dirname, '../public')));
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', uptime: process.uptime(), botStatus: client.user ? 'ONLINE' : 'OFFLINE' });
+});
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  const indexPath = path.join(__dirname, '../public/index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send('🎵 Anna Music Bot (24/7) đang hoạt động ổn định!');
+  }
 });
 
 function startServer(port) {
@@ -437,6 +451,49 @@ client.on('interactionCreate', async (interaction) => {
       const guildSettings = settingsManager.get(interaction.guild.id);
       const embed = createSettingsEmbed(interaction.guild, guildSettings);
       const row = createSettingsSelectMenu(guildSettings);
+      return interaction.reply({ embeds: [embed], components: [row], flags: 64 });
+    }
+
+    // Nút 🌐 Mở Web Player
+    if (customId === 'btn_web_player') {
+      const { generateWebToken } = require('./utils/tokenHelper');
+      const avatarUrl = interaction.user.displayAvatarURL({ dynamic: true, size: 256 });
+      const userData = {
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
+        avatar: avatarUrl,
+        guildId: interaction.guild.id,
+        guildName: interaction.guild.name
+      };
+
+      const token = generateWebToken(userData);
+      const baseUrl = process.env.WEB_URL || `http://${interaction.guild?.id ? 'localhost' : 'localhost'}:${config.port}`;
+      const webUrl = `${baseUrl}/?token=${token}&guild=${interaction.guild.id}`;
+
+      const embed = new EmbedBuilder()
+        .setColor(config.embedColor || '#5865F2')
+        .setAuthor({ name: 'ANNA MUSIC • WEB PLAYER', iconURL: client.user.displayAvatarURL() })
+        .setTitle('🌐 Liên Kết Web Player Riêng Tư Của Bạn')
+        .setDescription(
+          `Xin chào **${userData.displayName}**!\n\n` +
+          `Bấm nút bên dưới để mở giao diện Web Player điều khiển nhạc thời gian thực cho máy chủ **${interaction.guild.name}**!\n\n` +
+          `• 🔍 **Live Search:** Tìm kiếm bài hát tức thời as-you-type.\n` +
+          `• 📋 **Hàng Chờ:** Quản lý, xóa bài, xem avatar người gọi bài.\n` +
+          `• 📜 **Karaoke Lyrics:** Lời bài hát đồng bộ cuộn mượt mà.\n` +
+          `• ⏯️ **Điều Khiển:** Âm lượng, phát tiếp, lặp lại, 24/7 Lofi.`
+        )
+        .setThumbnail(avatarUrl)
+        .setFooter({ text: 'Liên kết có hiệu lực trong 48 giờ' });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setLabel('Mở Web Player Ngay')
+          .setStyle(ButtonStyle.Link)
+          .setURL(webUrl)
+          .setEmoji('🌐')
+      );
+
       return interaction.reply({ embeds: [embed], components: [row], flags: 64 });
     }
 

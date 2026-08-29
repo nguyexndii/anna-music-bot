@@ -1,0 +1,431 @@
+﻿<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anna Music • Web Player & Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            anna: {
+              bg: '#111214',
+              surface: '#1E1F22',
+              card: '#2B2D31',
+              hover: '#35373C',
+              border: '#3F4147',
+              accent: '#5865F2',
+              accentHover: '#4752C4',
+              pink: '#EB459E',
+              green: '#23A55A',
+              yellow: '#FEE75C',
+              red: '#F23F43',
+              text: '#DBDEE1',
+              muted: '#949BA4'
+            }
+          },
+          animation: {
+            'spin-slow': 'spin 12s linear infinite',
+            'pulse-subtle': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-anna-bg text-anna-text font-sans antialiased min-h-screen flex flex-col selection:bg-anna-accent selection:text-white">
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="sticky top-0 z-40 bg-anna-surface/80 backdrop-blur-xl border-b border-anna-border/60 px-4 lg:px-8 py-3 transition-all">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center gap-3">
+        <div class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-anna-accent to-anna-pink text-white shadow-lg shadow-anna-accent/20">
+          <i data-lucide="disc" class="w-5 h-5 animate-spin-slow"></i>
+          <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-anna-green border-2 border-anna-surface"></span>
+        </div>
+        <div>
+          <h1 class="font-extrabold text-white text-base tracking-wide flex items-center gap-2">
+            ANNA MUSIC
+            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-anna-accent/20 text-anna-accent border border-anna-accent/30">PRO</span>
+          </h1>
+          <p id="headerGuildName" class="text-xs text-anna-muted font-medium flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-anna-muted/60"></span>
+            Đang tải dữ liệu server...
+          </p>
+        </div>
+      </div>
+
+      <!-- User Profile Badge & Quick Action -->
+      <div class="flex items-center gap-3">
+        <div id="userProfileBadge" class="hidden items-center gap-2.5 bg-anna-card border border-anna-border/80 px-3 py-1.5 rounded-full shadow-sm">
+          <img id="userAvatar" src="" alt="Avatar" class="w-6 h-6 rounded-full ring-1 ring-anna-border object-cover">
+          <span id="userName" class="text-xs font-semibold text-white max-w-[120px] truncate">User</span>
+          <span class="text-[10px] bg-anna-accent/20 text-anna-accent px-1.5 py-0.5 rounded font-bold">ONLINE</span>
+        </div>
+
+        <button id="btnOpenAuthModal" class="hidden px-3.5 py-1.5 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition shadow-md shadow-anna-accent/20 flex items-center gap-1.5">
+          <i data-lucide="key" class="w-3.5 h-3.5"></i>
+          <span>Nhập Token (.web)</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- MAIN DASHBOARD CONTENT -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- LEFT COLUMN: HERO MUSIC PLAYER (5 Cols) -->
+    <div class="lg:col-span-5 flex flex-col gap-6">
+      
+      <!-- Player Card -->
+      <div class="bg-gradient-to-b from-anna-surface to-anna-card border border-anna-border/80 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
+        
+        <!-- Glowing Ambient Backdrop -->
+        <div id="playerGlow" class="absolute -top-24 -left-24 w-64 h-64 bg-anna-accent/20 rounded-full blur-3xl pointer-events-none transition-all duration-700"></div>
+        <div class="absolute -bottom-24 -right-24 w-64 h-64 bg-anna-pink/15 rounded-full blur-3xl pointer-events-none"></div>
+
+        <!-- 24/7 Mode Status Badge -->
+        <div class="w-full flex items-center justify-between mb-4 z-10">
+          <div id="badgePlayingStatus" class="flex items-center gap-2 px-3 py-1 rounded-full bg-anna-bg/60 border border-anna-border/60 text-xs font-semibold text-anna-text">
+            <span class="w-2 h-2 rounded-full bg-anna-green animate-ping"></span>
+            <span>Đang phát</span>
+          </div>
+
+          <div id="badge247" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-anna-pink/10 border border-anna-pink/30 text-xs font-bold text-anna-pink">
+            <i data-lucide="infinity" class="w-3.5 h-3.5"></i>
+            <span>24/7 Lofi</span>
+          </div>
+        </div>
+
+        <!-- Vinyl Disc / Artwork -->
+        <div class="relative my-4 group">
+          <div id="vinylDisc" class="w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-[#0a0a0a] border-4 border-[#222] shadow-2xl flex items-center justify-center p-3 relative transition-transform duration-500">
+            <!-- Grooves -->
+            <div class="absolute inset-2 rounded-full border border-white/5 pointer-events-none"></div>
+            <div class="absolute inset-6 rounded-full border border-white/5 pointer-events-none"></div>
+            <div class="absolute inset-10 rounded-full border border-white/5 pointer-events-none"></div>
+            
+            <!-- Center Thumbnail Artwork -->
+            <img id="trackThumbnail" src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=60" alt="Thumbnail" class="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover shadow-inner ring-4 ring-[#111]">
+            
+            <!-- Center Spindle Hole -->
+            <div class="absolute w-6 h-6 rounded-full bg-anna-surface border-2 border-anna-border shadow-inner"></div>
+          </div>
+        </div>
+
+        <!-- Track Info -->
+        <div class="w-full mt-2 z-10">
+          <h2 id="trackTitle" class="text-base sm:text-lg font-bold text-white tracking-tight line-clamp-1 hover:line-clamp-none transition-all">
+            Chưa có bài hát đang phát
+          </h2>
+          <p id="trackArtist" class="text-xs sm:text-sm font-medium text-anna-muted mt-1 flex items-center justify-center gap-1.5">
+            <i data-lucide="music" class="w-3.5 h-3.5 text-anna-accent"></i>
+            <span id="artistName">Anna Music DJ AI</span>
+          </p>
+
+          <!-- Requester Badge -->
+          <div id="requesterBox" class="mt-3 inline-flex items-center gap-2 bg-anna-bg/80 border border-anna-border/60 px-3 py-1 rounded-full text-xs text-anna-muted">
+            <img id="requesterAvatar" src="" alt="" class="w-4 h-4 rounded-full object-cover hidden">
+            <span>Yêu cầu bởi: <b id="requesterName" class="text-white">Hệ thống (24/7)</b></span>
+          </div>
+        </div>
+
+        <!-- Audio Visualizer (Waveform) -->
+        <div class="w-full flex items-center justify-center gap-1 my-5 h-8 px-4" id="audioVisualizer">
+          <span class="v-bar h-2 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-5 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-7 w-1 rounded-full bg-anna-pink"></span>
+          <span class="v-bar h-4 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-6 w-1 rounded-full bg-anna-pink"></span>
+          <span class="v-bar h-8 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-3 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-6 w-1 rounded-full bg-anna-pink"></span>
+          <span class="v-bar h-7 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-4 w-1 rounded-full bg-anna-accent"></span>
+          <span class="v-bar h-2 w-1 rounded-full bg-anna-pink"></span>
+        </div>
+
+        <!-- Progress Bar & Duration -->
+        <div class="w-full z-10 space-y-1.5">
+          <div class="relative w-full bg-anna-border/50 h-1.5 rounded-full overflow-hidden">
+            <div id="trackProgressBar" class="h-full bg-gradient-to-r from-anna-accent to-anna-pink rounded-full w-0 transition-all duration-300"></div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] font-mono text-anna-muted px-0.5">
+            <span id="timeElapsed">0:00</span>
+            <span id="timeDuration">0:00</span>
+          </div>
+        </div>
+
+        <!-- Control Deck -->
+        <div class="w-full flex items-center justify-center gap-3 sm:gap-4 mt-5 z-10">
+          <button id="btnShuffle" title="Xáo trộn hàng chờ" class="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95">
+            <i data-lucide="shuffle" class="w-4 h-4"></i>
+          </button>
+          
+          <button id="btnPrevious" title="Phát lại từ đầu" class="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95">
+            <i data-lucide="skip-back" class="w-5 h-5"></i>
+          </button>
+
+          <button id="btnPlayPause" title="Tạm dừng / Tiếp tục" class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-anna-accent to-anna-pink hover:opacity-90 text-white flex items-center justify-center shadow-lg shadow-anna-accent/30 transition active:scale-95">
+            <i id="iconPlayPause" data-lucide="pause" class="w-7 h-7 fill-current"></i>
+          </button>
+
+          <button id="btnNext" title="Chuyển bài tiếp theo" class="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95">
+            <i data-lucide="skip-forward" class="w-5 h-5"></i>
+          </button>
+
+          <button id="btnLoop" title="Chế độ lặp lại" class="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 relative">
+            <i data-lucide="repeat" class="w-4 h-4"></i>
+            <span id="loopBadge" class="hidden absolute -top-1 -right-1 text-[9px] font-black bg-anna-accent text-white rounded-full w-4 h-4 flex items-center justify-center">1</span>
+          </button>
+        </div>
+
+        <!-- Volume & 24/7 Controls -->
+        <div class="w-full flex items-center justify-between gap-4 mt-6 pt-4 border-t border-anna-border/50 text-xs z-10">
+          <!-- Volume Slider -->
+          <div class="flex items-center gap-2 flex-1">
+            <i data-lucide="volume-2" class="w-4 h-4 text-anna-muted"></i>
+            <input id="volumeSlider" type="range" min="0" max="150" value="100" class="w-full accent-anna-accent h-1.5 bg-anna-border rounded-lg cursor-pointer">
+            <span id="volumeValue" class="text-xs font-mono text-anna-muted w-8 text-right">100%</span>
+          </div>
+
+          <!-- Quick 24/7 Toggle -->
+          <button id="btnToggle247" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-anna-bg hover:bg-anna-hover border border-anna-border text-anna-text hover:text-white transition font-medium text-xs">
+            <i data-lucide="radio" class="w-3.5 h-3.5 text-anna-pink"></i>
+            <span>Treo 24/7</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Voice Channel State Card -->
+      <div class="bg-anna-surface border border-anna-border/80 rounded-2xl p-4 flex items-center justify-between shadow-md">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-anna-green/10 text-anna-green border border-anna-green/20 flex items-center justify-center">
+            <i data-lucide="mic" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <div class="text-xs font-bold text-white flex items-center gap-2">
+              <span id="voiceChannelName">Chưa vào kênh Voice</span>
+            </div>
+            <p id="voiceMembersCount" class="text-[11px] text-anna-muted font-medium">0 thành viên đang nghe</p>
+          </div>
+        </div>
+
+        <div id="voiceMembersAvatars" class="flex items-center -space-x-2"></div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN: INTERACTIVE TABS (7 Cols) -->
+    <div class="lg:col-span-7 flex flex-col gap-4">
+      
+      <!-- TAB NAVIGATION -->
+      <div class="flex items-center gap-2 bg-anna-surface p-1.5 rounded-2xl border border-anna-border/80 shadow-md overflow-x-auto">
+        <button data-tab="tabSearch" class="tab-btn flex-1 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 bg-anna-accent text-white shadow-sm shadow-anna-accent/20">
+          <i data-lucide="search" class="w-4 h-4"></i>
+          <span>Live Search</span>
+        </button>
+
+        <button data-tab="tabQueue" class="tab-btn flex-1 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 text-anna-muted hover:text-white hover:bg-anna-card">
+          <i data-lucide="list-music" class="w-4 h-4"></i>
+          <span>Hàng Chờ</span>
+          <span id="queueBadgeCount" class="text-[10px] px-1.5 py-0.5 rounded-full bg-anna-border text-white">0</span>
+        </button>
+
+        <button data-tab="tabLyrics" class="tab-btn flex-1 py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 text-anna-muted hover:text-white hover:bg-anna-card">
+          <i data-lucide="mic-2" class="w-4 h-4"></i>
+          <span>Lời Bài Hát</span>
+        </button>
+
+        <button data-tab="tabSettings" class="tab-btn py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 text-anna-muted hover:text-white hover:bg-anna-card">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- TAB 1: LIVE SEARCH (INSTANT AS-YOU-TYPE) -->
+      <div id="tabSearch" class="tab-content flex-1 flex flex-col gap-4">
+        
+        <!-- Search Input Bar -->
+        <div class="relative flex items-center">
+          <i data-lucide="search" class="absolute left-4 w-5 h-5 text-anna-muted pointer-events-none"></i>
+          <input id="searchInput" type="text" placeholder="Tìm bài hát, nghệ sĩ hoặc dán link YouTube/Spotify..." class="w-full bg-anna-surface border border-anna-border focus:border-anna-accent rounded-2xl pl-12 pr-12 py-3.5 text-sm text-white placeholder-anna-muted focus:outline-none focus:ring-2 focus:ring-anna-accent/30 transition shadow-inner">
+          <button id="btnClearSearch" class="hidden absolute right-4 text-anna-muted hover:text-white">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Quick Tags -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span class="text-anna-muted text-[11px] font-semibold">Gợi ý:</span>
+          <button class="quick-tag px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition">Chill Lofi</button>
+          <button class="quick-tag px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition">V-Pop Hot</button>
+          <button class="quick-tag px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition">Indie Việt</button>
+          <button class="quick-tag px-3 py-1 rounded-full bg-anna-card hover:bg-anna-hover text-anna-text hover:text-white border border-anna-border transition">US-UK Hits</button>
+        </div>
+
+        <!-- Search Results List Container -->
+        <div class="bg-anna-surface border border-anna-border/80 rounded-2xl p-4 flex-1 min-h-[360px] max-h-[500px] overflow-y-auto flex flex-col gap-2 relative">
+          
+          <!-- Loading State -->
+          <div id="searchLoading" class="hidden absolute inset-0 bg-anna-surface/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2">
+            <i data-lucide="loader-2" class="w-7 h-7 text-anna-accent animate-spin"></i>
+            <span class="text-xs text-anna-muted font-medium">Đang tìm bài hát chính xác nhất...</span>
+          </div>
+
+          <!-- Empty State -->
+          <div id="searchEmptyState" class="flex-1 flex flex-col items-center justify-center text-center p-8 text-anna-muted">
+            <div class="w-12 h-12 rounded-2xl bg-anna-card border border-anna-border flex items-center justify-center mb-3">
+              <i data-lucide="sparkles" class="w-6 h-6 text-anna-accent"></i>
+            </div>
+            <p class="text-sm font-semibold text-white">Tìm kiếm bài hát tức thời</p>
+            <p class="text-xs text-anna-muted mt-1 max-w-xs">Gõ tên bài hát hoặc dán link YouTube/Spotify để thêm bài vào hàng chờ ngay lập tức!</p>
+          </div>
+
+          <!-- Search Results Injected via JS -->
+          <div id="searchResultsList" class="flex flex-col gap-2"></div>
+
+        </div>
+
+      </div>
+
+      <!-- TAB 2: LIVE QUEUE (HÀNG CHỜ) -->
+      <div id="tabQueue" class="tab-content hidden flex-1 flex flex-col gap-4">
+        
+        <div class="flex items-center justify-between bg-anna-surface px-4 py-2.5 rounded-xl border border-anna-border">
+          <div class="flex items-center gap-2">
+            <i data-lucide="list-ordered" class="w-4 h-4 text-anna-accent"></i>
+            <span class="text-xs font-bold text-white">Danh Sách Chờ Phát</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="btnClearQueue" class="text-xs text-anna-red hover:underline font-semibold flex items-center gap-1">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Xóa Hàng Chờ</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Queue List Container -->
+        <div id="queueListContainer" class="bg-anna-surface border border-anna-border/80 rounded-2xl p-4 flex-1 min-h-[360px] max-h-[500px] overflow-y-auto flex flex-col gap-2">
+          
+          <!-- Empty Queue -->
+          <div id="queueEmptyState" class="flex-1 flex flex-col items-center justify-center text-center p-8 text-anna-muted">
+            <div class="w-12 h-12 rounded-2xl bg-anna-card border border-anna-border flex items-center justify-center mb-3">
+              <i data-lucide="music-2" class="w-6 h-6 text-anna-muted"></i>
+            </div>
+            <p class="text-sm font-semibold text-white">Hàng chờ đang trống</p>
+            <p class="text-xs text-anna-muted mt-1">Hãy chuyển qua tab <b>Live Search</b> để thêm bài hát vào hàng chờ nhé!</p>
+          </div>
+
+          <!-- Songs injected here -->
+          <div id="queueSongsList" class="flex flex-col gap-2"></div>
+
+        </div>
+
+      </div>
+
+      <!-- TAB 3: KARAOKE SYNCED LYRICS -->
+      <div id="tabLyrics" class="tab-content hidden flex-1 flex flex-col gap-4">
+        <div class="bg-anna-surface border border-anna-border/80 rounded-2xl p-6 flex-1 min-h-[400px] max-h-[500px] overflow-y-auto flex flex-col items-center text-center relative" id="lyricsContainer">
+          
+          <div id="lyricsHeader" class="mb-4">
+            <h3 id="lyricsTitle" class="text-base font-bold text-white">Tên Bài Hát</h3>
+            <p id="lyricsArtist" class="text-xs text-anna-muted">Nghệ Sĩ</p>
+          </div>
+
+          <div id="lyricsContent" class="space-y-4 text-sm font-medium text-anna-muted max-w-lg leading-relaxed">
+            Đang tải lời bài hát...
+          </div>
+
+        </div>
+      </div>
+
+      <!-- TAB 4: SETTINGS PANEL -->
+      <div id="tabSettings" class="tab-content hidden flex-1 flex flex-col gap-4">
+        <div class="bg-anna-surface border border-anna-border/80 rounded-2xl p-6 flex-1 flex flex-col gap-5">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <i data-lucide="sliders" class="w-4 h-4 text-anna-accent"></i>
+            <span>Cài Đặt Phát Nhạc Server</span>
+          </h3>
+
+          <!-- Setting item: 24/7 Lofi -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl bg-anna-card border border-anna-border">
+            <div>
+              <p class="text-xs font-bold text-white">Chế độ Treo Lofi 24/7</p>
+              <p class="text-[11px] text-anna-muted mt-0.5">Tự động phát Lofi thư giãn khi không có người nghe hoặc hết bài.</p>
+            </div>
+            <button id="toggleSetting247" class="w-11 h-6 rounded-full bg-anna-pink relative p-0.5 transition">
+              <div class="w-5 h-5 rounded-full bg-white transition-transform translate-x-5"></div>
+            </button>
+          </div>
+
+          <!-- Setting item: Autoplay DJ AI -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl bg-anna-card border border-anna-border">
+            <div>
+              <p class="text-xs font-bold text-white">DJ AI Tự Động Gợi Ý (Autoplay)</p>
+              <p class="text-[11px] text-anna-muted mt-0.5">Tự động chọn bài hát tương tự khi còn người trong phòng Voice.</p>
+            </div>
+            <button id="toggleSettingAutoplay" class="w-11 h-6 rounded-full bg-anna-green relative p-0.5 transition">
+              <div class="w-5 h-5 rounded-full bg-white transition-transform translate-x-5"></div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- TOAST NOTIFICATION POPUP -->
+  <div id="toastNotification" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+    <div class="bg-anna-card/95 border border-anna-border backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold text-white">
+      <div id="toastIcon" class="w-6 h-6 rounded-lg bg-anna-green/20 text-anna-green flex items-center justify-center">
+        <i data-lucide="check" class="w-4 h-4"></i>
+      </div>
+      <span id="toastMessage">Thông báo</span>
+    </div>
+  </div>
+
+  <!-- AUTH / TOKEN MODAL -->
+  <div id="authModal" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-anna-surface border border-anna-border rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="w-12 h-12 rounded-2xl bg-anna-accent/10 border border-anna-accent/20 text-anna-accent flex items-center justify-center mx-auto">
+        <i data-lucide="key" class="w-6 h-6"></i>
+      </div>
+      <div class="text-center">
+        <h3 class="text-base font-bold text-white">Đăng Nhập Magic Token (.web)</h3>
+        <p class="text-xs text-anna-muted mt-1">Gõ lệnh <code class="bg-anna-card px-1.5 py-0.5 rounded text-anna-accent font-bold">.web</code> trong server Discord để nhận link đăng nhập riêng tư kèm Avatar của bạn!</p>
+      </div>
+
+      <div class="space-y-2">
+        <label class="text-[11px] font-semibold text-anna-muted uppercase">Hoặc dán Token trực tiếp:</label>
+        <input id="tokenInput" type="text" placeholder="Dán mã Token nhận từ bot..." class="w-full bg-anna-card border border-anna-border focus:border-anna-accent rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-anna-muted focus:outline-none">
+      </div>
+
+      <div class="flex items-center gap-2 pt-2">
+        <button id="btnCloseAuthModal" class="flex-1 py-2 rounded-xl bg-anna-card hover:bg-anna-hover text-anna-text text-xs font-bold transition">Đóng</button>
+        <button id="btnSubmitToken" class="flex-1 py-2 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition shadow-md shadow-anna-accent/20">Xác Nhận</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -179,33 +179,52 @@ class MusicQueue {
     this.currentSong = null;
     this.currentResource = null;
 
+    // 0. Nếu trong hàng chờ vẫn còn bài của người dùng -> Phát bài tiếp theo ngay
     if (this.songs.length > 0) {
       await this.playNext();
-    } else if (this.prefetchedSong && !this.mode247) {
-      const nextTrack = this.prefetchedSong;
-      this.prefetchedSong = null;
-      this.songs.push(nextTrack);
-      await this.playNext();
-    } else if (this.mode247) {
-      // ♾️ Chế độ 24/7: Khi hết bài của người dùng hoặc phòng trống, LUÔN LUÔN phát nhạc Lofi Không Lời thư giãn!
+      return;
+    }
+
+    const humanMembers = this.voiceChannel ? this.voiceChannel.members.filter(m => !m.user.bot) : new Map();
+    const guildSettings = settingsManager.get(this.guild.id);
+    const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
+
+    // 1. KHI CÒN NGƯỜI TRONG PHÒNG VOICE (humanMembers.size > 0):
+    if (humanMembers.size > 0) {
+      // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay (DJ AI) gợi ý bài tương tự!
+      if (guildSettings.autoplay !== false && lastSong && !isLofiTrack) {
+        const useAi = guildSettings.useAiAssistant !== false;
+        console.log(`[Autoplay DJ AI] Phòng có ${humanMembers.size} người nghe, tiếp tục tìm bài tương tự sau "${lastSong.title}"...`);
+        const relatedTrack = await getRelatedTrack(lastSong, this.guild.id, useAi);
+        if (relatedTrack) {
+          this.songs.push(relatedTrack);
+          await this.playNext();
+          return;
+        }
+      }
+
+      // B. Nếu bài vừa phát là Lofi 24/7 (người vừa vào phòng chưa order bài mới) -> Tiếp tục phát bài Lofi tiếp theo
+      if (this.mode247 && isLofiTrack) {
+        await this._play247BackgroundLofi();
+        return;
+      }
+
+      // C. Nếu hết bài và không bật 24/7
+      if (!this.mode247) {
+        clearVoiceChannelStatus(this.voiceChannel);
+        const timeoutSeconds = guildSettings.emptyChannelTimeout || 60;
+        this.startDisconnectTimer(timeoutSeconds * 1000);
+        return;
+      }
+    }
+
+    // 2. KHI PHÒNG TRỐNG (humanMembers.size === 0):
+    if (this.mode247) {
       this.prefetchedSong = null;
       this.preloadedResource = null;
       setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Mode');
       await this._play247BackgroundLofi();
     } else {
-      // Nếu không bật 24/7: Kiểm tra Autoplay khi còn người nghe trong phòng
-      const humanMembers = this.voiceChannel ? this.voiceChannel.members.filter(m => !m.user.bot) : new Map();
-      const guildSettings = settingsManager.get(this.guild.id);
-      if (guildSettings.autoplay && lastSong && humanMembers.size > 0) {
-        const useAi = guildSettings.useAiAssistant !== false;
-        const relatedTrack = await getRelatedTrack(lastSong, this.guild.id, useAi);
-        if (relatedTrack) {
-          this.songs.push(relatedTrack);
-          return await this.playNext();
-        }
-      }
-
-      // Hết nhạc và không bật 24/7
       clearVoiceChannelStatus(this.voiceChannel);
       const timeoutSeconds = guildSettings.emptyChannelTimeout || 60;
       this.startDisconnectTimer(timeoutSeconds * 1000);

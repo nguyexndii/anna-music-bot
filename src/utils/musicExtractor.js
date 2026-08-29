@@ -721,8 +721,68 @@ async function createResource(trackItem, crossfadeSeconds = 0) {
   });
 }
 
+/**
+ * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web
+ */
+async function searchMultipleTracks(query, limit = 5) {
+  if (!query || typeof query !== 'string' || !query.trim()) return [];
+  query = query.trim();
+
+  if (query.startsWith('http')) {
+    const directRes = await searchTrack(query);
+    return directRes || [];
+  }
+
+  try {
+    const res = await ytdlp(`ytsearch${Math.min(limit * 2, 10)}:${query}`, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      flatPlaylist: true
+    });
+
+    if (res && res.entries && res.entries.length > 0) {
+      const results = [];
+      for (const entry of res.entries) {
+        if (!entry || !entry.title) continue;
+        const url = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
+        results.push({
+          title: entry.title,
+          url: url,
+          duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(entry.duration % 60).padStart(2, '0')}` : '3:30',
+          thumbnail: entry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
+          artist: entry.uploader || entry.channel || 'YouTube',
+          isLive: false
+        });
+        if (results.length >= limit) break;
+      }
+      if (results.length > 0) return results;
+    }
+  } catch (err) {
+    console.warn('[searchMultipleTracks yt-dlp error]:', err.message);
+  }
+
+  try {
+    const searchResults = await play.search(query, { limit: limit });
+    if (searchResults && searchResults.length > 0) {
+      return searchResults.map(track => ({
+        title: track.title,
+        url: track.url,
+        duration: track.durationRaw || 'Live Stream',
+        thumbnail: track.thumbnails[0]?.url,
+        artist: track.channel?.name || 'YouTube',
+        isLive: track.live
+      }));
+    }
+  } catch (err) {
+    console.warn('[searchMultipleTracks play-dl fallback error]:', err.message);
+  }
+
+  return [];
+}
+
 module.exports = {
   searchTrack,
+  searchMultipleTracks,
   getYoutubeMix,
   getLastfmSimilar,
   getHeuristicRelatedTrack,

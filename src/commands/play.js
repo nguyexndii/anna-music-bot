@@ -76,7 +76,12 @@ module.exports = {
           .setCustomId('btn_queue')
           .setLabel('Hàng chờ')
           .setEmoji(CUSTOM_EMOJIS.list)
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('btn_web_player')
+          .setLabel('Web Player')
+          .setEmoji('🌐')
+          .setStyle(ButtonStyle.Success)
       );
 
       return message.reply({
