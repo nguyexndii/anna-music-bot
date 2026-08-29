@@ -1,10 +1,11 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { generateWebToken } = require('../utils/tokenHelper');
+const { createErrorEmbed } = require('../utils/embed');
 const config = require('../config');
 
 module.exports = {
   name: 'web',
-  description: 'Nhận Magic Link để mở Web Player điều khiển nhạc',
+  description: 'Mở giao diện Web Player điều khiển âm nhạc',
   usage: '',
   async execute(message, args) {
     const client = message.client;
@@ -12,7 +13,15 @@ module.exports = {
     const member = message.member;
     const author = message.author;
 
-    // Lấy thông tin user
+    // 1. Kiểm tra User có trong kênh Voice hay không
+    const userVoice = member?.voice?.channel;
+    if (!userVoice) {
+      return message.reply({
+        embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
+      });
+    }
+
+    // 2. Tạo User data và Magic Token
     const avatarUrl = author.displayAvatarURL({ dynamic: true, size: 256 });
     const userData = {
       userId: author.id,
@@ -23,44 +32,28 @@ module.exports = {
       guildName: guild.name
     };
 
-    // Tạo Magic Token
-    const token = generateWebToken(userData);
-    const baseUrl = process.env.WEB_URL || `http://${message.guild?.id ? 'localhost' : 'localhost'}:${config.port}`;
+    const token = generateWebToken(userData, 2); // Hiệu lực 2 phút
+    const baseUrl = (process.env.WEB_URL || 'https://anna-music-bot-ui.pages.dev').replace(/\/$/, '');
     const webUrl = `${baseUrl}/?token=${token}&guild=${guild.id}`;
 
+    // 3. Tạo Embed tinh gọn & chuyên nghiệp
     const embed = new EmbedBuilder()
       .setColor(config.embedColor || '#5865F2')
-      .setAuthor({ name: 'ANNA MUSIC • WEB PLAYER', iconURL: client.user.displayAvatarURL() })
-      .setTitle('🌐 Magic Link Điều Khiển Nhạc Trên Web')
-      .setDescription(
-        `Xin chào **${userData.displayName}**!\n\n` +
-        `Dưới đây là liên kết riêng tư của bạn để truy cập **Web Player** của máy chủ **${guild.name}**.\n` +
-        `Tại Web Player, bạn có thể:\n` +
-        `• 🔍 **Live Search:** Tìm kiếm và chọn bài hát tức thời.\n` +
-        `• 📋 **Quản lý Hàng chờ:** Xem, kéo thả, xóa bài trong hàng chờ.\n` +
-        `• 📜 **Karaoke Lyrics:** Lời bài hát đồng bộ thời gian thực.\n` +
-        `• ⏯️ **Điều khiển:** Chỉnh âm lượng, chuyển bài, bật/tắt 24/7 Lofi.\n\n` +
-        `> 🔒 *Mỗi thao tác trên Web sẽ tự động ghi nhận Avatar & Tên của bạn!*`
-      )
-      .setThumbnail(avatarUrl)
-      .setFooter({ text: 'Liên kết có hiệu lực trong 48 giờ • Vui lòng không chia sẻ cho người lạ' });
+      .setAuthor({ name: 'ANNA MUSIC', iconURL: client.user.displayAvatarURL() })
+      .setTitle('Bảng Điều Khiển Web Player')
+      .setDescription(`Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.\n\n🔊 **Kênh Voice:** <#${userVoice.id}>`)
+      .setFooter({ text: 'Liên kết có hiệu lực trong 2 phút' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('Mở Web Player Ngay')
+        .setLabel('Mở Web Player')
         .setStyle(ButtonStyle.Link)
         .setURL(webUrl)
         .setEmoji('🌐')
     );
 
-    // Gửi tin nhắn
     try {
-      if (message.deletable) {
-        // Xóa lệnh gõ để giữ kênh chat sạch sẽ và gửi DM hoặc tin nhắn riêng
-        await message.reply({ embeds: [embed], components: [row] });
-      } else {
-        await message.reply({ embeds: [embed], components: [row] });
-      }
+      await message.reply({ embeds: [embed], components: [row] });
     } catch (err) {
       console.error('[Web Command Error]:', err);
     }

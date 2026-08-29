@@ -456,6 +456,14 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút 🌐 Mở Web Player
     if (customId === 'btn_web_player') {
+      const memberVoice = interaction.member?.voice?.channel;
+      if (!memberVoice) {
+        return interaction.reply({
+          embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để mở Web Player!')],
+          flags: 64
+        });
+      }
+
       const { generateWebToken } = require('./utils/tokenHelper');
       const avatarUrl = interaction.user.displayAvatarURL({ dynamic: true, size: 256 });
       const userData = {
@@ -467,28 +475,20 @@ client.on('interactionCreate', async (interaction) => {
         guildName: interaction.guild.name
       };
 
-      const token = generateWebToken(userData);
-      const baseUrl = process.env.WEB_URL || `http://${interaction.guild?.id ? 'localhost' : 'localhost'}:${config.port}`;
+      const token = generateWebToken(userData, 2);
+      const baseUrl = (process.env.WEB_URL || 'https://anna-music-bot-ui.pages.dev').replace(/\/$/, '');
       const webUrl = `${baseUrl}/?token=${token}&guild=${interaction.guild.id}`;
 
       const embed = new EmbedBuilder()
         .setColor(config.embedColor || '#5865F2')
-        .setAuthor({ name: 'ANNA MUSIC • WEB PLAYER', iconURL: client.user.displayAvatarURL() })
-        .setTitle('🌐 Liên Kết Web Player Riêng Tư Của Bạn')
-        .setDescription(
-          `Xin chào **${userData.displayName}**!\n\n` +
-          `Bấm nút bên dưới để mở giao diện Web Player điều khiển nhạc thời gian thực cho máy chủ **${interaction.guild.name}**!\n\n` +
-          `• 🔍 **Live Search:** Tìm kiếm bài hát tức thời as-you-type.\n` +
-          `• 📋 **Hàng Chờ:** Quản lý, xóa bài, xem avatar người gọi bài.\n` +
-          `• 📜 **Karaoke Lyrics:** Lời bài hát đồng bộ cuộn mượt mà.\n` +
-          `• ⏯️ **Điều Khiển:** Âm lượng, phát tiếp, lặp lại, 24/7 Lofi.`
-        )
-        .setThumbnail(avatarUrl)
-        .setFooter({ text: 'Liên kết có hiệu lực trong 48 giờ' });
+        .setAuthor({ name: 'ANNA MUSIC', iconURL: client.user.displayAvatarURL() })
+        .setTitle('Bảng Điều Khiển Web Player')
+        .setDescription(`Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.\n\n🔊 **Kênh Voice:** <#${memberVoice.id}>`)
+        .setFooter({ text: 'Liên kết có hiệu lực trong 2 phút' });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setLabel('Mở Web Player Ngay')
+          .setLabel('Mở Web Player')
           .setStyle(ButtonStyle.Link)
           .setURL(webUrl)
           .setEmoji('🌐')
