@@ -385,6 +385,25 @@ class MusicQueue {
     } else {
       this._preloadNextTrackResource();
     }
+  get isPlaying() {
+    return this.player?.state?.status === AudioPlayerStatus.Playing;
+  }
+
+  get isPaused() {
+    return this.paused || this.player?.state?.status === AudioPlayerStatus.Paused;
+  }
+
+  get currentTrack() {
+    return this.currentSong;
+  }
+
+  get queue() {
+    return this.songs;
+  }
+
+  get autoplay() {
+    const settings = settingsManager.get(this.guild.id);
+    return settings.autoplay !== false;
   }
 
   async playNext() {
@@ -395,6 +414,9 @@ class MusicQueue {
     const conn = await this.connect();
 
     this.currentSong = this.songs.shift();
+    if (this.currentSong) {
+      this.currentSong.startTime = Date.now();
+    }
     this.paused = false;
 
     try {
@@ -487,6 +509,63 @@ class MusicQueue {
       this.currentResource.volume.setVolume(this.volume / 100);
     }
     settingsManager.update(this.guild.id, { defaultVolume: this.volume });
+  }
+
+  pause() {
+    if (!this.paused) {
+      this.player.pause();
+      this.paused = true;
+    }
+  }
+
+  resume() {
+    if (this.paused) {
+      this.player.unpause();
+      this.paused = false;
+    }
+  }
+
+  async seek(seconds) {
+    if (!this.currentSong || this.isDestroyed || this.isStopped) {
+      throw new Error('Không có bài hát nào đang phát để tua');
+    }
+
+    const seekSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    console.log(`[MusicQueue Seek] Tua bài "${this.currentSong.title}" đến ${seekSeconds}s tại máy chủ ${this.guild.name}`);
+
+    // Hủy các timer chuyển bài / preload cũ
+    this.clearCrossfadeTimer();
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
+
+    const resource = await createResource(this.currentSong, 0, seekSeconds);
+
+    this.currentResource = resource;
+    if (resource.volume) {
+      resource.volume.setVolume(this.volume / 100);
+    }
+
+    this.currentSong.startTime = Date.now() - (seekSeconds * 1000);
+    this.currentSong.seekPosition = seekSeconds;
+    this.paused = false;
+
+    if (this.connection) {
+      this.connection.subscribe(this.player);
+    }
+
+    this.player.play(resource);
+    return seekSeconds;
+  }
+
+  shuffle() {
+    for (let i = this.songs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.songs[i], this.songs[j]] = [this.songs[j], this.songs[i]];
+    }
+  }
+
+  async addTrack(track) {
+    return this.addSong(track, track.requestedBy || 'Web User');
   }
 
   togglePause() {

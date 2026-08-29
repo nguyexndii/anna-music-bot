@@ -6,6 +6,17 @@ module.exports = {
   aliases: ['24/7', 'alwaysonline'],
   description: 'Bật hoặc tắt chế độ duy trì bot ở phòng Voice 24/7 và phát nhạc Lofi',
   async execute(message) {
+    if (!message.guild) return;
+
+    // Chỉ Admin máy chủ mới được phép cấu hình chế độ 24/7
+    const isOwner = message.guild.ownerId === message.author.id;
+    const hasAdminPerm = message.member?.permissions.has('Administrator') || message.member?.permissions.has('ManageGuild');
+    if (!isOwner && !hasAdminPerm) {
+      return message.reply({
+        embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt 24/7!')]
+      });
+    }
+
     const voiceChannel = message.member?.voice?.channel;
     let queue = musicManager.get(message.guild.id);
 

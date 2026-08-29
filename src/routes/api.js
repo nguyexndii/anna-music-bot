@@ -1,11 +1,27 @@
-﻿const express = require('express');
+const express = require('express');
 const { verifyWebToken } = require('../utils/tokenHelper');
 const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
 const { getLyrics } = require('../utils/lyricsHelper');
+const settingsManager = require('../structures/SettingsManager');
 
 module.exports = function createApiRouter(client) {
   const router = express.Router();
   router.use(express.json());
+
+  // Helper kiểm tra quyền Admin của User trong máy chủ
+  async function checkIsAdmin(guildId, userId) {
+    if (!guildId || !userId) return false;
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return false;
+    if (guild.ownerId === userId) return true;
+    try {
+      const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+      if (!member) return false;
+      return Boolean(member.permissions.has('Administrator') || member.permissions.has('ManageGuild'));
+    } catch (e) {
+      return false;
+    }
+  }
 
   // Middleware xác thực Magic Token
   const requireAuth = (req, res, next) => {
@@ -21,8 +37,8 @@ module.exports = function createApiRouter(client) {
     next();
   };
 
-  // 1. Xác thực Token & Lấy thông tin User
-  router.post('/auth/verify', (req, res) => {
+  // 1. Xác thực Token & Lấy thông tin User (Kèm quyền Admin)
+  router.post('/auth/verify', async (req, res) => {
     const { token } = req.body;
     const user = verifyWebToken(token);
     if (!user) {
@@ -30,10 +46,13 @@ module.exports = function createApiRouter(client) {
     }
 
     const guild = client.guilds.cache.get(user.guildId);
+    const isAdmin = await checkIsAdmin(user.guildId, user.userId);
+
     return res.json({
       success: true,
       user: {
         ...user,
+        isAdmin,
         guildName: guild?.name || user.guildName,
         guildIcon: guild?.iconURL({ dynamic: true }) || null
       }
@@ -68,6 +87,7 @@ module.exports = function createApiRouter(client) {
     }
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
+    const guildSettings = settingsManager.get(guildId);
 
     let voiceMembers = [];
     if (queue?.voiceChannel) {
@@ -79,6 +99,9 @@ module.exports = function createApiRouter(client) {
       }));
     }
 
+    const currentTrack = queue?.currentSong || queue?.currentTrack;
+    const queueList = queue?.songs || queue?.queue || [];
+
     return res.json({
       success: true,
       guild: {
@@ -89,23 +112,23 @@ module.exports = function createApiRouter(client) {
       player: {
         isPlaying: queue?.isPlaying || false,
         isPaused: queue?.isPaused || false,
-        volume: queue?.volume || 100,
-        loop: queue?.loopMode || 'off',
-        mode247: queue?.mode247 || false,
-        autoplay: queue?.autoplay !== false,
-        current: queue?.currentTrack ? {
-          title: queue.currentTrack.title,
-          url: queue.currentTrack.url,
-          thumbnail: queue.currentTrack.thumbnail,
-          duration: queue.currentTrack.duration,
-          artist: queue.currentTrack.artist || 'Unknown',
-          requestedBy: queue.currentTrack.requestedBy,
-          requestedByAvatar: queue.currentTrack.requestedByAvatar,
-          isLive: queue.currentTrack.isLive || false,
-          is247: queue.currentTrack.is247 || false,
-          startTime: queue.currentTrack.startTime || null
+        volume: queue?.volume || guildSettings.defaultVolume || 80,
+        loop: queue?.loopMode || guildSettings.loopMode || 'off',
+        mode247: queue?.mode247 ?? Boolean(guildSettings.mode247),
+        autoplay: guildSettings.autoplay !== false,
+        current: currentTrack ? {
+          title: currentTrack.title,
+          url: currentTrack.url,
+          thumbnail: currentTrack.thumbnail,
+          duration: currentTrack.duration,
+          artist: currentTrack.artist || 'Unknown',
+          requestedBy: currentTrack.requestedBy,
+          requestedByAvatar: currentTrack.requestedByAvatar,
+          isLive: currentTrack.isLive || false,
+          is247: currentTrack.is247 || false,
+          startTime: currentTrack.startTime || null
         } : null,
-        queue: (queue?.queue || []).map((t, idx) => ({
+        queue: queueList.map((t, idx) => ({
           index: idx,
           title: t.title,
           url: t.url,
@@ -171,7 +194,7 @@ module.exports = function createApiRouter(client) {
       targetTrack.requestedById = user.userId;
 
       queue = client.musicManager.getOrCreate(guild, textChannel, voiceChannel);
-      const isFirst = !queue.currentTrack && queue.queue.length === 0;
+      const isFirst = !queue.currentSong && queue.songs.length === 0;
 
       await queue.addTrack(targetTrack);
 
@@ -187,15 +210,28 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  // 5. Thao tác điều khiển Player (Pause, Resume, Skip, Volume, 24/7...)
+  // 5. Thao tác điều khiển Player (Pause, Resume, Skip, Seek, Volume, 24/7...)
   router.post('/guilds/:guildId/action', requireAuth, async (req, res) => {
     const { guildId } = req.params;
     const { action, value } = req.body;
     const user = req.user;
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
-    if (!queue) {
+    if (!queue && action !== 'toggle247' && action !== 'toggleAutoplay') {
       return res.status(400).json({ success: false, error: 'Hiện không có bài hát nào đang phát trong máy chủ này' });
+    }
+
+    // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER
+    const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'settings', 'updateSettings'];
+    if (serverSettingActions.includes(action)) {
+      const isAdmin = await checkIsAdmin(guildId, user.userId);
+      if (!isAdmin) {
+        return res.status(403).json({
+          success: false,
+          code: 'PERMISSION_DENIED',
+          error: 'Chỉ Quản trị viên (Admin / Quản lý máy chủ) mới có quyền thay đổi Cài đặt Máy chủ!'
+        });
+      }
     }
 
     try {
@@ -209,6 +245,15 @@ module.exports = function createApiRouter(client) {
           queue.resume();
           resultMessage = 'Đã tiếp tục phát nhạc';
           break;
+        case 'seek': {
+          const seekSec = Math.max(0, Math.floor(Number(value) || 0));
+          await queue.seek(seekSec);
+          const mins = Math.floor(seekSec / 60);
+          const secs = seekSec % 60;
+          const formatted = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+          resultMessage = `Đã tua đến ${formatted}`;
+          break;
+        }
         case 'skip':
           queue.skip();
           resultMessage = `Đã chuyển bài hát tiếp theo bởi @${user.displayName || user.username}`;
@@ -221,30 +266,51 @@ module.exports = function createApiRouter(client) {
           queue.shuffle();
           resultMessage = 'Đã xáo trộn hàng chờ';
           break;
-        case 'loop':
-          // toggle loop: off -> track -> queue -> off
-          const modes = ['off', 'track', 'queue'];
+        case 'loop': {
+          // toggle loop: off -> song -> queue -> off
+          const modes = ['off', 'song', 'queue'];
           const currentIdx = modes.indexOf(queue.loopMode || 'off');
           const nextMode = value || modes[(currentIdx + 1) % modes.length];
-          queue.loopMode = nextMode;
+          queue.setLoop(nextMode);
           resultMessage = `Chế độ lặp lại: ${nextMode.toUpperCase()}`;
           break;
-        case 'volume':
+        }
+        case 'volume': {
           const vol = Math.max(0, Math.min(150, parseInt(value, 10) || 100));
           queue.setVolume(vol);
           resultMessage = `Âm lượng: ${vol}%`;
           break;
-        case 'toggle247':
-          queue.mode247 = !queue.mode247;
-          resultMessage = queue.mode247 ? 'Đã BẬT chế độ Treo Lofi 24/7' : 'Đã TẮT chế độ 24/7';
+        }
+        case 'toggle247': {
+          if (queue) {
+            const is247 = queue.toggle247();
+            if (is247 && !queue.currentSong) {
+              queue._play247BackgroundLofi().catch(() => {});
+            }
+            resultMessage = is247 ? 'Đã BẬT chế độ Treo Lofi 24/7' : 'Đã TẮT chế độ 24/7';
+          } else {
+            const current = settingsManager.get(guildId);
+            const newVal = !current.mode247;
+            settingsManager.update(guildId, { mode247: newVal });
+            resultMessage = newVal ? 'Đã BẬT chế độ Treo Lofi 24/7' : 'Đã TẮT chế độ 24/7';
+          }
           break;
-        case 'remove':
+        }
+        case 'toggleAutoplay': {
+          const current = settingsManager.get(guildId);
+          const newVal = !current.autoplay;
+          settingsManager.update(guildId, { autoplay: newVal });
+          resultMessage = newVal ? 'Đã BẬT DJ AI Tự Động Gợi Ý (Autoplay)' : 'Đã TẮT DJ AI Autoplay';
+          break;
+        }
+        case 'remove': {
           const idx = parseInt(value, 10);
-          if (!isNaN(idx) && idx >= 0 && idx < queue.queue.length) {
-            const removed = queue.queue.splice(idx, 1)[0];
+          if (!isNaN(idx) && idx >= 0 && idx < queue.songs.length) {
+            const removed = queue.songs.splice(idx, 1)[0];
             resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
           }
           break;
+        }
         default:
           return res.status(400).json({ success: false, error: 'Hành động không hợp lệ' });
       }
@@ -260,17 +326,18 @@ module.exports = function createApiRouter(client) {
   router.get('/guilds/:guildId/lyrics', async (req, res) => {
     const { guildId } = req.params;
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
+    const currentTrack = queue?.currentSong || queue?.currentTrack;
 
-    if (!queue || !queue.currentTrack) {
+    if (!queue || !currentTrack) {
       return res.json({ success: true, lyrics: 'Không có bài hát nào đang phát', synced: false });
     }
 
     try {
-      const lyricsData = await getLyrics(queue.currentTrack.title, queue.currentTrack.artist);
+      const lyricsData = await getLyrics(currentTrack.title, currentTrack.artist);
       return res.json({
         success: true,
-        title: queue.currentTrack.title,
-        artist: queue.currentTrack.artist,
+        title: currentTrack.title,
+        artist: currentTrack.artist,
         lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics

@@ -598,7 +598,7 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
  * Tạo Discord AudioResource với yt-dlp-exec stdout pipe -> FFmpeg libopus
  * (Đảm bảo luồng phát liên tục, không bao giờ bị YouTube ngắt kết nối sau 10-20s)
  */
-async function createResource(trackItem, crossfadeSeconds = 0) {
+async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
 
   // Nếu track chưa có direct URL (từ playlist Spotify): tìm kiếm URL YouTube trước
@@ -653,11 +653,16 @@ async function createResource(trackItem, crossfadeSeconds = 0) {
     throw new Error(`Không thể khởi tạo luồng âm thanh cho bài hát: ${trackItem?.title || targetUrl}`);
   }
 
-  const ffmpegArgs = [
+  const ffmpegArgs = [];
+  if (seekSeconds && Number(seekSeconds) > 0) {
+    ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
+  }
+
+  ffmpegArgs.push(
     '-re',
     '-i', 'pipe:0',
     '-vn'
-  ];
+  );
 
   if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
     ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${Number(crossfadeSeconds)}:curve=esin`);
@@ -715,10 +720,19 @@ async function createResource(trackItem, crossfadeSeconds = 0) {
     } catch (e) {}
   });
 
-  return createAudioResource(ffmpegProcess.stdout, {
+  const resource = createAudioResource(ffmpegProcess.stdout, {
     inputType: StreamType.OggOpus,
     inlineVolume: true
   });
+
+  ffmpegProcess.stdout.on('close', () => {
+    try {
+      if (!ffmpegProcess.killed) ffmpegProcess.kill();
+      if (!ytdlpStreamProcess.killed) ytdlpStreamProcess.kill();
+    } catch (e) {}
+  });
+
+  return resource;
 }
 
 /**
