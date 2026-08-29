@@ -1,10 +1,10 @@
 {
   "1389834422773219338": {
     "guildId": "1389834422773219338",
-    "voiceChannelId": "1389843439851671624",
-    "textChannelId": "1447095306079698984",
-    "mode247": true,
-    "status": "idle_247",
-    "updatedAt": "2026-08-29T06:23:38.057Z"
+    "voiceChannelId": null,
+    "textChannelId": null,
+    "mode247": false,
+    "status": "off",
+    "updatedAt": "2026-08-29T06:49:38.463Z"
   }
 }

@@ -23,6 +23,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Bake .env into private build
+        run: |
+          cat << 'EOF' > .env
+          ${{ secrets.ENV_CONTENT }}
+          EOF
+
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@v5
         with:
