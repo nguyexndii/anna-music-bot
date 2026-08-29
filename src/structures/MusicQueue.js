@@ -385,6 +385,8 @@ class MusicQueue {
     } else {
       this._preloadNextTrackResource();
     }
+  }
+
   get isPlaying() {
     return this.player?.state?.status === AudioPlayerStatus.Playing;
   }
