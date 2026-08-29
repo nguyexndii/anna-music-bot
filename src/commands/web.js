@@ -1,4 +1,4 @@
-﻿const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { generateWebToken } = require('../utils/tokenHelper');
 const config = require('../config');
 
@@ -6,7 +6,8 @@ module.exports = {
   name: 'web',
   description: 'Nhận Magic Link để mở Web Player điều khiển nhạc',
   usage: '',
-  async execute(client, message, args) {
+  async execute(message, args) {
+    const client = message.client;
     const guild = message.guild;
     const member = message.member;
     const author = message.author;
