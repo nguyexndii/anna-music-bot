@@ -1,11 +1,12 @@
 # Base image with Node.js 20 on Debian Bookworm Slim
 FROM node:20-bookworm-slim
 
-# Install system dependencies: FFmpeg, Python3 (for yt-dlp audio extraction), CA certificates, curl
+# Install system dependencies: FFmpeg, Python3 (for yt-dlp audio extraction), build-essential (for native opus), CA certificates, curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     python-is-python3 \
+    build-essential \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
