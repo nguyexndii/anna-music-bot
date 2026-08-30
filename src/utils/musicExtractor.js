@@ -121,29 +121,16 @@ async function fetchSpotifyPlaylistFull(playlistId) {
 
 /**
  * Tìm kiếm và trích xuất thông tin bài hát / Playlist từ YouTube, Spotify, SoundCloud
- * (Tối đa 1000 bài đối với Playlist)
+ * (Tối đa 100 bài đối với Playlist)
  */
 async function searchTrack(query) {
   try {
-    // 1. Xử lý Playlist / Album Spotify (Toàn bộ bài hát không giới hạn)
+    // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 100 bài)
     if (query.includes('spotify.com/playlist/') || query.includes('spotify.com/album/')) {
-      const plMatch = query.match(/playlist\/([a-zA-Z0-9]+)/);
-      if (plMatch && plMatch[1]) {
-        try {
-          const fullTracks = await fetchSpotifyPlaylistFull(plMatch[1]);
-          if (fullTracks && fullTracks.length > 0) {
-            return fullTracks;
-          }
-        } catch (fullErr) {
-          console.warn('[Spotify Full Playlist Error]:', fullErr.message);
-        }
-      }
-
-      // Fallback sang spotify-url-info (100 bài đầu) nếu chưa cấu hình Spotify API Token
       try {
         const spotifyTracks = await spotifyUrlInfo.getTracks(query);
         if (spotifyTracks && spotifyTracks.length > 0) {
-          const limited = spotifyTracks.slice(0, 1000);
+          const limited = spotifyTracks.slice(0, 100);
           return limited.map(item => {
             const artistName = item.artist || item.artists?.[0]?.name || '';
             const title = artistName ? `${item.name} - ${artistName}` : item.name;
@@ -179,19 +166,19 @@ async function searchTrack(query) {
       }
     }
 
-    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 1000 bài)
+    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 100 bài)
     if (query.includes('youtube.com/playlist') || (query.includes('youtube.com/watch') && query.includes('list='))) {
       try {
         const res = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
-          playlistEnd: 1000,
+          playlistEnd: 100,
           yesPlaylist: true,
           noWarnings: true
         });
 
         if (res && res.entries && res.entries.length > 0) {
-          const limited = res.entries.slice(0, 1000);
+          const limited = res.entries.slice(0, 100);
           return limited.map(e => {
             const trackUrl = e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null);
             return {
@@ -239,7 +226,7 @@ function extractSoundCloudTitleFromUrl(url) {
   return 'SoundCloud Track';
 }
 
-    // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album - Giới hạn 1000 bài)
+    // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album - Giới hạn 100 bài)
     if (query.includes('soundcloud.com')) {
       try {
         await ensureSoundCloudAuth();
@@ -247,7 +234,7 @@ function extractSoundCloudTitleFromUrl(url) {
 
         if (scData && scData.type === 'playlist') {
           const allTracks = await scData.all_tracks();
-          const limited = allTracks.slice(0, 1000);
+          const limited = allTracks.slice(0, 100);
           return limited.map(track => ({
             title: track.name || 'SoundCloud Track',
             url: track.permalink || track.url || query,
@@ -275,12 +262,12 @@ function extractSoundCloudTitleFromUrl(url) {
         const info = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
-          playlistEnd: 1000,
+          playlistEnd: 100,
           noWarnings: true
         });
 
         if (info.entries && Array.isArray(info.entries) && info.entries.length > 0) {
-          const limited = info.entries.slice(0, 1000);
+          const limited = info.entries.slice(0, 100);
           return limited.map(item => {
             let trackTitle = item.title || item.name;
             if (!trackTitle || trackTitle === 'SoundCloud Track') {
