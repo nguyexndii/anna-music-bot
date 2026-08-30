@@ -500,7 +500,7 @@ function getActiveWebUsers(guildId) {
           const current = settingsManager.get(guildId);
           const newVal = !current.autoplay;
           settingsManager.update(guildId, { autoplay: newVal });
-          resultMessage = newVal ? 'Đã BẬT DJ AI Tự Động Gợi Ý (Autoplay)' : 'Đã TẮT DJ AI Autoplay';
+          resultMessage = newVal ? 'Đã BẬT Tự Động Phát Bài Tương Tự (Autoplay)' : 'Đã TẮT Tự Động Phát';
           break;
         }
         case 'remove':

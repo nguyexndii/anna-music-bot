@@ -42,6 +42,7 @@ module.exports = {
     }
 
     // 3. Tạo User data và Magic Token (kèm PIN 6 số)
+    const isAdmin = member?.permissions?.has('Administrator') || member?.permissions?.has('ManageGuild') || guild.ownerId === author.id;
     const avatarUrl = author.displayAvatarURL({ dynamic: true, size: 256 });
     const userData = {
       userId: author.id,
@@ -49,7 +50,8 @@ module.exports = {
       displayName: member?.displayName || author.globalName || author.username,
       avatar: avatarUrl,
       guildId: guild.id,
-      guildName: guild.name
+      guildName: guild.name,
+      isAdmin: Boolean(isAdmin)
     };
 
     const { token, pin } = generateWebToken(userData, 2); // Hiệu lực 2 phút
