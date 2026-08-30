@@ -154,9 +154,10 @@ function getActiveWebUsers(guildId) {
       return res.status(404).json({ success: false, error: 'Bot chưa tham gia máy chủ này' });
     }
 
+    let caller = null;
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.token;
     if (token) {
-      const caller = verifyWebToken(token);
+      caller = verifyWebToken(token);
       if (caller) recordActiveUser(guildId, caller);
     }
 
@@ -235,8 +236,8 @@ function getActiveWebUsers(guildId) {
           artist: t.artist || (t.title.includes(' - ') ? t.title.split(' - ')[0].trim() : 'YouTube Music')
         })),
         hasPrevious: Boolean(queue?.previousSongs && queue.previousSongs.length > 0),
-        history: (await historyManager.getRecent(guildId, 10)) || [],
-        favorites: (await favoriteManager.getFavorites(user?.userId || '')) || []
+        history: (historyManager.getRecent ? historyManager.getRecent(guildId, 10) : (historyManager.getHistory(guildId) || []).slice(0, 10)) || [],
+        favorites: caller?.userId ? ((await favoriteManager.getFavorites(caller.userId)) || []) : []
       }
     });
   });

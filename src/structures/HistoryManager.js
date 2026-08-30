@@ -90,6 +90,11 @@ class HistoryManager {
     return this.cache.get(guildId) || [];
   }
 
+  getRecent(guildId, limit = 10) {
+    const list = this.getHistory(guildId);
+    return list.slice(0, limit);
+  }
+
   /**
    * Kiểm tra xem bài hát này có nằm trong 20 bài gần nhất không
    */
