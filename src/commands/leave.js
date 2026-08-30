@@ -27,22 +27,22 @@ module.exports = {
                       message.member.permissions.has('ManageGuild') || 
                       message.guild.ownerId === message.author.id;
       if (!isAdmin) {
-        return message.reply('🔒 **Chế độ Treo Lofi 24/7 đang được BẬT!**\nChỉ Quản trị viên máy chủ mới có quyền cho bot rời khỏi phòng Voice.');
+        return sendTemp(message, '🔒 **Chế độ Treo Lofi 24/7 đang được BẬT!**\nChỉ Quản trị viên máy chủ mới có quyền cho bot rời khỏi phòng Voice.', 6000);
       }
     }
 
     if (!hasMusicPermission(message.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return message.reply(`Bạn cần có vai trò ${roleText} để cho bot rời phòng.`);
+      return sendTemp(message, `Bạn cần có vai trò ${roleText} để cho bot rời phòng.`, 5000);
     }
 
     if (!queue) {
-      return message.reply('Bot hiện không có mặt trong kênh Voice nào của máy chủ này!');
+      return sendTemp(message, 'Bot hiện không có mặt trong kênh Voice nào của máy chủ này!', 5000);
     }
 
     const memberVoice = message.member?.voice?.channel;
     if (!memberVoice) {
-      return message.reply('Bạn cần ở trong phòng Voice để ngắt kết nối bot!');
+      return sendTemp(message, 'Bạn cần ở trong phòng Voice để ngắt kết nối bot!', 5000);
     }
 
     // Nếu Admin đồng ý rời phòng, tắt 24/7 để bot không tự động nối lại
@@ -52,6 +52,6 @@ module.exports = {
     }
 
     queue.destroy();
-    return message.reply('👋 Đã ngắt kết nối và rời khỏi kênh Voice (Đã tắt chế độ 24/7).');
+    return sendTemp(message, '👋 Đã ngắt kết nối và rời khỏi kênh Voice (Đã tắt chế độ 24/7).', 5000);
   }
 };
