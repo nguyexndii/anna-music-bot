@@ -27,7 +27,7 @@ module.exports = {
                       message.member.permissions.has('ManageGuild') || 
                       message.guild.ownerId === message.author.id;
       if (!isAdmin) {
-        return sendTemp(message, '🔒 Đang bật 24/7 (Chỉ Admin mới có quyền out bot).', 4000);
+        return sendTemp(message, '🔒 Đang bật chế độ 24/7.', 3000);
       }
     }
 
