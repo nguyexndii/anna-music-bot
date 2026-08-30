@@ -4,6 +4,8 @@ const { verifyWebToken } = require('../utils/tokenHelper');
 const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
 const { getLyrics } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
+const favoriteManager = require('../structures/FavoriteManager');
+const historyManager = require('../structures/HistoryManager');
 const { logAction } = require('../utils/debugLogger');
 
 module.exports = function createApiRouter(client) {
@@ -144,7 +146,7 @@ function getActiveWebUsers(guildId) {
 }
 
   // 3. Lấy trạng thái phát nhạc của Server (Queue, NowPlaying, Settings)
-  router.get('/guilds/:guildId/state', (req, res) => {
+  router.get('/guilds/:guildId/state', async (req, res) => {
     const { guildId } = req.params;
     const guild = client.guilds.cache.get(guildId);
 
@@ -224,7 +226,17 @@ function getActiveWebUsers(guildId) {
           name: queue.voiceChannel.name,
           memberCount: voiceMembers.length,
           members: voiceMembers
-        } : null
+        } : null,
+        previousSongs: (queue?.previousSongs || []).map(t => ({
+          title: t.title,
+          url: t.url,
+          thumbnail: t.thumbnail,
+          duration: t.duration,
+          artist: t.artist || (t.title.includes(' - ') ? t.title.split(' - ')[0].trim() : 'YouTube Music')
+        })),
+        hasPrevious: Boolean(queue?.previousSongs && queue.previousSongs.length > 0),
+        history: (await historyManager.getRecent(guildId, 10)) || [],
+        favorites: (await favoriteManager.getFavorites(user?.userId || '')) || []
       }
     });
   });
@@ -419,6 +431,32 @@ function getActiveWebUsers(guildId) {
           queue.skip();
           resultMessage = `Đã chuyển bài hát tiếp theo bởi @${user.displayName || user.username}`;
           break;
+        case 'previous': {
+          const ok = await queue.playPrevious();
+          resultMessage = ok ? 'Đã quay lại bài hát trước đó ⏮️' : 'Không có bài hát trước đó để quay lại';
+          break;
+        }
+        case 'playNow': {
+          const ok = await queue.playNow(value);
+          resultMessage = ok ? 'Đã phát ngay bài hát được chọn ▶️' : 'Không thể phát bài hát này';
+          break;
+        }
+        case 'move': {
+          const { from, to } = value || {};
+          const ok = queue.moveTrack(from, to);
+          resultMessage = ok ? 'Đã thay đổi thứ tự hàng chờ' : 'Không thể di chuyển bài hát';
+          break;
+        }
+        case 'toggleFavorite': {
+          const trackToFav = value || queue?.currentSong;
+          if (trackToFav && trackToFav.title) {
+            const favRes = await favoriteManager.toggleFavorite(user.userId, trackToFav);
+            resultMessage = favRes.isAdded ? `Đã thêm "${trackToFav.title}" vào Yêu thích ❤️` : `Đã xóa "${trackToFav.title}" khỏi Yêu thích`;
+          } else {
+            resultMessage = 'Không có bài hát để yêu thích';
+          }
+          break;
+        }
         case 'stop':
           queue.stop();
           resultMessage = 'Đã dừng phát và xóa toàn bộ hàng chờ';

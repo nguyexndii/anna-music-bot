@@ -50,6 +50,7 @@ class MusicQueue {
     this.mode247 = true;
     this.paused = false;
 
+    this.previousSongs = []; // Tối đa 5 bài hát đã nghe trước đó
     this.disconnectTimeout = null;
     this.emptyRoomTimeout = null;
     this.idle247Timeout = null;
@@ -187,10 +188,13 @@ class MusicQueue {
     if (this.isDestroyed || this.isStopped) return;
     const lastSong = this.currentSong;
 
-    if (lastSong) {
+    if (lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
       this.history.push(lastSong.url);
       if (this.history.length > 50) this.history.shift();
       await historyManager.addSong(this.guild.id, lastSong);
+      
+      this.previousSongs.push(lastSong);
+      if (this.previousSongs.length > 5) this.previousSongs.shift();
     }
 
     if (this.loopMode === 'song' && lastSong) {
@@ -665,9 +669,44 @@ class MusicQueue {
 
   skip() {
     this.clearCrossfadeTimer();
-    this.clearDisconnectTimer();
-    this.clearEmptyRoomTimer();
-    this.player.stop(true);
+    this.player.stop();
+  }
+
+  async playPrevious() {
+    if (!this.previousSongs || this.previousSongs.length === 0) return false;
+    const prevSong = this.previousSongs.pop();
+    if (!prevSong) return false;
+
+    if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
+      this.songs.unshift(this.currentSong);
+    }
+
+    this.currentSong = null;
+    this.songs.unshift(prevSong);
+    this.player.stop();
+    return true;
+  }
+
+  async playNow(index) {
+    const idx = parseInt(index, 10);
+    if (isNaN(idx) || idx < 0 || idx >= this.songs.length) return false;
+    const targetTrack = this.songs.splice(idx, 1)[0];
+    if (!targetTrack) return false;
+
+    this.songs.unshift(targetTrack);
+    this.skip();
+    return true;
+  }
+
+  moveTrack(fromIndex, toIndex) {
+    const from = parseInt(fromIndex, 10);
+    const to = parseInt(toIndex, 10);
+    if (isNaN(from) || isNaN(to) || from < 0 || to < 0 || from >= this.songs.length || to >= this.songs.length) {
+      return false;
+    }
+    const [moved] = this.songs.splice(from, 1);
+    this.songs.splice(to, 0, moved);
+    return true;
   }
 
   stop() {
