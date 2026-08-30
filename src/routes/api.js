@@ -576,6 +576,12 @@ module.exports = function createApiRouter(client) {
         case 'clear':
           if (queue) {
             queue.songs = [];
+            queue.preloadedResource = null;
+            queue.preloadedSongUrl = null;
+            queue.prefetchedSong = null;
+            if (queue.loopMode === 'song' || queue.loopMode === 'queue') {
+              queue.loopMode = 'off';
+            }
           }
           resultMessage = 'Đã xóa toàn bộ bài hát trong hàng chờ';
           break;

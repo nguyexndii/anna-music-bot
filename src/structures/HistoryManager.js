@@ -54,6 +54,16 @@ class HistoryManager {
   async addSong(guildId, song) {
     if (!guildId || !song || !song.title) return;
 
+    // Bỏ qua nhạc 24/7 Lofi nền do bot tự phát (Không lưu vào lịch sử và bảng xếp hạng)
+    if (
+      song.is247 ||
+      song.requestedBy === 'Auto (24/7)' ||
+      /lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(song.title) ||
+      /lofi girl/i.test(song.artist || '')
+    ) {
+      return;
+    }
+
     if (!this.cache.has(guildId)) {
       this.cache.set(guildId, []);
     }
@@ -105,7 +115,13 @@ class HistoryManager {
   }
 
   getHistory(guildId) {
-    return this.cache.get(guildId) || [];
+    const rawList = this.cache.get(guildId) || [];
+    // Lọc bỏ nhạc Lofi 24/7 nếu trước đây từng bị lưu nhầm
+    return rawList.filter(item => 
+      item && 
+      item.title && 
+      !/lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(item.title)
+    );
   }
 
   getRecent(guildId, limit = 10) {
@@ -129,7 +145,7 @@ class HistoryManager {
   }
 
   /**
-   * Thống kê Top bài hát được nghe nhiều nhất của Server
+   * Thống kê Top bài hát được nghe nhiều nhất của Server (Loại trừ 100% nhạc Lofi 24/7)
    */
   getTopTracks(guildId, limit = 6) {
     const list = this.getHistory(guildId);
@@ -138,6 +154,9 @@ class HistoryManager {
     const counts = new Map();
     for (const item of list) {
       if (!item || !item.title) continue;
+      // Bỏ qua lofi nền
+      if (/lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(item.title)) continue;
+
       const key = item.title.toLowerCase().trim();
       if (!counts.has(key)) {
         counts.set(key, { ...item, count: 1 });

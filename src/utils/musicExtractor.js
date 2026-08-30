@@ -40,14 +40,106 @@ function parseArtistAndTitle(rawTitle) {
   return { artist, songName: cleanSong, rawSongName: songName };
 }
 
+let spotifyTokenCache = { token: null, expiresAt: 0 };
+
+async function getSpotifyApiToken() {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+
+  if (spotifyTokenCache.token && Date.now() < spotifyTokenCache.expiresAt) {
+    return spotifyTokenCache.token;
+  }
+
+  try {
+    const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${authHeader}`
+      },
+      body: 'grant_type=client_credentials'
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      spotifyTokenCache = {
+        token: data.access_token,
+        expiresAt: Date.now() + ((data.expires_in || 3600) - 60) * 1000
+      };
+      return spotifyTokenCache.token;
+    }
+  } catch (e) {
+    console.warn('[Spotify Token Error]:', e.message);
+  }
+  return null;
+}
+
+async function fetchSpotifyPlaylistFull(playlistId) {
+  const token = await getSpotifyApiToken();
+  if (!token) return null;
+
+  const tracks = [];
+  let offset = 0;
+  const limit = 100;
+
+  while (offset < 2000) {
+    try {
+      const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?offset=${offset}&limit=${limit}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) break;
+      const data = await res.json();
+      if (!data.items || data.items.length === 0) break;
+
+      for (const item of data.items) {
+        if (item.track && item.track.name) {
+          const artistName = item.track.artists ? item.track.artists.map(a => a.name).join(', ') : '';
+          const title = artistName ? `${item.track.name} - ${artistName}` : item.track.name;
+          tracks.push({
+            title: title,
+            url: null,
+            searchQuery: `${title}`,
+            duration: formatMs(item.track.duration_ms),
+            thumbnail: item.track.album?.images?.[0]?.url || null,
+            isLive: false
+          });
+        }
+      }
+
+      if (tracks.length >= (data.total || 0) || !data.next) break;
+      offset += limit;
+    } catch (err) {
+      console.warn('[Spotify Playlist Page Error]:', err.message);
+      break;
+    }
+  }
+
+  return tracks.length > 0 ? tracks : null;
+}
+
 /**
  * Tìm kiếm và trích xuất thông tin bài hát / Playlist từ YouTube, Spotify, SoundCloud
  * (Tối đa 1000 bài đối với Playlist)
  */
 async function searchTrack(query) {
   try {
-    // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 1000 bài)
+    // 1. Xử lý Playlist / Album Spotify (Toàn bộ bài hát không giới hạn)
     if (query.includes('spotify.com/playlist/') || query.includes('spotify.com/album/')) {
+      const plMatch = query.match(/playlist\/([a-zA-Z0-9]+)/);
+      if (plMatch && plMatch[1]) {
+        try {
+          const fullTracks = await fetchSpotifyPlaylistFull(plMatch[1]);
+          if (fullTracks && fullTracks.length > 0) {
+            return fullTracks;
+          }
+        } catch (fullErr) {
+          console.warn('[Spotify Full Playlist Error]:', fullErr.message);
+        }
+      }
+
+      // Fallback sang spotify-url-info (100 bài đầu) nếu chưa cấu hình Spotify API Token
       try {
         const spotifyTracks = await spotifyUrlInfo.getTracks(query);
         if (spotifyTracks && spotifyTracks.length > 0) {
@@ -57,7 +149,7 @@ async function searchTrack(query) {
             const title = artistName ? `${item.name} - ${artistName}` : item.name;
             return {
               title: title,
-              url: null, // Sẽ được tìm kiếm YouTube khi phát
+              url: null,
               searchQuery: `${title}`,
               duration: formatMs(item.duration),
               thumbnail: item.coverArt?.sources?.[0]?.url || null,

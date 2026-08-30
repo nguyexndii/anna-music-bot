@@ -187,6 +187,8 @@ class MusicQueue {
     this.clearCrossfadeTimer();
     if (this.isDestroyed || this.isStopped) return;
     const lastSong = this.currentSong;
+    const wasExplicitSkip = Boolean(this._skipRequested);
+    this._skipRequested = false;
 
     if (lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
       this.history.push(lastSong.url);
@@ -197,9 +199,10 @@ class MusicQueue {
       if (this.previousSongs.length > 5) this.previousSongs.shift();
     }
 
-    if (this.loopMode === 'song' && lastSong) {
+    // Chỉ lặp lại bài nếu người dùng không bấm nút Skip thủ công
+    if (!wasExplicitSkip && this.loopMode === 'song' && lastSong) {
       this.songs.unshift(lastSong);
-    } else if (this.loopMode === 'queue' && lastSong) {
+    } else if (!wasExplicitSkip && this.loopMode === 'queue' && lastSong) {
       this.songs.push(lastSong);
     }
 
@@ -215,6 +218,11 @@ class MusicQueue {
     const humanMembers = this.voiceChannel ? this.voiceChannel.members.filter(m => !m.user.bot) : new Map();
     const guildSettings = settingsManager.get(this.guild.id);
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
+
+    // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát
+    if (this.prefetchedSong && (this.prefetchedSong.url === lastSong?.url || this.prefetchedSong.title === lastSong?.title)) {
+      this.prefetchedSong = null;
+    }
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
     if (this.prefetchedSong && humanMembers.size > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
@@ -668,6 +676,10 @@ class MusicQueue {
   }
 
   skip() {
+    this._skipRequested = true;
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
+    this.prefetchedSong = null;
     this.clearCrossfadeTimer();
     this.player.stop();
   }
