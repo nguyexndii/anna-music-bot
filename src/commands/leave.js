@@ -20,38 +20,38 @@ module.exports = {
     const guildSettings = settingsManager.get(message.guild.id);
     const queue = musicManager.get(message.guild.id);
 
-    // 🔒 BẢO VỆ CHẾ ĐỘ 24/7: Nếu 24/7 đang BẬT, chỉ Quản trị viên (Admin / ManageGuild / Owner) mới có quyền cho bot out!
+    // 🔒 BẢO VỆ CHẾ ĐỘ 24/7
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247) {
       const isAdmin = message.member.permissions.has('Administrator') || 
                       message.member.permissions.has('ManageGuild') || 
                       message.guild.ownerId === message.author.id;
       if (!isAdmin) {
-        return sendTemp(message, '🔒 **Chế độ Treo Lofi 24/7 đang được BẬT!**\nChỉ Quản trị viên máy chủ mới có quyền cho bot rời khỏi phòng Voice.', 6000);
+        return sendTemp(message, '🔒 Đang bật 24/7 (Chỉ Admin mới có quyền out bot).', 4000);
       }
     }
 
     if (!hasMusicPermission(message.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return sendTemp(message, `Bạn cần có vai trò ${roleText} để cho bot rời phòng.`, 5000);
+      return sendTemp(message, `Cần vai trò ${roleText} để out bot.`, 4000);
     }
 
     if (!queue) {
-      return sendTemp(message, 'Bot hiện không có mặt trong kênh Voice nào của máy chủ này!', 5000);
+      return sendTemp(message, 'Bot không ở trong phòng Voice nào!', 4000);
     }
 
     const memberVoice = message.member?.voice?.channel;
     if (!memberVoice) {
-      return sendTemp(message, 'Bạn cần ở trong phòng Voice để ngắt kết nối bot!', 5000);
+      return sendTemp(message, 'Bạn cần vào phòng Voice trước!', 4000);
     }
 
-    // Nếu Admin đồng ý rời phòng, tắt 24/7 để bot không tự động nối lại
+    // Nếu Admin đồng ý rời phòng, tắt 24/7
     if (queue.mode247) {
       queue.mode247 = false;
       settingsManager.update(message.guild.id, { mode247: false });
     }
 
     queue.destroy();
-    return sendTemp(message, '👋 Đã ngắt kết nối và rời khỏi kênh Voice (Đã tắt chế độ 24/7).', 5000);
+    return sendTemp(message, '👋 Đã ngắt kết nối và rời Voice.', 4000);
   }
 };
