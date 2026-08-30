@@ -20,29 +20,29 @@ module.exports = {
     const guildSettings = settingsManager.get(message.guild.id);
     const queue = musicManager.get(message.guild.id);
 
-    // 🔒 BẢO VỆ CHẾ ĐỘ 24/7
+    // BẢO VỆ CHẾ ĐỘ 24/7
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247) {
       const isAdmin = message.member.permissions.has('Administrator') || 
                       message.member.permissions.has('ManageGuild') || 
                       message.guild.ownerId === message.author.id;
       if (!isAdmin) {
-        return sendTemp(message, '🔒 Đang bật chế độ 24/7.', 3000);
+        return sendTemp(message, 'Đang bật chế độ 24/7.', 3000);
       }
     }
 
     if (!hasMusicPermission(message.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return sendTemp(message, `Cần vai trò ${roleText} để out bot.`, 4000);
+      return sendTemp(message, `Cần vai trò ${roleText} để out bot.`, 3000);
     }
 
     if (!queue) {
-      return sendTemp(message, 'Bot không ở trong phòng Voice nào!', 4000);
+      return sendTemp(message, 'Bot không ở trong phòng Voice nào!', 3000);
     }
 
     const memberVoice = message.member?.voice?.channel;
     if (!memberVoice) {
-      return sendTemp(message, 'Bạn cần vào phòng Voice trước!', 4000);
+      return sendTemp(message, 'Bạn cần vào phòng Voice trước!', 3000);
     }
 
     // Nếu Admin đồng ý rời phòng, tắt 24/7
@@ -52,6 +52,6 @@ module.exports = {
     }
 
     queue.destroy();
-    return sendTemp(message, '👋 Đã ngắt kết nối và rời Voice.', 4000);
+    return sendTemp(message, 'Đã ngắt kết nối và rời Voice.', 3000);
   }
 };
