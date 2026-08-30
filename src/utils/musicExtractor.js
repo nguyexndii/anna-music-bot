@@ -51,7 +51,7 @@ async function searchTrack(query) {
       try {
         const spotifyTracks = await spotifyUrlInfo.getTracks(query);
         if (spotifyTracks && spotifyTracks.length > 0) {
-          const limited = spotifyTracks.slice(0, 20);
+          const limited = spotifyTracks.slice(0, 200);
           return limited.map(item => {
             const artistName = item.artist || item.artists?.[0]?.name || '';
             const title = artistName ? `${item.name} - ${artistName}` : item.name;
@@ -87,19 +87,19 @@ async function searchTrack(query) {
       }
     }
 
-    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 20 bài đầu tiên)
+    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 200 bài đầu tiên)
     if (query.includes('youtube.com/playlist') || (query.includes('youtube.com/watch') && query.includes('list='))) {
       try {
         const res = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
-          playlistEnd: 20,
+          playlistEnd: 200,
           yesPlaylist: true,
           noWarnings: true
         });
 
         if (res && res.entries && res.entries.length > 0) {
-          const limited = res.entries.slice(0, 20);
+          const limited = res.entries.slice(0, 200);
           return limited.map(e => {
             const trackUrl = e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null);
             return {
@@ -156,7 +156,7 @@ function extractSoundCloudTitleFromUrl(url) {
 
         if (scData && scData.type === 'playlist') {
           const allTracks = await scData.all_tracks();
-          const limited = allTracks.slice(0, 20);
+          const limited = allTracks.slice(0, 200);
           return limited.map(track => ({
             title: track.name || 'SoundCloud Track',
             url: track.permalink || track.url || query,
@@ -184,11 +184,12 @@ function extractSoundCloudTitleFromUrl(url) {
         const info = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
+          playlistEnd: 200,
           noWarnings: true
         });
 
         if (info.entries && Array.isArray(info.entries) && info.entries.length > 0) {
-          const limited = info.entries.slice(0, 20);
+          const limited = info.entries.slice(0, 200);
           return limited.map(item => {
             let trackTitle = item.title || item.name;
             if (!trackTitle || trackTitle === 'SoundCloud Track') {

@@ -450,11 +450,23 @@ function getActiveWebUsers(guildId) {
           resultMessage = newVal ? 'Đã BẬT DJ AI Tự Động Gợi Ý (Autoplay)' : 'Đã TẮT DJ AI Autoplay';
           break;
         }
-        case 'remove': {
-          const idx = parseInt(value, 10);
-          if (!isNaN(idx) && idx >= 0 && idx < queue.songs.length) {
-            const removed = queue.songs.splice(idx, 1)[0];
-            resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
+        case 'remove':
+        case 'removeBatch': {
+          if (Array.isArray(value)) {
+            const sortedIndices = value
+              .map(Number)
+              .filter(n => !isNaN(n) && n >= 0 && n < queue.songs.length)
+              .sort((a, b) => b - a);
+            for (const idx of sortedIndices) {
+              queue.songs.splice(idx, 1);
+            }
+            resultMessage = `Đã xóa ${sortedIndices.length} bài hát khỏi hàng chờ`;
+          } else {
+            const idx = parseInt(value, 10);
+            if (!isNaN(idx) && idx >= 0 && idx < queue.songs.length) {
+              const removed = queue.songs.splice(idx, 1)[0];
+              resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
+            }
           }
           break;
         }
