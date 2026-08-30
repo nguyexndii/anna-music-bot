@@ -74,10 +74,12 @@ module.exports = function createApiRouter(client) {
     const guildSettings = settingsManager.get(user.guildId);
     const isAdmin = await checkIsAdmin(user.guildId, user.userId);
 
-    // Nếu máy chủ đã khóa kênh Voice cố định: người có PIN hợp lệ được coi là đủ điều kiện vào web
+    // Kiểm tra thực tế xem User có đang ngồi trong kênh Voice trên Discord hay không
+    const isInVoice = Boolean(userVoice);
     const isLocked = Boolean(guildSettings.lockedVoiceChannelId);
-    const isInVoice = isLocked ? true : Boolean(userVoice);
-    const isSameVoice = isLocked ? (userVoice ? userVoice.id === guildSettings.lockedVoiceChannelId : true) : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
+    const isSameVoice = isLocked 
+      ? Boolean(userVoice && userVoice.id === guildSettings.lockedVoiceChannelId)
+      : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
 
     return res.json({
       success: true,
@@ -273,8 +275,22 @@ function getActiveWebUsers(guildId) {
       textChannel = guild.channels.cache.find(c => c.isTextBased?.() && c.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) || null;
     }
 
+    // Kiểm tra User có thực sự đang ở trong kênh Voice trên Discord hay không
+    const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
+    const userVoice = member?.voice?.channel;
+    if (!userVoice) {
+      return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi thêm bài hát!' });
+    }
+
     // Nếu máy chủ đã khóa kênh Voice cố định (lockedVoiceChannelId)
     if (guildSettings.lockedVoiceChannelId) {
+      if (userVoice.id !== guildSettings.lockedVoiceChannelId) {
+        return res.status(400).json({
+          success: false,
+          error: `Máy chủ đã khóa kênh Voice! Vui lòng tham gia kênh <#${guildSettings.lockedVoiceChannelId}> để phát nhạc.`
+        });
+      }
+
       const targetChannel = guild.channels.cache.get(guildSettings.lockedVoiceChannelId) || await guild.channels.fetch(guildSettings.lockedVoiceChannelId).catch(() => null);
       if (!targetChannel || !targetChannel.isVoiceBased || !targetChannel.isVoiceBased()) {
         return res.status(400).json({
@@ -293,17 +309,8 @@ function getActiveWebUsers(guildId) {
 
       voiceChannel = targetChannel;
     } else {
-      // Nếu không khóa: lấy kênh voice của User hoặc kênh bot đang đứng
-      const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
-      voiceChannel = member?.voice?.channel;
-
-      if (existingQueue && existingQueue.voiceChannel) {
-        voiceChannel = existingQueue.voiceChannel;
-      }
-
-      if (!voiceChannel) {
-        return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào 1 kênh Voice trong Discord trước!' });
-      }
+      // Nếu không khóa: sử dụng kênh Voice mà User đang ngồi
+      voiceChannel = userVoice;
     }
 
     try {
@@ -404,6 +411,16 @@ function getActiveWebUsers(guildId) {
           success: false,
           code: 'PERMISSION_DENIED',
           error: 'Chỉ Quản trị viên (Admin / Quản lý máy chủ) mới có quyền thay đổi Cài đặt Máy chủ!'
+        });
+      }
+    } else if (action !== 'toggleFavorite') {
+      const guild = client.guilds.cache.get(guildId);
+      const member = guild?.members?.cache.get(user.userId) || await guild?.members?.fetch(user.userId).catch(() => null);
+      const isAdmin = await checkIsAdmin(guildId, user.userId);
+      if (!member?.voice?.channel && !isAdmin) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bạn phải tham gia vào kênh Voice trên Discord để điều khiển âm nhạc!'
         });
       }
     }
