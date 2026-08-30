@@ -129,6 +129,43 @@ class HistoryManager {
   }
 
   /**
+   * Thống kê Top bài hát được nghe nhiều nhất của Server
+   */
+  getTopTracks(guildId, limit = 6) {
+    const list = this.getHistory(guildId);
+    if (!list || list.length === 0) return [];
+
+    const counts = new Map();
+    for (const item of list) {
+      if (!item || !item.title) continue;
+      const key = item.title.toLowerCase().trim();
+      if (!counts.has(key)) {
+        counts.set(key, { ...item, count: 1 });
+      } else {
+        counts.get(key).count += 1;
+      }
+    }
+
+    const sorted = Array.from(counts.values()).sort((a, b) => b.count - a.count);
+    return sorted.slice(0, limit).map(item => {
+      let thumb = item.thumbnail;
+      if (!thumb && item.url) {
+        const match = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+        if (match && match[1]) {
+          thumb = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+        }
+      }
+      return {
+        ...item,
+        thumbnail: thumb || null,
+        artist: item.artist && item.artist !== 'Unknown'
+          ? item.artist
+          : (item.title && item.title.includes(' - ') ? item.title.split(' - ')[0].trim() : 'YouTube Music')
+      };
+    });
+  }
+
+  /**
    * Kiểm tra xem bài hát này có nằm trong 20 bài gần nhất không
    */
   isRecentlyPlayed(guildId, trackOrTitle, limit = 20) {

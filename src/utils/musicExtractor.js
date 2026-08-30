@@ -738,7 +738,10 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
 /**
  * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web
  */
-async function searchMultipleTracks(query, limit = 5) {
+/**
+ * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web (Siêu tốc độ)
+ */
+async function searchMultipleTracks(query, limit = 8) {
   if (!query || typeof query !== 'string' || !query.trim()) return [];
   query = query.trim();
 
@@ -747,8 +750,26 @@ async function searchMultipleTracks(query, limit = 5) {
     return directRes || [];
   }
 
+  // 1. Ưu tiên cao nhất: play-dl (Thuần Node.js HTTP, phản hồi siêu tốc dưới 250ms)
   try {
-    const res = await ytdlp(`ytsearch${Math.min(limit * 2, 10)}:${query}`, {
+    const searchResults = await play.search(query, { limit: Math.min(limit, 10), source: { youtube: 'video' } });
+    if (searchResults && searchResults.length > 0) {
+      return searchResults.map(track => ({
+        title: track.title,
+        url: track.url,
+        duration: track.durationRaw || '3:30',
+        thumbnail: track.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`,
+        artist: track.channel?.name || 'YouTube',
+        isLive: Boolean(track.live)
+      }));
+    }
+  } catch (err) {
+    console.warn('[searchMultipleTracks play-dl error]:', err.message);
+  }
+
+  // 2. Fallback qua yt-dlp nếu play-dl gặp lỗi
+  try {
+    const res = await ytdlp(`ytsearch${Math.min(limit, 8)}:${query}`, {
       dumpSingleJson: true,
       noWarnings: true,
       flatPlaylist: true
@@ -762,7 +783,7 @@ async function searchMultipleTracks(query, limit = 5) {
         results.push({
           title: entry.title,
           url: url,
-          duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(entry.duration % 60).padStart(2, '0')}` : '3:30',
+          duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(Math.floor(entry.duration % 60)).padStart(2, '0')}` : '3:30',
           thumbnail: entry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
           artist: entry.uploader || entry.channel || 'YouTube',
           isLive: false
@@ -772,23 +793,7 @@ async function searchMultipleTracks(query, limit = 5) {
       if (results.length > 0) return results;
     }
   } catch (err) {
-    console.warn('[searchMultipleTracks yt-dlp error]:', err.message);
-  }
-
-  try {
-    const searchResults = await play.search(query, { limit: limit });
-    if (searchResults && searchResults.length > 0) {
-      return searchResults.map(track => ({
-        title: track.title,
-        url: track.url,
-        duration: track.durationRaw || 'Live Stream',
-        thumbnail: track.thumbnails[0]?.url,
-        artist: track.channel?.name || 'YouTube',
-        isLive: track.live
-      }));
-    }
-  } catch (err) {
-    console.warn('[searchMultipleTracks play-dl fallback error]:', err.message);
+    console.warn('[searchMultipleTracks yt-dlp fallback error]:', err.message);
   }
 
   return [];
