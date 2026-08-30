@@ -45,13 +45,12 @@ function parseDurationToMs(durationStr) {
  * Tạo thanh tiến trình âm nhạc mượt mà: `0:45 ━━━━🔘───────── 4:18`
  */
 function createProgressBar(currentMs, totalMs, size = 12) {
+  const currentFormatted = formatDurationMs(currentMs || 0);
   if (!totalMs || totalMs <= 0) {
-    return '🔴 `TRỰC TIẾP (LIVE STREAM)`';
+    return `\`${currentFormatted}\` 🔘${'─'.repeat(size)} \`0:00\``;
   }
 
-  const currentFormatted = formatDurationMs(currentMs);
   const totalFormatted = formatDurationMs(totalMs);
-
   const progress = Math.min(1, Math.max(0, currentMs / totalMs));
   const progressIndex = Math.round(progress * size);
 
