@@ -101,7 +101,8 @@ function startServer(port) {
 const sessionManager = require('./structures/SessionManager');
 
 console.log('🎵 ANNA MUSIC BOT ĐANG KHỞI ĐỘNG...');
-startServer(Number(config.port) || 3005);
+const serverPort = process.env.PORT && process.env.PORT !== '3005' ? Number(process.env.PORT) : 3000;
+startServer(serverPort);
 
 // 4. Sự kiện khi Bot sẵn sàng
 client.once('clientReady', async () => {
