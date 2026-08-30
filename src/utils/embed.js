@@ -523,17 +523,16 @@ function createSettingsSelectMenu(settings) {
   return row;
 }
 
+const _lastVoiceStatus = new Map();
+
 /**
  * Cập nhật trạng thái Voice Channel (Voice Channel Status - hiển thị tên bài đang phát trên phòng voice)
  */
 async function setVoiceChannelStatus(voiceChannel, statusText) {
   if (!voiceChannel || !voiceChannel.id || !voiceChannel.client?.rest) return;
   const cleanText = (statusText || '').slice(0, 500);
-  logAction('VOICE_STATUS_UPDATE', {
-    source: 'embed.js',
-    channelId: voiceChannel.id,
-    status: cleanText || '(empty)'
-  });
+  if (_lastVoiceStatus.get(voiceChannel.id) === cleanText) return;
+  _lastVoiceStatus.set(voiceChannel.id, cleanText);
   try {
     await voiceChannel.client.rest.put(Routes.channelVoiceStatus(voiceChannel.id), {
       body: { status: cleanText }
@@ -548,10 +547,8 @@ async function setVoiceChannelStatus(voiceChannel, statusText) {
  */
 async function clearVoiceChannelStatus(voiceChannel) {
   if (!voiceChannel || !voiceChannel.id || !voiceChannel.client?.rest) return;
-  logAction('VOICE_STATUS_CLEAR', {
-    source: 'embed.js',
-    channelId: voiceChannel.id
-  });
+  if (!_lastVoiceStatus.get(voiceChannel.id)) return;
+  _lastVoiceStatus.delete(voiceChannel.id);
   try {
     await voiceChannel.client.rest.put(Routes.channelVoiceStatus(voiceChannel.id), {
       body: { status: '' }

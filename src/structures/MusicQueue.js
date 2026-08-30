@@ -509,8 +509,9 @@ class MusicQueue {
       this._prefetchAutoplayTrack();
       this._preloadNextTrackResource();
 
-      // Gửi hoặc Cập nhật Banner bài đang phát (Siêu tinh gọn & hiện đại)
-      if (this.textChannel && guildSettings.announceSongs !== false) {
+      // Gửi hoặc Cập nhật Banner bài đang phát (Chỉ gửi khi có người nghe order/DJ AI, KHÔNG spam khi phát Lofi 24/7 nền)
+      const is247Lofi = this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247;
+      if (this.textChannel && guildSettings.announceSongs !== false && !is247Lofi) {
         try {
           const banner = createNowPlayingBanner(this.currentSong, this);
 
