@@ -59,13 +59,31 @@ class HistoryManager {
     }
 
     const list = this.cache.get(guildId);
+    let thumbnail = song.thumbnail;
+    if (!thumbnail && song.url) {
+      const match = song.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+      if (match && match[1]) {
+        thumbnail = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+      }
+    }
+
     const item = {
       title: song.title,
       url: song.url || null,
+      thumbnail: thumbnail || null,
+      artist: song.artist && song.artist !== 'Unknown' 
+        ? song.artist 
+        : (song.title.includes(' - ') ? song.title.split(' - ')[0].trim() : 'YouTube Music'),
+      duration: song.duration || '0:00',
       playedAt: new Date()
     };
 
-    list.unshift(item);
+    // Kiểm tra không lặp liên tiếp
+    if (list.length > 0 && list[0].title === item.title) {
+      list[0] = item;
+    } else {
+      list.unshift(item);
+    }
 
     // Giữ tối đa 50 bài hát gần nhất
     if (list.length > 50) {
@@ -92,7 +110,22 @@ class HistoryManager {
 
   getRecent(guildId, limit = 10) {
     const list = this.getHistory(guildId);
-    return list.slice(0, limit);
+    return list.slice(0, limit).map(item => {
+      let thumb = item.thumbnail;
+      if (!thumb && item.url) {
+        const match = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+        if (match && match[1]) {
+          thumb = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+        }
+      }
+      return {
+        ...item,
+        thumbnail: thumb || null,
+        artist: item.artist && item.artist !== 'Unknown'
+          ? item.artist
+          : (item.title && item.title.includes(' - ') ? item.title.split(' - ')[0].trim() : 'YouTube Music')
+      };
+    });
   }
 
   /**
