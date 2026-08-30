@@ -282,6 +282,16 @@ function getActiveWebUsers(guildId) {
       return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi thêm bài hát!' });
     }
 
+    // Nếu Bot ĐÃ Ở TRONG một kênh Voice (ví dụ phòng treo Lofi 24/7):
+    // Bắt buộc User phải Ở CÙNG PHÒNG VOICE VỚI BOT!
+    const botVoice = existingQueue?.voiceChannel || guild.members.me?.voice?.channel;
+    if (botVoice && userVoice.id !== botVoice.id) {
+      return res.status(400).json({
+        success: false,
+        error: `Bot đang ở trong kênh Voice "${botVoice.name}"! Bạn cần vào cùng phòng Voice với Bot để order nhạc.`
+      });
+    }
+
     // Nếu máy chủ đã khóa kênh Voice cố định (lockedVoiceChannelId)
     if (guildSettings.lockedVoiceChannelId) {
       if (userVoice.id !== guildSettings.lockedVoiceChannelId) {
@@ -416,11 +426,21 @@ function getActiveWebUsers(guildId) {
     } else if (action !== 'toggleFavorite') {
       const guild = client.guilds.cache.get(guildId);
       const member = guild?.members?.cache.get(user.userId) || await guild?.members?.fetch(user.userId).catch(() => null);
+      const userVoice = member?.voice?.channel;
       const isAdmin = await checkIsAdmin(guildId, user.userId);
-      if (!member?.voice?.channel && !isAdmin) {
+      const botVoice = queue?.voiceChannel || guild?.members?.me?.voice?.channel;
+
+      if (!userVoice && !isAdmin) {
         return res.status(400).json({
           success: false,
           error: 'Bạn phải tham gia vào kênh Voice trên Discord để điều khiển âm nhạc!'
+        });
+      }
+
+      if (botVoice && userVoice && userVoice.id !== botVoice.id && !isAdmin) {
+        return res.status(400).json({
+          success: false,
+          error: `Bạn cần ở cùng phòng Voice "${botVoice.name}" với Bot để điều khiển nhạc!`
         });
       }
     }
