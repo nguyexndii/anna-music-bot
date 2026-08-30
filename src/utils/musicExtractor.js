@@ -42,23 +42,23 @@ function parseArtistAndTitle(rawTitle) {
 
 /**
  * Tìm kiếm và trích xuất thông tin bài hát / Playlist từ YouTube, Spotify, SoundCloud
- * (Tối đa 20 bài đối với Playlist)
+ * (Tối đa 1000 bài đối với Playlist)
  */
 async function searchTrack(query) {
   try {
-    // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 20 bài đầu tiên)
+    // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 1000 bài)
     if (query.includes('spotify.com/playlist/') || query.includes('spotify.com/album/')) {
       try {
         const spotifyTracks = await spotifyUrlInfo.getTracks(query);
         if (spotifyTracks && spotifyTracks.length > 0) {
-          const limited = spotifyTracks.slice(0, 200);
+          const limited = spotifyTracks.slice(0, 1000);
           return limited.map(item => {
             const artistName = item.artist || item.artists?.[0]?.name || '';
             const title = artistName ? `${item.name} - ${artistName}` : item.name;
             return {
               title: title,
               url: null, // Sẽ được tìm kiếm YouTube khi phát
-              searchQuery: `${title} official audio`,
+              searchQuery: `${title}`,
               duration: formatMs(item.duration),
               thumbnail: item.coverArt?.sources?.[0]?.url || null,
               isLive: false
@@ -77,7 +77,7 @@ async function searchTrack(query) {
         if (trackData && trackData.name) {
           const artistName = trackData.artists?.[0]?.name || trackData.artist || '';
           const title = artistName ? `${trackData.name} - ${artistName}` : trackData.name;
-          const results = await searchTrack(`${title} official audio`);
+          const results = await searchTrack(title);
           if (results && results.length > 0) {
             return results;
           }
@@ -87,19 +87,19 @@ async function searchTrack(query) {
       }
     }
 
-    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 200 bài đầu tiên)
+    // 3. Xử lý Playlist YouTube (Giới hạn tối đa 1000 bài)
     if (query.includes('youtube.com/playlist') || (query.includes('youtube.com/watch') && query.includes('list='))) {
       try {
         const res = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
-          playlistEnd: 200,
+          playlistEnd: 1000,
           yesPlaylist: true,
           noWarnings: true
         });
 
         if (res && res.entries && res.entries.length > 0) {
-          const limited = res.entries.slice(0, 200);
+          const limited = res.entries.slice(0, 1000);
           return limited.map(e => {
             const trackUrl = e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null);
             return {
@@ -112,8 +112,8 @@ async function searchTrack(query) {
             };
           });
         }
-      } catch (ytListErr) {
-        console.warn('[YouTube Playlist extraction error]:', ytListErr.message);
+      } catch (ytErr) {
+        console.warn('[YouTube Playlist extraction error]:', ytErr.message);
       }
     }
 
@@ -147,16 +147,15 @@ function extractSoundCloudTitleFromUrl(url) {
   return 'SoundCloud Track';
 }
 
-    // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album)
+    // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album - Giới hạn 1000 bài)
     if (query.includes('soundcloud.com')) {
-      // Ưu tiên 1: Dùng play-dl với SoundCloud Free Client ID để lấy 100% tên bài, ca sĩ, thumbnail chuẩn
       try {
         await ensureSoundCloudAuth();
         const scData = await play.soundcloud(query);
 
         if (scData && scData.type === 'playlist') {
           const allTracks = await scData.all_tracks();
-          const limited = allTracks.slice(0, 200);
+          const limited = allTracks.slice(0, 1000);
           return limited.map(track => ({
             title: track.name || 'SoundCloud Track',
             url: track.permalink || track.url || query,
@@ -179,17 +178,17 @@ function extractSoundCloudTitleFromUrl(url) {
         console.warn('[SoundCloud play-dl error, falling back to yt-dlp]:', scErr.message);
       }
 
-      // Ưu tiên 2: Fallback qua yt-dlp nếu play-dl gặp sự cố
+      // Fallback
       try {
         const info = await ytdlp(query, {
           dumpSingleJson: true,
           flatPlaylist: true,
-          playlistEnd: 200,
+          playlistEnd: 1000,
           noWarnings: true
         });
 
         if (info.entries && Array.isArray(info.entries) && info.entries.length > 0) {
-          const limited = info.entries.slice(0, 200);
+          const limited = info.entries.slice(0, 1000);
           return limited.map(item => {
             let trackTitle = item.title || item.name;
             if (!trackTitle || trackTitle === 'SoundCloud Track') {
@@ -251,92 +250,46 @@ function extractSoundCloudTitleFromUrl(url) {
       }
     }
 
-    // 6. Tìm kiếm YouTube với yt-dlp và Thuật toán chấm điểm chuẩn gốc (100% chính xác từ khóa)
+    // 6. Tìm kiếm YouTube cho từ khóa (Ưu tiên play-dl siêu chuẩn xác và nhanh chóng)
     try {
-      const res = await ytdlp(`ytsearch5:${query}`, {
+      const searchResults = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+      if (searchResults && searchResults.length > 0) {
+        const track = searchResults[0];
+        return [{
+          title: track.title,
+          url: track.url,
+          duration: track.durationRaw || '3:30',
+          thumbnail: track.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`,
+          artist: track.channel?.name || 'YouTube',
+          isLive: Boolean(track.live)
+        }];
+      }
+    } catch (pErr) {
+      console.warn('[play-dl search primary error, fallback yt-dlp]:', pErr.message);
+    }
+
+    // Fallback: yt-dlp search nếu play-dl gặp lỗi
+    try {
+      const res = await ytdlp(`ytsearch3:${query}`, {
         dumpSingleJson: true,
         noWarnings: true,
         flatPlaylist: true
       });
 
       if (res && res.entries && res.entries.length > 0) {
-        let bestEntry = res.entries[0];
-        let bestScore = -999;
-        const isShowQuery = /(anh trai|chị đẹp|ca sĩ mặt nạ|rap việt|tập \d+|gameshow|show)/i.test(query);
-        const lowerQuery = query.toLowerCase();
-        const queryWords = lowerQuery.split(/[\s\-–—/|]+/).filter(w => w.length > 1);
-
-        for (const entry of res.entries) {
-          if (!entry || !entry.title) continue;
-          let score = 0;
-          const lowerTitle = entry.title.toLowerCase();
-          const lowerUploader = (entry.uploader || '').toLowerCase();
-
-          // 1. Khớp từ khóa tìm kiếm (Ưu tiên video chứa nhiều từ khóa của người dùng nhất)
-          const matchedWords = queryWords.filter(w => lowerTitle.includes(w) || lowerUploader.includes(w));
-          score += (matchedWords.length / Math.max(1, queryWords.length)) * 50;
-
-          // 2. Phạt nặng gameshow / clip cắt ghép / parody / reaction nếu người dùng không yêu cầu
-          if (!isShowQuery) {
-            if (/(anh trai vượt ngàn chông gai|anh trai say hi|chị đẹp|ca sĩ mặt nạ|the masked singer|rap việt tập|tập \d+|reaction|review|trailer|hậu trường|parody|full show)/i.test(lowerTitle) ||
-                /(anh trai|chị đẹp|yeah1|vie channel|đông tây)/i.test(lowerUploader)) {
-              score -= 100;
-            }
-          }
-
-          // 3. Phạt bản cover, karaoke nếu không yêu cầu
-          if (!/(cover|karaoke|beat|piano|guitar|remake)/i.test(lowerQuery)) {
-            if (/(cover|karaoke|beat|piano version|guitar version|remake)/i.test(lowerTitle)) {
-              score -= 50;
-            }
-          }
-
-          // 4. Phạt bản live / concert nếu người dùng không tìm live
-          if (!/(live|concert|fancam)/i.test(lowerQuery)) {
-            if (/(live @|live at|\(live\)|concert|fancam)/i.test(lowerTitle)) {
-              score -= 40;
-            }
-          }
-
-          // 5. Thưởng điểm cho video official / audio / mv / visualizer
-          if (/(official|audio|mv|visualizer|video)/i.test(lowerTitle)) {
-            score += 15;
-          }
-
-          if (score > bestScore) {
-            bestScore = score;
-            bestEntry = entry;
-          }
-        }
-
+        const bestEntry = res.entries[0];
         const url = bestEntry.url || `https://www.youtube.com/watch?v=${bestEntry.id}`;
         return [{
           title: bestEntry.title,
           url: url,
           duration: bestEntry.duration ? `${Math.floor(bestEntry.duration / 60)}:${String(bestEntry.duration % 60).padStart(2, '0')}` : '3:30',
           thumbnail: bestEntry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${bestEntry.id}/hqdefault.jpg`,
+          artist: bestEntry.uploader || bestEntry.channel || 'YouTube',
           isLive: false
         }];
       }
     } catch (ytErr) {
-      console.warn('[yt-dlp keyword search error, trying play-dl fallback]:', ytErr.message);
-    }
-
-    // Fallback play-dl
-    try {
-      const searchResults = await play.search(query, { limit: 1 });
-      if (searchResults && searchResults.length > 0) {
-        const track = searchResults[0];
-        return [{
-          title: track.title,
-          url: track.url,
-          duration: track.durationRaw || 'Live Stream',
-          thumbnail: track.thumbnails[0]?.url,
-          isLive: track.live
-        }];
-      }
-    } catch (pErr) {
-      console.warn('[play-dl search fallback error]:', pErr.message);
+      console.warn('[yt-dlp keyword search fallback error]:', ytErr.message);
     }
 
     return null;

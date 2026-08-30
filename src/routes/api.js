@@ -573,6 +573,12 @@ module.exports = function createApiRouter(client) {
           }
           break;
         }
+        case 'clear':
+          if (queue) {
+            queue.songs = [];
+          }
+          resultMessage = 'Đã xóa toàn bộ bài hát trong hàng chờ';
+          break;
         case 'stop':
           queue.stop();
           resultMessage = 'Đã dừng phát và xóa toàn bộ hàng chờ';
