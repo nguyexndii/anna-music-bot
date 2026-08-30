@@ -20,6 +20,7 @@ const {
 const settingsManager = require('./SettingsManager');
 const historyManager = require('./HistoryManager');
 const sessionManager = require('./SessionManager');
+const { logAction } = require('../utils/debugLogger');
 
 class MusicQueue {
   constructor(guild, textChannel, voiceChannel, manager) {
@@ -114,6 +115,11 @@ class MusicQueue {
     }
 
     this.connection.on(VoiceConnectionStatus.Ready, () => {
+      logAction('VOICE_CONNECTION_READY', {
+        guild: this.guild.name,
+        guildId: this.guild.id,
+        channelId: this.voiceChannel.id
+      });
       console.log(`[VoiceConnection Ready] Đã kết nối thành công vào phòng: ${this.voiceChannel.name}`);
       sessionManager.saveSession(this.guild.id, {
         voiceChannelId: this.voiceChannel.id,
@@ -124,11 +130,20 @@ class MusicQueue {
     });
 
     this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      logAction('VOICE_CONNECTION_DISCONNECTED', {
+        guild: this.guild.name,
+        guildId: this.guild.id,
+        channelId: this.voiceChannel?.id
+      });
       try {
         await Promise.race([
           entersState(this.connection, VoiceConnectionStatus.Signalling, 5000),
           entersState(this.connection, VoiceConnectionStatus.Connecting, 5000)
         ]);
+        logAction('VOICE_CONNECTION_RECONNECTING', {
+          guild: this.guild.name,
+          guildId: this.guild.id
+        });
       } catch (error) {
         console.warn(`[VoiceConnection] Mất kết nối tại ${this.guild.name}, tự động kết nối lại...`);
         this.destroy();
@@ -151,6 +166,13 @@ class MusicQueue {
     this.player.on('error', (error) => {
       console.error(`[AudioPlayer Error] Guild ${this.guild.name}:`, error);
       if (this.textChannel) {
+        logAction('MESSAGE_SEND', {
+          type: 'PLAYER_ERROR',
+          channelId: this.textChannel.id,
+          guildId: this.guild.id,
+          flags: 4096,
+          content: `Loi phat nhac: ${(error.message || '').slice(0, 60)}`
+        });
         this.textChannel.send({
           embeds: [createErrorEmbed(`Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
           flags: 4096
@@ -267,6 +289,13 @@ class MusicQueue {
     this.disconnectTimeout = setTimeout(() => {
       if (!this.currentSong && this.songs.length === 0 && !this.mode247) {
         if (this.textChannel) {
+          logAction('MESSAGE_SEND', {
+            type: 'DISCONNECT_NOTICE',
+            channelId: this.textChannel.id,
+            guildId: this.guild.id,
+            flags: 4096,
+            content: 'Het nhac trong hang cho, bot da tu dong roi phong Voice.'
+          });
           this.textChannel.send({
             embeds: [createEmbed('👋 Rời phòng', 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
             flags: 4096
@@ -320,6 +349,13 @@ class MusicQueue {
     this.emptyRoomTimeout = setTimeout(() => {
       if (!this.mode247) {
         if (this.textChannel) {
+          logAction('MESSAGE_SEND', {
+            type: 'EMPTY_ROOM_NOTICE',
+            channelId: this.textChannel.id,
+            guildId: this.guild.id,
+            flags: 4096,
+            content: `Phong Voice khong con ai trong ${timeoutSeconds}s`
+          });
           this.textChannel.send({
             embeds: [createEmbed('👋 Rời phòng', `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
             flags: 4096
@@ -485,6 +521,12 @@ class MusicQueue {
               const isLastMessage = lastMessages && lastMessages.first()?.id === this.nowPlayingMessage.id;
 
               if (isLastMessage) {
+                logAction('MESSAGE_EDIT', {
+                  type: 'NOW_PLAYING_BANNER',
+                  channelId: this.textChannel.id,
+                  messageId: this.nowPlayingMessage.id,
+                  content: (banner.content || '').slice(0, 80)
+                });
                 await this.nowPlayingMessage.edit({
                   content: banner.content,
                   embeds: [],
@@ -492,6 +534,11 @@ class MusicQueue {
                 });
                 edited = true;
               } else {
+                logAction('MESSAGE_DELETE', {
+                  type: 'NOW_PLAYING_BANNER_OLD',
+                  channelId: this.textChannel.id,
+                  messageId: this.nowPlayingMessage.id
+                });
                 await this.nowPlayingMessage.delete().catch(() => {});
                 this.nowPlayingMessage = null;
               }
@@ -501,6 +548,13 @@ class MusicQueue {
           }
 
           if (!edited) {
+            logAction('MESSAGE_SEND', {
+              type: 'NOW_PLAYING_BANNER',
+              channelId: this.textChannel.id,
+              guildId: this.guild.id,
+              flags: 4096,
+              content: (banner.content || '').slice(0, 80)
+            });
             const msg = await this.textChannel.send({
               content: banner.content,
               components: banner.components,
@@ -515,6 +569,13 @@ class MusicQueue {
     } catch (error) {
       console.error(`[Play Error] ${this.currentSong.title}:`, error);
       if (this.textChannel) {
+        logAction('MESSAGE_SEND', {
+          type: 'PLAY_ERROR',
+          channelId: this.textChannel.id,
+          guildId: this.guild.id,
+          flags: 4096,
+          content: `Khong the phat bai: ${(error.message || '').slice(0, 60)}`
+        });
         this.textChannel.send({
           embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong.title}**: ${error.message}`)],
           flags: 4096

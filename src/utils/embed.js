@@ -8,6 +8,7 @@ const {
   Routes
 } = require('discord.js');
 const config = require('../config');
+const { logAction } = require('./debugLogger');
 
 /**
  * Định dạng mili-giây sang chuỗi Phút:Giây (MM:SS)
@@ -527,8 +528,13 @@ function createSettingsSelectMenu(settings) {
  */
 async function setVoiceChannelStatus(voiceChannel, statusText) {
   if (!voiceChannel || !voiceChannel.id || !voiceChannel.client?.rest) return;
+  const cleanText = (statusText || '').slice(0, 500);
+  logAction('VOICE_STATUS_UPDATE', {
+    source: 'embed.js',
+    channelId: voiceChannel.id,
+    status: cleanText || '(empty)'
+  });
   try {
-    const cleanText = (statusText || '').slice(0, 500);
     await voiceChannel.client.rest.put(Routes.channelVoiceStatus(voiceChannel.id), {
       body: { status: cleanText }
     });
@@ -542,6 +548,10 @@ async function setVoiceChannelStatus(voiceChannel, statusText) {
  */
 async function clearVoiceChannelStatus(voiceChannel) {
   if (!voiceChannel || !voiceChannel.id || !voiceChannel.client?.rest) return;
+  logAction('VOICE_STATUS_CLEAR', {
+    source: 'embed.js',
+    channelId: voiceChannel.id
+  });
   try {
     await voiceChannel.client.rest.put(Routes.channelVoiceStatus(voiceChannel.id), {
       body: { status: '' }

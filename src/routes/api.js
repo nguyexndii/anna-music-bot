@@ -4,6 +4,7 @@ const { verifyWebToken } = require('../utils/tokenHelper');
 const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
 const { getLyrics } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
+const { logAction } = require('../utils/debugLogger');
 
 module.exports = function createApiRouter(client) {
   const router = express.Router();
@@ -331,6 +332,13 @@ function getActiveWebUsers(guildId) {
             )
             .setThumbnail(targetTrack.thumbnail || null)
             .setFooter({ text: 'Anna Music Web Player' });
+          logAction('MESSAGE_SEND', {
+            type: 'WEB_PLAYER_NOTIFY',
+            channelId: notifyChannel.id,
+            guildId: guild.id,
+            flags: 4096,
+            content: `${isFirst ? 'playing' : 'queued'}: ${(targetTrack.title || '').slice(0, 60)}`
+          });
           notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).catch(() => {});
         }
       } catch (notifErr) {
