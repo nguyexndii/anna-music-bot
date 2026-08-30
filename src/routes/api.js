@@ -194,8 +194,12 @@ function getActiveWebUsers(guildId) {
           url: currentTrack.url,
           thumbnail: currentTrack.thumbnail,
           duration: currentTrack.duration,
-          artist: currentTrack.artist || 'Unknown',
-          requestedBy: currentTrack.requestedBy,
+          artist: currentTrack.artist && currentTrack.artist !== 'Unknown' 
+            ? currentTrack.artist 
+            : (currentTrack.title.includes(' - ') ? currentTrack.title.split(' - ')[0].trim() : (currentTrack.title.includes('|') ? currentTrack.title.split('|')[1].trim() : 'YouTube Music')),
+          requestedBy: currentTrack.requestedBy === 'Auto' || currentTrack.requestedBy === 'DJ AI (Gợi ý)' || currentTrack.requestedBy === 'Auto (24/7)'
+            ? 'Tự động phát 🎵'
+            : (currentTrack.requestedBy || 'Tự động phát 🎵'),
           requestedByAvatar: currentTrack.requestedByAvatar,
           isLive: currentTrack.isLive || false,
           is247: currentTrack.is247 || false,
@@ -207,8 +211,12 @@ function getActiveWebUsers(guildId) {
           url: t.url,
           thumbnail: t.thumbnail,
           duration: t.duration,
-          artist: t.artist || 'Unknown',
-          requestedBy: t.requestedBy,
+          artist: t.artist && t.artist !== 'Unknown' 
+            ? t.artist 
+            : (t.title.includes(' - ') ? t.title.split(' - ')[0].trim() : (t.title.includes('|') ? t.title.split('|')[1].trim() : 'YouTube Music')),
+          requestedBy: t.requestedBy === 'Auto' || t.requestedBy === 'DJ AI (Gợi ý)' || t.requestedBy === 'Auto (24/7)'
+            ? 'Tự động phát 🎵'
+            : (t.requestedBy || 'Tự động phát 🎵'),
           requestedByAvatar: t.requestedByAvatar
         })),
         voiceChannel: queue?.voiceChannel ? {
@@ -289,6 +297,12 @@ function getActiveWebUsers(guildId) {
       let targetTrack = null;
       if (track && track.url && track.title) {
         targetTrack = track;
+      } else if (track && (track.searchQuery || track.title)) {
+        const q = track.searchQuery || `${track.title} ${track.artist || ''}`.trim();
+        const searchResults = await searchTrack(q);
+        if (searchResults && searchResults.length > 0) {
+          targetTrack = searchResults[0];
+        }
       } else if (query) {
         const searchResults = await searchTrack(query);
         if (searchResults && searchResults.length > 0) {

@@ -229,7 +229,7 @@ class MusicQueue {
         console.log(`[Autoplay DJ AI] Phòng có ${humanMembers.size} người nghe, tiếp tục tìm bài tương tự sau "${lastSong.title}"...`);
         const relatedTrack = await getRelatedTrack(lastSong, this.guild.id, useAi);
         if (relatedTrack) {
-          relatedTrack.requestedBy = 'DJ AI (Gợi ý)';
+          relatedTrack.requestedBy = 'Tự động phát 🎵';
           this.songs.push(relatedTrack);
           await this.playNext();
           return;
@@ -763,7 +763,7 @@ class MusicQueue {
         const useAi = guildSettings.useAiAssistant !== false;
         const nextTrack = await getRelatedTrack(this.currentSong, this.guild.id, useAi);
         if (nextTrack) {
-          nextTrack.requestedBy = 'DJ AI (Gợi ý)';
+          nextTrack.requestedBy = 'Tự động phát 🎵';
           this.prefetchedSong = nextTrack;
           // Tải trước ngầm luồng âm thanh vào RAM
           this._preloadNextTrackResource();
