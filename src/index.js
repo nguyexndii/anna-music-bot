@@ -33,14 +33,18 @@ const {
 const { hasMusicPermission, isAllowedVoiceChannel } = require('./utils/permissionHelper');
 const { initLogger, logAction } = require('./utils/debugLogger');
 
-// 1. Khởi tạo Discord Client
+// 1. Khởi tạo Discord Client (Tắt triệt để ping/tít tít thông báo với allowedMentions)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
-  ]
+  ],
+  allowedMentions: {
+    parse: [],
+    repliedUser: false
+  }
 });
 
 initLogger(client);
@@ -195,7 +199,9 @@ client.on('messageCreate', async (message) => {
         content: `Chi duoc dung lenh tai #${guildSettings.musicChannelId}`
       });
       message.channel.send({
-        content: `⚠️ <@${message.author.id}>, bạn chỉ được phép dùng lệnh nhạc tại kênh <#${guildSettings.musicChannelId}>!`
+        content: `⚠️ <@${message.author.id}>, bạn chỉ được phép dùng lệnh nhạc tại kênh <#${guildSettings.musicChannelId}>!`,
+        allowedMentions: { users: [] },
+        flags: 4096
       }).then(warningMsg => {
         setTimeout(() => {
           logAction('MESSAGE_DELETE', {
