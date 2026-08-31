@@ -69,6 +69,14 @@ class MusicQueue {
     }
   }
 
+  _cleanupResource(resource) {
+    if (resource && typeof resource.destroy === 'function') {
+      try {
+        resource.destroy();
+      } catch (e) {}
+    }
+  }
+
   _initSettings() {
     const guildSettings = settingsManager.get(this.guild.id);
     this.mode247 = Boolean(guildSettings.mode247);
@@ -207,6 +215,7 @@ class MusicQueue {
     }
 
     this.currentSong = null;
+    this._cleanupResource(this.currentResource);
     this.currentResource = null;
 
     // 0. Nếu trong hàng chờ vẫn còn bài của người dùng -> Phát bài tiếp theo ngay
@@ -498,6 +507,9 @@ class MusicQueue {
         resource = await createResource(this.currentSong, crossfade);
       }
 
+      if (this.currentResource && this.currentResource !== resource) {
+        this._cleanupResource(this.currentResource);
+      }
       this.currentResource = resource;
 
       if (resource.volume) {
@@ -628,13 +640,15 @@ class MusicQueue {
     const seekSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
     console.log(`[MusicQueue Seek] Tua bài "${this.currentSong.title}" đến ${seekSeconds}s tại máy chủ ${this.guild.name}`);
 
-    // Hủy các timer chuyển bài / preload cũ
+    // Hủy các timer chuyển bài / preload cũ và dọn dẹp tiến trình con
     this.clearCrossfadeTimer();
+    this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
 
     const resource = await createResource(this.currentSong, 0, seekSeconds);
 
+    this._cleanupResource(this.currentResource);
     this.currentResource = resource;
     if (resource.volume) {
       resource.volume.setVolume(this.volume / 100);
@@ -677,6 +691,7 @@ class MusicQueue {
 
   skip() {
     this._skipRequested = true;
+    this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
     this.prefetchedSong = null;
@@ -724,8 +739,12 @@ class MusicQueue {
   stop() {
     this.isStopped = true;
     this.clearCrossfadeTimer();
+    this._cleanupResource(this.preloadedResource);
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
     this.songs = [];
     this.currentSong = null;
+    this._cleanupResource(this.currentResource);
     this.currentResource = null;
     this.player.stop(true);
     clearVoiceChannelStatus(this.voiceChannel);
@@ -785,8 +804,12 @@ class MusicQueue {
     this.clearEmptyRoomTimer();
     this.clear247IdleTimer();
     sessionManager.clearSession(this.guild.id);
+    this._cleanupResource(this.preloadedResource);
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
     this.songs = [];
     this.currentSong = null;
+    this._cleanupResource(this.currentResource);
     this.currentResource = null;
     this.player.stop(true);
     clearVoiceChannelStatus(this.voiceChannel);
@@ -845,6 +868,7 @@ class MusicQueue {
       const crossfade = guildSettings.crossfadeDuration || 0;
       const resource = await createResource(nextTrack, crossfade);
       if (resource) {
+        this._cleanupResource(this.preloadedResource);
         this.preloadedResource = resource;
         this.preloadedSongUrl = nextKey;
       }

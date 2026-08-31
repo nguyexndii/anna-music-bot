@@ -32,14 +32,14 @@ const SECRET_KEY = crypto.createHash('sha256').update(secretKeySource).digest();
  * Tạo Mã PIN 6 số và Token cho User khi gõ lệnh .web
  * @param {Object} userData - { userId, username, displayName, avatar, guildId, guildName }
  * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 2 phút)
- * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập HMAC (mặc định 12 tiếng)
+ * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập HMAC (mặc định 2 tiếng)
  * @returns {{ token: string, pin: string }}
  */
-function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 12) {
+function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2) {
   const pinExp = Date.now() + pinExpiryMinutes * 60 * 1000;
   const sessionExp = Date.now() + sessionExpiryHours * 60 * 60 * 1000;
 
-  // 1. Tạo mã PIN 6 số ngẫu nhiên (hiệu lực ngắn)
+  // 1. Tạo mã PIN 6 số ngẫu nhiên (hiệu lực ngắn: 2 phút)
   const pin = Math.floor(100000 + Math.random() * 900000).toString();
 
   const pinPayload = {
@@ -53,17 +53,49 @@ function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 1
     exp: pinExp
   };
 
-  // 2. Tạo HMAC session token (hiệu lực dài - dùng cho nút bấm)
-  const sessionPayload = { ...pinPayload, exp: sessionExp };
+  // 2. Tạo HMAC session token (hiệu lực 2 tiếng)
+  const sessionPayload = {
+    userId: String(userData.userId),
+    username: userData.username,
+    displayName: userData.displayName || userData.username,
+    avatar: userData.avatar,
+    guildId: String(userData.guildId),
+    guildName: userData.guildName || 'Server',
+    exp: sessionExp
+  };
   const base64Payload = Buffer.from(JSON.stringify(sessionPayload)).toString('base64url');
   const signature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
   const token = `${base64Payload}.${signature}`;
 
   // Lưu PIN vào store (ngắn hạn), Token lưu để HMAC fallback verify không cần store
-  tokenStore.set(pin, pinPayload);
+  tokenStore.set(pin, { ...pinPayload, sessionToken: token });
   tokenStore.set(token, sessionPayload);
 
   return { token, pin };
+}
+
+/**
+ * Tạo/Gia hạn một Session Token HMAC mới có thời hạn 2 giờ
+ * @param {Object} userData
+ * @param {number} sessionExpiryHours (mặc định 2 tiếng)
+ * @returns {string} HMAC Token
+ */
+function createSessionToken(userData, sessionExpiryHours = 2) {
+  const sessionExp = Date.now() + sessionExpiryHours * 60 * 60 * 1000;
+  const sessionPayload = {
+    userId: String(userData.userId),
+    username: userData.username,
+    displayName: userData.displayName || userData.username,
+    avatar: userData.avatar,
+    guildId: String(userData.guildId),
+    guildName: userData.guildName || 'Server',
+    exp: sessionExp
+  };
+  const base64Payload = Buffer.from(JSON.stringify(sessionPayload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
+  const token = `${base64Payload}.${signature}`;
+  tokenStore.set(token, sessionPayload);
+  return token;
 }
 
 /**
@@ -111,5 +143,6 @@ function verifyWebToken(tokenOrPin) {
 
 module.exports = {
   generateWebToken,
+  createSessionToken,
   verifyWebToken
 };

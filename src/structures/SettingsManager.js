@@ -9,6 +9,7 @@ const DEFAULT_GUILD_SETTINGS = {
   autoplay: true,              // Tự động phát bài tương tự khi hết hàng chờ
   musicChannelId: null,        // Kênh văn bản chỉ định (Khóa kênh lệnh)
   lockedVoiceChannelId: null,  // Kênh đàm thoại cố định (Khóa phòng voice)
+  logChannelId: null,          // Kênh văn bản ghi nhật ký hoạt động (Log Channel)
   djOnly: false,               // Bật/Tắt chế độ chỉ người có Role DJ mới được dùng lệnh
   djRoleId: null,              // ID của vai trò (Role) DJ được chỉ định
   emptyChannelTimeout: 60,     // Số giây chờ trước khi tự rời phòng nếu không có người

@@ -365,6 +365,7 @@ function createSettingsEmbed(guild, settings) {
   const autoplayText = settings.autoplay ? '`Bật`' : '`Tắt`';
   const voiceLockText = settings.lockedVoiceChannelId ? `<#${settings.lockedVoiceChannelId}>` : '`Mọi phòng`';
   const textLockText = settings.musicChannelId ? `<#${settings.musicChannelId}>` : '`Mọi kênh`';
+  const logChannelText = settings.logChannelId ? `<#${settings.logChannelId}>` : '`Tắt`';
   const djText = settings.djOnly
     ? (settings.djRoleId ? `<@&${settings.djRoleId}> (\`Bật\`)` : '`Bật (Cần Role DJ)`')
     : '`Tắt (Mọi người)`';
@@ -404,6 +405,11 @@ function createSettingsEmbed(guild, settings) {
       {
         name: 'Khóa kênh lệnh chat',
         value: `Cài đặt hiện tại: ${textLockText}`,
+        inline: true
+      },
+      {
+        name: 'Kênh nhật ký hoạt động (Log)',
+        value: `Cài đặt hiện tại: ${logChannelText}`,
         inline: true
       },
       {
@@ -480,6 +486,11 @@ function createSettingsSelectMenu(settings) {
         .setLabel('Khóa kênh văn bản dùng lệnh')
         .setDescription(`Chỉ nhận lệnh tại kênh chat chỉ định (Hiện tại: ${settings.musicChannelId ? 'ĐÃ KHÓA' : 'MỌI KÊNH'})`)
         .setValue('set_channel_lock')
+        .setEmoji(CUSTOM_EMOJIS.settings),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Kênh ghi nhật ký hoạt động (Log)')
+        .setDescription(`Ghi lại mọi hành động sửa/xóa/lệnh/voice (Hiện tại: ${settings.logChannelId ? 'ĐÃ BẬT' : 'TẮT'})`)
+        .setValue('set_log_channel')
         .setEmoji(CUSTOM_EMOJIS.settings),
       new StringSelectMenuOptionBuilder()
         .setLabel('Chế độ DJ (Cần Role mới phát được)')

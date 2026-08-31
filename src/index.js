@@ -31,7 +31,7 @@ const {
   clearVoiceChannelStatus
 } = require('./utils/embed');
 const { hasMusicPermission, isAllowedVoiceChannel } = require('./utils/permissionHelper');
-const { logAction } = require('./utils/debugLogger');
+const { initLogger, logAction } = require('./utils/debugLogger');
 
 // 1. Khởi tạo Discord Client
 const client = new Client({
@@ -42,6 +42,8 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+
+initLogger(client);
 
 client.commands = new Collection();
 client.aliases = new Collection();
@@ -144,6 +146,19 @@ client.once('clientReady', async () => {
     console.warn('[Session Sync Error]:', syncErr.message);
   }
 
+  // 🧹 Định kỳ dọn dẹp bộ nhớ RAM và giám sát tiến trình mỗi 5 phút
+  setInterval(() => {
+    try {
+      if (global.gc) {
+        global.gc();
+      }
+      const mem = process.memoryUsage();
+      const rssMB = Math.round(mem.rss / 1024 / 1024);
+      const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
+      console.log(`[Memory Monitor] RAM Sử dụng: RSS=${rssMB}MB | HeapUsed=${heapMB}MB`);
+    } catch (e) {}
+  }, 5 * 60 * 1000);
+
   console.log('✨ Anna Music Bot đã sẵn sàng nhận lệnh 24/7!');
 });
 
@@ -198,6 +213,13 @@ client.on('messageCreate', async (message) => {
 
   const command = client.commands.get(cmdName);
   try {
+    logAction('COMMAND_EXECUTE', {
+      guildId: message.guild.id,
+      channelId: message.channel.id,
+      userId: message.author.id,
+      user: message.author.tag,
+      command: `.${cmdName}${args.length > 0 ? ' ' + args.join(' ') : ''}`
+    });
     await command.execute(message, args);
   } catch (error) {
     console.error(`[Command Error] Lỗi khi chạy lệnh .${commandName}:`, error);
@@ -209,6 +231,40 @@ client.on('messageCreate', async (message) => {
     });
     message.reply({ embeds: [createErrorEmbed('Đã xảy ra lỗi khi thực thi lệnh này!')] }).catch(() => {});
   }
+});
+
+// Xử lý ghi nhận khi tin nhắn bị sửa (Message Update)
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  try {
+    if (!newMessage.guild || newMessage.author?.bot) return;
+    if (oldMessage.content === newMessage.content) return;
+    logAction('MESSAGE_EDIT', {
+      type: 'USER_MESSAGE_EDIT',
+      channelId: newMessage.channelId,
+      guildId: newMessage.guild.id,
+      userId: newMessage.author?.id,
+      user: newMessage.author?.tag,
+      messageId: newMessage.id,
+      oldContent: oldMessage.content || '',
+      newContent: newMessage.content || ''
+    });
+  } catch (e) {}
+});
+
+// Xử lý ghi nhận khi tin nhắn bị xóa (Message Delete)
+client.on('messageDelete', async (message) => {
+  try {
+    if (!message.guild || message.author?.id === client.user.id) return;
+    logAction('MESSAGE_DELETE', {
+      type: 'USER_MESSAGE_DELETE',
+      channelId: message.channelId,
+      guildId: message.guild.id,
+      userId: message.author?.id,
+      user: message.author?.tag,
+      messageId: message.id,
+      content: message.content || ''
+    });
+  } catch (e) {}
 });
 
 // Xử lý VoiceStateUpdate (Bot rời phòng, đổi phòng hoặc phòng trống)
@@ -463,6 +519,9 @@ client.on('interactionCreate', async (interaction) => {
       } else if (selectedValue === 'set_channel_lock') {
         const newChannel = currentSettings.musicChannelId ? null : interaction.channel.id;
         updatedSettings = settingsManager.update(guildId, { musicChannelId: newChannel });
+      } else if (selectedValue === 'set_log_channel') {
+        const newLogChannel = currentSettings.logChannelId ? null : interaction.channel.id;
+        updatedSettings = settingsManager.update(guildId, { logChannelId: newLogChannel });
       } else if (selectedValue === 'set_dj_only') {
         const newVal = !currentSettings.djOnly;
         updatedSettings = settingsManager.update(guildId, { djOnly: newVal });
@@ -534,9 +593,12 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.message.delete().catch(() => {});
       }
       const tab = customId.replace('help_tab_', '');
+      const isOwner = interaction.guild?.ownerId === interaction.user.id;
+      const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
+      const isAdmin = Boolean(isOwner || hasAdminPerm);
       const helpCommand = client.commands.get('help');
       if (helpCommand && helpCommand.createHelpMenu) {
-        const payload = helpCommand.createHelpMenu(tab);
+        const payload = helpCommand.createHelpMenu(tab, isAdmin);
         return interaction.update(payload);
       }
     }

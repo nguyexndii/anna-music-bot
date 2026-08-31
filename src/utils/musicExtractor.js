@@ -627,6 +627,41 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
   return null;
 }
 
+// Bộ quản lý tiến trình con (FFmpeg & yt-dlp) để chống tràn / rò rỉ RAM (Zombie processes)
+const activeProcesses = new Set();
+
+function registerProcess(proc) {
+  if (!proc) return;
+  activeProcesses.add(proc);
+  const cleanup = () => {
+    activeProcesses.delete(proc);
+  };
+  proc.on('exit', cleanup);
+  proc.on('close', cleanup);
+  proc.on('error', cleanup);
+}
+
+function killProcess(proc) {
+  if (!proc) return;
+  activeProcesses.delete(proc);
+  try {
+    if (!proc.killed) {
+      proc.kill('SIGKILL');
+    }
+  } catch (e) {}
+}
+
+function cleanupAllProcesses() {
+  for (const proc of activeProcesses) {
+    killProcess(proc);
+  }
+}
+
+// Tự động dọn dẹp tiến trình con khi Node.js process thoát
+process.on('exit', cleanupAllProcesses);
+process.on('SIGINT', () => { cleanupAllProcesses(); process.exit(); });
+process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
+
 /**
  * Tạo Discord AudioResource với yt-dlp-exec stdout pipe -> FFmpeg libopus
  * (Đảm bảo luồng phát liên tục, không bao giờ bị YouTube ngắt kết nối sau 10-20s)
@@ -656,6 +691,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
       ffmpegLocation: ffmpeg,
       noWarnings: true
     });
+    if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
   } catch (err) {
     console.warn(`[yt-dlp stream init error for ${targetUrl}]:`, err.message);
   }
@@ -676,6 +712,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
           ffmpegLocation: ffmpeg,
           noWarnings: true
         });
+        if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
       }
     } catch (fbErr) {
       console.warn('[Auto-Recovery stream failed]:', fbErr.message);
@@ -710,6 +747,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   );
 
   const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+  registerProcess(ffmpegProcess);
 
   // Ngăn chặn lỗi write EPIPE khi một trong hai tiến trình kết thúc trước
   ffmpegProcess.stdin.on('error', (err) => {
@@ -742,7 +780,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   ffmpegProcess.on('close', () => {
     try {
       ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-      ytdlpStreamProcess.kill();
+      killProcess(ytdlpStreamProcess);
     } catch (e) {}
   });
 
@@ -757,11 +795,18 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     inlineVolume: true
   });
 
-  ffmpegProcess.stdout.on('close', () => {
+  // Gắn hàm destroy() chủ động để dọn dẹp tiến trình con ngay lập tức khi skip / đổi bài
+  resource.destroy = () => {
     try {
-      if (!ffmpegProcess.killed) ffmpegProcess.kill();
-      if (!ytdlpStreamProcess.killed) ytdlpStreamProcess.kill();
+      ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
     } catch (e) {}
+    killProcess(ffmpegProcess);
+    killProcess(ytdlpStreamProcess);
+  };
+
+  ffmpegProcess.stdout.on('close', () => {
+    killProcess(ffmpegProcess);
+    killProcess(ytdlpStreamProcess);
   });
 
   return resource;

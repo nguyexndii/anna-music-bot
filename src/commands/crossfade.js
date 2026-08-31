@@ -4,9 +4,18 @@ const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 module.exports = {
   name: 'crossfade',
   aliases: ['fade', 'hoam'],
-  description: 'Cài đặt thời gian hòa âm chuyển bài mượt mà (Fade-in)',
+  description: 'Cài đặt thời gian hòa âm chuyển bài mượt mà (Fade-in - Chỉ Quản trị viên)',
   async execute(message, args) {
     if (!message.guild) return;
+
+    // Chỉ Admin máy chủ mới được phép cấu hình Crossfade
+    const isOwner = message.guild.ownerId === message.author.id;
+    const hasAdminPerm = message.member?.permissions.has('Administrator') || message.member?.permissions.has('ManageGuild');
+    if (!isOwner && !hasAdminPerm) {
+      return message.reply({
+        embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt Hòa âm (Crossfade)!')]
+      });
+    }
 
     if (!args[0]) {
       const current = settingsManager.get(message.guild.id);

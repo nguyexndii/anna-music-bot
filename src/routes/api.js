@@ -1,6 +1,6 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { verifyWebToken } = require('../utils/tokenHelper');
+const { verifyWebToken, createSessionToken } = require('../utils/tokenHelper');
 const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
 const { getLyrics } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
@@ -93,8 +93,12 @@ module.exports = function createApiRouter(client) {
       ? Boolean(userVoice && userVoice.id === guildSettings.lockedVoiceChannelId)
       : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
 
+    // Cấp Session Token 2 tiếng (2h)
+    const sessionToken = createSessionToken(user, 2);
+
     return res.json({
       success: true,
+      token: sessionToken,
       user: {
         ...user,
         isAdmin,
@@ -491,7 +495,7 @@ module.exports = function createApiRouter(client) {
     }
 
     // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER
-    const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'settings', 'updateSettings'];
+    const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'setLogChannel', 'settings', 'updateSettings'];
     if (serverSettingActions.includes(action)) {
       const isAdmin = await checkIsAdmin(guildId, user.userId);
       if (!isAdmin) {
@@ -524,6 +528,14 @@ module.exports = function createApiRouter(client) {
     }
 
     try {
+      logAction('WEB_PLAYER_ACTION', {
+        guildId,
+        userId: user.userId,
+        user: `${user.displayName || user.username} 🌐`,
+        action,
+        value: typeof value === 'object' ? JSON.stringify(value) : value
+      });
+
       let resultMessage = '';
       switch (action) {
         case 'pause':
@@ -630,6 +642,19 @@ module.exports = function createApiRouter(client) {
           resultMessage = newVal ? 'Đã BẬT Tự Động Phát Bài Tương Tự (Autoplay)' : 'Đã TẮT Tự Động Phát';
           break;
         }
+        case 'setLogChannel': {
+          const newLogChannel = value || null;
+          settingsManager.update(guildId, { logChannelId: newLogChannel });
+          resultMessage = newLogChannel ? `Đã cấu hình Kênh Nhật Ký (Log Channel): <#${newLogChannel}>` : 'Đã TẮT Kênh Nhật Ký hoạt động';
+          break;
+        }
+        case 'updateSettings': {
+          if (typeof value === 'object' && value !== null) {
+            settingsManager.update(guildId, value);
+            resultMessage = 'Đã lưu cài đặt máy chủ thành công!';
+          }
+          break;
+        }
         case 'remove':
         case 'removeBatch': {
           if (Array.isArray(value)) {
@@ -658,6 +683,60 @@ module.exports = function createApiRouter(client) {
     } catch (err) {
       console.error('[API Action Error]:', err);
       return res.status(500).json({ success: false, error: err.message || 'Lỗi thao tác' });
+    }
+  });
+
+  // 6. Lấy Cài đặt & Danh sách Kênh của Máy chủ
+  router.get('/guilds/:guildId/settings', requireAuth, async (req, res) => {
+    const { guildId } = req.params;
+    const user = req.user;
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      return res.status(404).json({ success: false, error: 'Không tìm thấy máy chủ' });
+    }
+
+    const isAdmin = await checkIsAdmin(guildId, user.userId);
+    const settings = settingsManager.get(guildId);
+
+    const textChannels = guild.channels.cache
+      .filter(c => c.isTextBased && c.isTextBased())
+      .map(c => ({ id: c.id, name: c.name, type: c.type }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return res.json({
+      success: true,
+      isAdmin,
+      settings,
+      textChannels
+    });
+  });
+
+  // 7. Cập nhật Cài đặt Máy chủ từ Web Dashboard
+  router.post('/guilds/:guildId/settings', requireAuth, async (req, res) => {
+    const { guildId } = req.params;
+    const user = req.user;
+
+    const isAdmin = await checkIsAdmin(guildId, user.userId);
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'PERMISSION_DENIED',
+        error: 'Chỉ Quản trị viên mới được phép thay đổi cài đặt máy chủ!'
+      });
+    }
+
+    try {
+      const updated = settingsManager.update(guildId, req.body);
+      logAction('WEB_PLAYER_ACTION', {
+        guildId,
+        userId: user.userId,
+        user: `${user.displayName || user.username} 🌐`,
+        action: 'UPDATE_SETTINGS_DASHBOARD',
+        content: JSON.stringify(req.body)
+      });
+      return res.json({ success: true, settings: updated, message: 'Đã lưu cài đặt thành công!' });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'Lỗi khi lưu cài đặt' });
     }
   });
 
