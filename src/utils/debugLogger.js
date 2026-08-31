@@ -100,10 +100,24 @@ async function processLogQueue() {
   while (logQueue.length > 0) {
     const item = logQueue.shift();
     try {
-      if (item.targetChannel && item.targetChannel.isTextBased && item.targetChannel.isTextBased()) {
-        await item.targetChannel.send({ embeds: [item.embed], flags: 4096 }).catch(() => {});
+      let targetChannel = item.targetChannel;
+      if (!targetChannel && item.logChannelId && discordClient) {
+        targetChannel = discordClient.channels.cache.get(item.logChannelId)
+          || await discordClient.channels.fetch(item.logChannelId).catch(() => null);
       }
-    } catch (e) {}
+
+      if (targetChannel && targetChannel.isTextBased && targetChannel.isTextBased()) {
+        await targetChannel.send({
+          embeds: [item.embed],
+          flags: 4096,
+          allowedMentions: { parse: [] }
+        }).catch((sendErr) => {
+          console.warn('[LogChannel Send Warning]:', sendErr.message);
+        });
+      }
+    } catch (e) {
+      console.warn('[LogQueue Error]:', e.message);
+    }
     // Chờ 100ms giữa các tin nhắn log để tránh rate limit
     await new Promise(res => setTimeout(res, 100));
   }
@@ -148,7 +162,6 @@ function logAction(action, details = {}) {
     if (details.channelId === logChannelId) return;
 
     const logChannel = discordClient.channels.cache.get(logChannelId);
-    if (!logChannel || !logChannel.isTextBased()) return;
 
     const info = getActionInfo(action, details);
     const timeFormatted = `<t:${Math.floor(Date.now() / 1000)}:T>`;
@@ -187,7 +200,7 @@ function logAction(action, details = {}) {
     embed.setDescription(desc.trim());
 
     // Thêm vào hàng đợi gửi log an toàn
-    logQueue.push({ targetChannel: logChannel, embed });
+    logQueue.push({ logChannelId, targetChannel: logChannel || null, embed });
     processLogQueue();
 
   } catch (err) {
