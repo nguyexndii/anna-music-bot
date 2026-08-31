@@ -703,11 +703,23 @@ module.exports = function createApiRouter(client) {
       .map(c => ({ id: c.id, name: c.name, type: c.type }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    const voiceChannels = guild.channels.cache
+      .filter(c => c.isVoiceBased && c.isVoiceBased())
+      .map(c => ({ id: c.id, name: c.name, type: c.type }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const roles = guild.roles.cache
+      .filter(r => r.id !== guildId)
+      .map(r => ({ id: r.id, name: r.name, color: r.hexColor }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
     return res.json({
       success: true,
       isAdmin,
       settings,
-      textChannels
+      textChannels,
+      voiceChannels,
+      roles
     });
   });
 
