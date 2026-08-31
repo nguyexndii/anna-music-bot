@@ -366,6 +366,7 @@ function createSettingsEmbed(guild, settings) {
   const voiceLockText = settings.lockedVoiceChannelId ? `<#${settings.lockedVoiceChannelId}>` : '`Mọi phòng`';
   const textLockText = settings.musicChannelId ? `<#${settings.musicChannelId}>` : '`Mọi kênh`';
   const logChannelText = settings.logChannelId ? `<#${settings.logChannelId}>` : '`Tắt`';
+  const voiceStatusText = settings.updateVoiceStatus !== false ? '`Bật`' : '`Tắt`';
   const djText = settings.djOnly
     ? (settings.djRoleId ? `<@&${settings.djRoleId}> (\`Bật\`)` : '`Bật (Cần Role DJ)`')
     : '`Tắt (Mọi người)`';
@@ -410,6 +411,11 @@ function createSettingsEmbed(guild, settings) {
       {
         name: 'Kênh nhật ký hoạt động (Log)',
         value: `Cài đặt hiện tại: ${logChannelText}`,
+        inline: true
+      },
+      {
+        name: 'Trạng thái kênh Voice (Voice Status)',
+        value: `Cài đặt hiện tại: ${voiceStatusText}`,
         inline: true
       },
       {
@@ -489,9 +495,14 @@ function createSettingsSelectMenu(settings) {
         .setEmoji(CUSTOM_EMOJIS.settings),
       new StringSelectMenuOptionBuilder()
         .setLabel('Kênh ghi nhật ký hoạt động (Log)')
-        .setDescription(`Ghi lại mọi hành động sửa/xóa/lệnh/voice (Hiện tại: ${settings.logChannelId ? 'ĐÃ BẬT' : 'TẮT'})`)
+        .setDescription(`Ghi toàn bộ nhật ký bot vào kênh Discord (Hiện tại: ${settings.logChannelId ? 'BẬT' : 'TẮT'})`)
         .setValue('set_log_channel')
         .setEmoji(CUSTOM_EMOJIS.settings),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Trạng thái kênh Voice (Voice Status)')
+        .setDescription(`Bật/Tắt đổi tên bài hát trên kênh Voice (Hiện tại: ${settings.updateVoiceStatus !== false ? 'BẬT' : 'TẮT'})`)
+        .setValue('set_voice_status')
+        .setEmoji(CUSTOM_EMOJIS.volume),
       new StringSelectMenuOptionBuilder()
         .setLabel('Chế độ DJ (Cần Role mới phát được)')
         .setDescription(`Chỉ người có vai trò DJ mới dùng được lệnh (Hiện tại: ${settings.djOnly ? 'BẬT' : 'TẮT'})`)
@@ -540,6 +551,12 @@ const _lastVoiceStatus = new Map();
  */
 async function setVoiceChannelStatus(voiceChannel, statusText) {
   if (!voiceChannel || !voiceChannel.id || !voiceChannel.client?.rest) return;
+  const guildId = voiceChannel.guild?.id || voiceChannel.guildId;
+  if (guildId) {
+    const settingsManager = require('../structures/SettingsManager');
+    const settings = settingsManager.get(guildId);
+    if (settings && settings.updateVoiceStatus === false) return;
+  }
   const cleanText = (statusText || '').slice(0, 500);
   if (_lastVoiceStatus.get(voiceChannel.id) === cleanText) return;
   _lastVoiceStatus.set(voiceChannel.id, cleanText);

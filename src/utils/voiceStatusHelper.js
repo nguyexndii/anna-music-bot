@@ -1,11 +1,21 @@
 const { Routes } = require('discord.js');
 const { logAction } = require('./debugLogger');
 
+const settingsManager = require('../structures/SettingsManager');
+
 /**
  * Cập nhật trạng thái phòng Voice (Voice Channel Status) hiển thị bài hát đang phát
  */
 async function setVoiceChannelStatus(channel, statusText = '') {
   if (!channel || !channel.client || !channel.id) return;
+  const guildId = channel.guild?.id || channel.guildId;
+  if (guildId) {
+    const settings = settingsManager.get(guildId);
+    if (settings && settings.updateVoiceStatus === false) {
+      return; // Đã tắt cập nhật trạng thái kênh voice theo cài đặt của Admin
+    }
+  }
+
   const trimmed = (statusText || '').slice(0, 100);
   logAction('VOICE_STATUS_UPDATE', {
     source: 'voiceStatusHelper',

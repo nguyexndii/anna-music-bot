@@ -567,6 +567,12 @@ client.on('interactionCreate', async (interaction) => {
       } else if (selectedValue === 'set_announce') {
         const newVal = !currentSettings.announceSongs;
         updatedSettings = settingsManager.update(guildId, { announceSongs: newVal });
+      } else if (selectedValue === 'set_voice_status') {
+        const newVal = !(currentSettings.updateVoiceStatus !== false);
+        updatedSettings = settingsManager.update(guildId, { updateVoiceStatus: newVal });
+        if (!newVal && queue?.voiceChannel) {
+          clearVoiceChannelStatus(queue.voiceChannel).catch(() => {});
+        }
       } else if (selectedValue === 'set_reset') {
         updatedSettings = settingsManager.reset(guildId);
         if (queue) {

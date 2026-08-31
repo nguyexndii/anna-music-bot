@@ -16,6 +16,7 @@ const DEFAULT_GUILD_SETTINGS = {
   crossfadeDuration: 3,        // Số giây hòa âm / Fade-in mượt mà khi chuyển bài (0 = tắt)
   defaultVolume: 80,           // Âm lượng mặc định (%)
   announceSongs: true,         // Bật/Tắt thông báo Embed bài đang phát
+  updateVoiceStatus: true,     // Bật/Tắt tự động đổi trạng thái dòng chữ trên kênh Voice
   loopMode: 'off',             // Chế độ lặp: 'off' (Tắt) | 'song' (Lặp bài) | 'queue' (Lặp hàng chờ)
   useAiAssistant: true         // Bật/Tắt Trợ lý DJ Gemini AI để gợi ý và tìm nhạc thông minh
 };
