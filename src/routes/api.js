@@ -781,5 +781,26 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  router.get('/lyrics', async (req, res) => {
+    const title = req.query.title || req.query.q;
+    const artist = req.query.artist || '';
+    if (!title) {
+      return res.json({ success: false, error: 'Thiếu tham số title' });
+    }
+    try {
+      const lyricsData = await getLyrics(title, artist);
+      return res.json({
+        success: true,
+        title,
+        artist,
+        lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
+        syncedLyrics: lyricsData?.syncedLyrics || null,
+        synced: !!lyricsData?.syncedLyrics
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'Lỗi lấy lời bài hát' });
+    }
+  });
+
   return router;
 };
