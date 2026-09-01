@@ -291,8 +291,8 @@ module.exports = function createApiRouter(client) {
           artist: t.artist || (t.title.includes(' - ') ? t.title.split(' - ')[0].trim() : 'YouTube Music')
         })),
         hasPrevious: Boolean(queue?.previousSongs && queue.previousSongs.length > 0),
-        history: (historyManager.getRecent ? historyManager.getRecent(guildId, 10) : (historyManager.getHistory(guildId) || []).slice(0, 10)) || [],
-        topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 6) : []) || [],
+        history: (historyManager.getRecent ? historyManager.getRecent(guildId, 30) : (historyManager.getHistory(guildId) || []).slice(0, 30)) || [],
+        topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 8) : []) || [],
         recentPlaylists: (playlistHistoryManager.getPlaylists ? playlistHistoryManager.getPlaylists(guildId, 6) : []) || [],
         favorites: caller?.userId ? ((await favoriteManager.getFavorites(caller.userId)) || []) : []
       }
