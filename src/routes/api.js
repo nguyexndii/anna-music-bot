@@ -231,7 +231,11 @@ module.exports = function createApiRouter(client) {
           url: currentTrack.url,
           thumbnail: currentTrack.thumbnail,
           duration: currentTrack.duration,
-          durationMs: currentTrack.durationMs || (queue.currentResource?.playbackDuration || 0),
+          durationMs: currentTrack.durationMs || 0,
+          playbackDurationMs: (queue?.currentResource && typeof queue.currentResource.playbackDuration === 'number')
+            ? queue.currentResource.playbackDuration
+            : (currentTrack.startTime ? Math.max(0, Date.now() - currentTrack.startTime) : 0),
+          serverTime: Date.now(),
           is247: currentTrack.is247 || currentTrack.requestedBy === 'Auto (24/7)',
           isLive: currentTrack.isLive || currentTrack.duration === 'LIVE',
           requestedBy: currentTrack.requestedBy === 'Auto' || currentTrack.requestedBy === 'DJ AI (Gợi ý)' || currentTrack.requestedBy === 'Auto (24/7)'

@@ -486,9 +486,6 @@ class MusicQueue {
     const conn = await this.connect();
 
     this.currentSong = this.songs.shift();
-    if (this.currentSong) {
-      this.currentSong.startTime = Date.now();
-    }
     this.paused = false;
 
     try {
@@ -521,6 +518,9 @@ class MusicQueue {
       }
 
       this.player.play(resource);
+      if (this.currentSong) {
+        this.currentSong.startTime = Date.now();
+      }
 
       // Cập nhật trạng thái kênh Voice (Voice Channel Status)
       if (this.currentSong.requestedBy === 'Auto (24/7)') {
