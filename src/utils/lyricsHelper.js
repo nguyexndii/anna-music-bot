@@ -1,4 +1,15 @@
-const fetch = globalThis.fetch || require('node-fetch');
+﻿const fetch = globalThis.fetch || require('node-fetch');
+
+function normalizeStr(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function cleanSearchVariants(rawTitle, rawArtist = '') {
   if (!rawTitle) return [];
@@ -6,7 +17,7 @@ function cleanSearchVariants(rawTitle, rawArtist = '') {
   // Remove common YouTube clutter
   let clean = rawTitle
     .replace(/\[(?:official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat).*?\]/gi, '')
-    .replace(/\((?:official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat).*?\)/gi, '')
+    .replace(/\((?:official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?).*?\)/gi, '')
     .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?)/gi, '')
     .replace(/4k|hd|1080p/gi, '')
     .replace(/\s+/g, ' ')
@@ -14,52 +25,42 @@ function cleanSearchVariants(rawTitle, rawArtist = '') {
 
   const queries = [];
 
-  // 1. Check for separators: - , | , : , /
-  const separatorParts = clean.split(/\s*(?:[-|:/\\])\s*/).map(s => s.trim()).filter(Boolean);
+  // Require whitespace around separator to not break names like B-Ray or T-Ara
+  const separatorParts = clean.split(/\s+[-|:/\\–—]\s+/).map(s => s.trim()).filter(Boolean);
 
   if (separatorParts.length >= 2) {
-    const p1 = separatorParts[0];
-    const p2 = separatorParts[1];
+    const p1 = separatorParts[0].replace(/prod\.?\s*by.*/gi, '').trim();
+    const p2 = separatorParts[1].replace(/prod\.?\s*by.*/gi, '').trim();
 
-    // Case: Artist - Song (very common in VN/US music)
-    queries.push({ track: p2, artist: p1, titleKey: p2 });
-    // Case: Song - Artist
-    queries.push({ track: p1, artist: p2, titleKey: p1 });
+    // 1. Direct get: Artist = p1, Track = p2
+    queries.push({ track: p2, artist: p1, expectedTrack: p2, expectedArtist: p1 });
+    // 2. Direct get: Track = p1, Artist = p2
+    queries.push({ track: p1, artist: p2, expectedTrack: p1, expectedArtist: p2 });
 
-    queries.push({ q: `${p1} ${p2}` });
-    queries.push({ q: `${p2} ${p1}` });
+    queries.push({ q: `${p1} ${p2}`, expectedTrack: p2, expectedArtist: p1 });
+    queries.push({ q: `${p2} ${p1}`, expectedTrack: p1, expectedArtist: p2 });
   }
 
-  // 2. Check for ft. / feat. / x / &
+  // Check for ft. / feat. / x / &
   const ftMatch = clean.match(/(.*?)\s+(?:ft\.?|feat\.?|x|&)\s+(.*)/i);
   if (ftMatch) {
     const mainPart = ftMatch[1].trim();
     const guestPart = ftMatch[2].trim();
-    queries.push({ track: mainPart, artist: guestPart, titleKey: mainPart });
-    queries.push({ q: `${mainPart} ${guestPart}` });
-    queries.push({ q: mainPart });
+    queries.push({ track: mainPart, artist: guestPart, expectedTrack: mainPart, expectedArtist: guestPart });
+    queries.push({ q: `${mainPart} ${guestPart}`, expectedTrack: mainPart, expectedArtist: guestPart });
+    queries.push({ q: mainPart, expectedTrack: mainPart });
   }
 
-  // 3. Clean version with parenthesis removed
-  const noParens = clean.replace(/\(.*?\)/g, '').trim();
-  if (noParens && noParens !== clean) {
-    queries.push({ q: noParens });
+  // Provided artist if not YouTube Music / unknown
+  if (rawArtist && rawArtist !== 'Unknown' && rawArtist !== 'YouTube Music' && !rawArtist.includes('WxLF') && !rawArtist.includes('Topic')) {
+    queries.push({ track: clean, artist: rawArtist, expectedTrack: clean, expectedArtist: rawArtist });
+    queries.push({ q: `${clean} ${rawArtist}`, expectedTrack: clean, expectedArtist: rawArtist });
   }
 
-  // 4. Raw clean query
-  queries.push({ q: clean });
+  // Raw clean query fallback (must match track title)
+  queries.push({ q: clean, expectedTrack: clean });
 
-  // 5. With provided artist if available
-  if (rawArtist && rawArtist !== 'Unknown' && rawArtist !== 'YouTube Music') {
-    queries.push({ track: clean, artist: rawArtist });
-    queries.push({ q: `${clean} ${rawArtist}` });
-    if (separatorParts.length >= 2) {
-      queries.push({ track: separatorParts[0], artist: rawArtist });
-      queries.push({ track: separatorParts[1], artist: rawArtist });
-    }
-  }
-
-  // Deduplicate queries
+  // Deduplicate
   const seen = new Set();
   const deduped = [];
   for (const item of queries) {
@@ -71,6 +72,31 @@ function cleanSearchVariants(rawTitle, rawArtist = '') {
   }
 
   return deduped;
+}
+
+function isValidMatch(match, expectedTrack, expectedArtist) {
+  if (!match || !match.trackName) return false;
+  const mTrack = normalizeStr(match.trackName);
+  const mArtist = normalizeStr(match.artistName);
+
+  if (expectedTrack) {
+    const eTrack = normalizeStr(expectedTrack);
+    const trackOk = mTrack.includes(eTrack) || eTrack.includes(mTrack);
+    if (!trackOk) {
+      const eWords = eTrack.split(' ').filter(w => w.length >= 2);
+      if (eWords.length === 0) return false;
+      const matchWords = eWords.filter(w => mTrack.includes(w));
+      if (matchWords.length < Math.min(2, eWords.length)) return false;
+    }
+  }
+
+  if (expectedArtist) {
+    const eArtist = normalizeStr(expectedArtist);
+    const artistOk = mArtist.includes(eArtist) || eArtist.includes(mArtist) || mTrack.includes(eArtist);
+    if (!artistOk) return false; // Prevent foreign unrelated artists
+  }
+
+  return true;
 }
 
 function parseLrc(lrcString) {
@@ -96,9 +122,23 @@ function parseLrc(lrcString) {
 /**
  * Lấy lời bài hát chuẩn xác từ LRCLIB (Spotify / Apple Music database)
  */
-async function fetchLyrics(rawTitle, artist = '') {
+async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
   if (!rawTitle) return null;
+
+  // Lofi / Chill / Instrumental check
+  const lowerTitle = rawTitle.toLowerCase();
+  if (lowerTitle.includes('lofi') || lowerTitle.includes('lo-fi') || lowerTitle.includes('chillhop') || lowerTitle.includes('beats to') || lowerTitle.includes('không lời') || lowerTitle.includes('instrumental') || lowerTitle.includes('jazz hip-hop') || lowerTitle.includes('coffee shop')) {
+    return {
+      title: rawTitle,
+      artist: artist || 'Lofi Chill',
+      isLofi: true,
+      lyrics: 'Bản nhạc Lofi tự động không lời ☕',
+      syncedLyrics: null
+    };
+  }
+
   const variants = cleanSearchVariants(rawTitle, artist);
+  const targetDurationSec = durationMs ? durationMs / 1000 : 0;
 
   for (const item of variants) {
     try {
@@ -111,14 +151,24 @@ async function fetchLyrics(rawTitle, artist = '') {
         if (res.ok) {
           const match = await res.json();
           if (match && (match.plainLyrics || match.syncedLyrics)) {
-            const lyrics = match.plainLyrics || match.syncedLyrics;
-            const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
-            return {
-              title: match.trackName || rawTitle,
-              artist: match.artistName || artist || '',
-              lyrics: cleanLyrics,
-              syncedLyrics: parseLrc(match.syncedLyrics)
-            };
+            if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+              const lyrics = match.plainLyrics || match.syncedLyrics;
+              const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+
+              let autoOffsetMs = 0;
+              if (targetDurationSec > 0 && match.duration && (targetDurationSec - match.duration > 8) && (targetDurationSec - match.duration < 120)) {
+                autoOffsetMs = Math.round((targetDurationSec - match.duration) * 1000);
+              }
+
+              return {
+                title: match.trackName || rawTitle,
+                artist: match.artistName || artist || '',
+                lyrics: cleanLyrics,
+                syncedLyrics: parseLrc(match.syncedLyrics),
+                duration: match.duration,
+                autoOffsetMs
+              };
+            }
           }
         }
       }
@@ -135,17 +185,26 @@ async function fetchLyrics(rawTitle, artist = '') {
           const data = await res.json();
           const results = Array.isArray(data) ? data : [data];
           if (results.length > 0) {
-            // Find first result with lyrics
             for (const match of results) {
               const lyrics = match?.syncedLyrics || match?.plainLyrics;
               if (lyrics && lyrics.trim().length > 10) {
-                const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
-                return {
-                  title: match.trackName || rawTitle,
-                  artist: match.artistName || artist || '',
-                  lyrics: cleanLyrics,
-                  syncedLyrics: parseLrc(match.syncedLyrics)
-                };
+                if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+                  const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+
+                  let autoOffsetMs = 0;
+                  if (targetDurationSec > 0 && match.duration && (targetDurationSec - match.duration > 8) && (targetDurationSec - match.duration < 120)) {
+                    autoOffsetMs = Math.round((targetDurationSec - match.duration) * 1000);
+                  }
+
+                  return {
+                    title: match.trackName || rawTitle,
+                    artist: match.artistName || artist || '',
+                    lyrics: cleanLyrics,
+                    syncedLyrics: parseLrc(match.syncedLyrics),
+                    duration: match.duration,
+                    autoOffsetMs
+                  };
+                }
               }
             }
           }
@@ -161,5 +220,3 @@ module.exports = {
   fetchLyrics,
   getLyrics: fetchLyrics
 };
-
-

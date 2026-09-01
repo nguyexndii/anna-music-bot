@@ -767,11 +767,13 @@ module.exports = function createApiRouter(client) {
     }
 
     try {
-      const lyricsData = await getLyrics(currentTrack.title, currentTrack.artist);
+      const lyricsData = await getLyrics(currentTrack.title, currentTrack.artist, currentTrack.durationMs || 0);
       return res.json({
         success: true,
         title: currentTrack.title,
         artist: currentTrack.artist,
+        isLofi: !!lyricsData?.isLofi,
+        autoOffsetMs: lyricsData?.autoOffsetMs || 0,
         lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics
@@ -784,15 +786,18 @@ module.exports = function createApiRouter(client) {
   router.get('/lyrics', async (req, res) => {
     const title = req.query.title || req.query.q;
     const artist = req.query.artist || '';
+    const durationMs = parseInt(req.query.duration, 10) || 0;
     if (!title) {
       return res.json({ success: false, error: 'Thiếu tham số title' });
     }
     try {
-      const lyricsData = await getLyrics(title, artist);
+      const lyricsData = await getLyrics(title, artist, durationMs);
       return res.json({
         success: true,
         title,
         artist,
+        isLofi: !!lyricsData?.isLofi,
+        autoOffsetMs: lyricsData?.autoOffsetMs || 0,
         lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics
@@ -801,6 +806,7 @@ module.exports = function createApiRouter(client) {
       return res.status(500).json({ success: false, error: 'Lỗi lấy lời bài hát' });
     }
   });
+
 
   return router;
 };
