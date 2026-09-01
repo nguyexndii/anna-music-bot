@@ -9,6 +9,7 @@ const historyManager = require('../structures/HistoryManager');
 const { logAction } = require('../utils/debugLogger');
 
 const playlistHistoryManager = require('../structures/PlaylistHistoryManager');
+const ytdlp = require('yt-dlp-exec');
 
 module.exports = function createApiRouter(client) {
   const router = express.Router();
@@ -217,6 +218,7 @@ module.exports = function createApiRouter(client) {
         name: guild.name,
         icon: guild.iconURL({ dynamic: true }) || null
       },
+      settings: guildSettings,
       activeWebUsers,
       player: {
         isPlaying: queue ? queue.isPlaying : false,
@@ -226,6 +228,8 @@ module.exports = function createApiRouter(client) {
         mode247: queue ? queue.mode247 : Boolean(guildSettings.mode247),
         autoplay: queue ? (guildSettings.autoplay !== false) : (guildSettings.autoplay !== false),
         lyricsSync: queue ? (guildSettings.lyricsSync !== false) : true,
+        enableCinemaMode: guildSettings.enableCinemaMode !== false,
+        settings: guildSettings,
         current: currentTrack ? {
           title: currentTrack.title,
           artist: (() => {

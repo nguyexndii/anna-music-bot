@@ -21,6 +21,16 @@ const settingsManager = require('./SettingsManager');
 const historyManager = require('./HistoryManager');
 const sessionManager = require('./SessionManager');
 const { logAction } = require('../utils/debugLogger');
+const { hasEnoughMemoryToPreload, logMemoryUsage } = require('../utils/systemMonitor');
+
+function parseDurationToSeconds(str) {
+  if (!str || typeof str !== 'string' || str.toLowerCase().includes('live')) return 0;
+  const parts = str.split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
 
 class MusicQueue {
   constructor(guild, textChannel, voiceChannel, manager) {
@@ -36,6 +46,7 @@ class MusicQueue {
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
     this._isPreloading = false;
+    this.preloadTimer = null;
     this.currentResource = null;
     this.connection = null;
 
@@ -60,6 +71,13 @@ class MusicQueue {
 
     this._initSettings();
     this._setupPlayerEvents();
+  }
+
+  clearPreloadTimer() {
+    if (this.preloadTimer) {
+      clearTimeout(this.preloadTimer);
+      this.preloadTimer = null;
+    }
   }
 
   clearCrossfadeTimer() {
@@ -193,6 +211,7 @@ class MusicQueue {
 
   async _handleSongEnd() {
     this.clearCrossfadeTimer();
+    this.clearPreloadTimer();
     if (this.isDestroyed || this.isStopped) return;
     const lastSong = this.currentSong;
     const wasExplicitSkip = Boolean(this._skipRequested);
@@ -429,7 +448,7 @@ class MusicQueue {
     if (!this.currentSong && this.player.state.status === AudioPlayerStatus.Idle) {
       await this.playNext();
     } else {
-      this._preloadNextTrackResource();
+      this.schedulePreload();
     }
   }
 
@@ -453,7 +472,7 @@ class MusicQueue {
     if (!this.currentSong && this.player.state.status === AudioPlayerStatus.Idle) {
       await this.playNext();
     } else {
-      this._preloadNextTrackResource();
+      this.schedulePreload();
     }
   }
 
@@ -478,11 +497,37 @@ class MusicQueue {
     return settings.autoplay !== false;
   }
 
+  /**
+   * Lập lịch tải trước bài tiếp theo khi bài hiện tại còn 20 giây cuối
+   * Giúp tiết kiệm RAM tối đa cho VPS 2GB (tránh chạy đồng thời 2 tiến trình yt-dlp & ffmpeg)
+   */
+  schedulePreload() {
+    this.clearPreloadTimer();
+    if (!this.currentSong || this.isDestroyed || this.isStopped) return;
+
+    const is247 = Boolean(this.currentSong.is247 || this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.isLive);
+    const totalSec = parseDurationToSeconds(this.currentSong.duration);
+
+    if (is247 || totalSec <= 0) {
+      this._preloadNextTrackResource();
+      return;
+    }
+
+    // Với bài hát có thời lượng: Kích hoạt khi còn 20 giây cuối
+    const triggerAfterMs = Math.max(1000, (totalSec - 20) * 1000);
+    this.preloadTimer = setTimeout(() => {
+      this.preloadTimer = null;
+      this._prefetchAutoplayTrack();
+      this._preloadNextTrackResource();
+    }, triggerAfterMs);
+  }
+
   async playNext() {
     if (this.songs.length === 0) return;
 
     this.isStopped = false;
     this.isDestroyed = false;
+    this.clearPreloadTimer();
     const conn = await this.connect();
 
     this.currentSong = this.songs.shift();
@@ -520,7 +565,8 @@ class MusicQueue {
       this.player.play(resource);
       if (this.currentSong) {
         this.currentSong.startTime = Date.now();
-        
+        logMemoryUsage(`Track Start: ${(this.currentSong.title || '').slice(0, 25)}`);
+
         // Ghi nhận ngay vào lịch sử bài hát khi bắt đầu phát!
         if (!this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
           if (!this.history.includes(this.currentSong.url)) {
@@ -538,9 +584,8 @@ class MusicQueue {
         setVoiceChannelStatus(this.voiceChannel, `🎶 ${this.currentSong.title}`);
       }
 
-      // Kích hoạt Tải trước (Pre-fetch & Pre-buffer) bài tiếp theo ngầm để khi hết bài là nối liền lập tức
-      this._prefetchAutoplayTrack();
-      this._preloadNextTrackResource();
+      // Lập lịch tải trước (Preload) ở 20s cuối bài để bảo vệ RAM VPS
+      this.schedulePreload();
 
       // Gửi hoặc Cập nhật Banner bài đang phát (Chỉ gửi khi có người nghe order/DJ AI, KHÔNG spam khi phát Lofi 24/7 nền)
       const is247Lofi = this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247;
@@ -651,6 +696,7 @@ class MusicQueue {
 
     // Hủy các timer chuyển bài / preload cũ và dọn dẹp tiến trình con
     this.clearCrossfadeTimer();
+    this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
@@ -672,6 +718,7 @@ class MusicQueue {
     }
 
     this.player.play(resource);
+    this.schedulePreload();
     return seekSeconds;
   }
 
@@ -688,18 +735,17 @@ class MusicQueue {
 
   togglePause() {
     if (this.paused) {
-      this.player.unpause();
-      this.paused = false;
+      this.resume();
       return false;
     } else {
-      this.player.pause();
-      this.paused = true;
+      this.pause();
       return true;
     }
   }
 
   skip() {
     this._skipRequested = true;
+    this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
@@ -713,6 +759,7 @@ class MusicQueue {
     const prevSong = this.previousSongs.pop();
     if (!prevSong) return false;
 
+    this.clearPreloadTimer();
     if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
       this.songs.unshift(this.currentSong);
     }
@@ -729,6 +776,7 @@ class MusicQueue {
     const targetTrack = this.songs.splice(idx, 1)[0];
     if (!targetTrack) return false;
 
+    this.clearPreloadTimer();
     this.songs.unshift(targetTrack);
     this.skip();
     return true;
@@ -748,6 +796,7 @@ class MusicQueue {
   stop() {
     this.isStopped = true;
     this.clearCrossfadeTimer();
+    this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
     this.preloadedSongUrl = null;
@@ -809,6 +858,7 @@ class MusicQueue {
     this.isDestroyed = true;
     this.isStopped = true;
     this.clearCrossfadeTimer();
+    this.clearPreloadTimer();
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.clear247IdleTimer();
@@ -871,7 +921,13 @@ class MusicQueue {
     const nextKey = nextTrack.url || nextTrack.searchQuery;
     if (this.preloadedResource && this.preloadedSongUrl === nextKey) return;
 
+    // RAM Guard: Kiểm tra hệ thống có đủ RAM trống không trước khi spawn tiến trình nặng
+    if (!hasEnoughMemoryToPreload()) {
+      return;
+    }
+
     this._isPreloading = true;
+    logMemoryUsage(`Preload Start: ${(nextTrack.title || '').slice(0, 25)}`);
     try {
       const guildSettings = settingsManager.get(this.guild.id);
       const crossfade = guildSettings.crossfadeDuration || 0;
@@ -880,9 +936,10 @@ class MusicQueue {
         this._cleanupResource(this.preloadedResource);
         this.preloadedResource = resource;
         this.preloadedSongUrl = nextKey;
+        logMemoryUsage(`Preload Done: ${(nextTrack.title || '').slice(0, 25)}`);
       }
     } catch (e) {
-      // Bỏ qua lỗi preload, playNext sẽ tự tạo lại
+      // Bỏ qua lỗi preload, playNext sẽ tự tạo lại on-demand
     } finally {
       this._isPreloading = false;
     }

@@ -740,14 +740,17 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   }
 
-  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe
+  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe (Tối ưu memory với client android)
   let ytdlpStreamProcess = null;
   try {
     ytdlpStreamProcess = ytdlp.exec(targetUrl, {
       output: '-',
       format: 'bestaudio/best',
       ffmpegLocation: ffmpeg,
-      noWarnings: true
+      extractorArgs: 'youtube:player_client=android',
+      noPlaylist: true,
+      noWarnings: true,
+      preferFreeFormats: true
     });
     if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
   } catch (err) {
@@ -768,7 +771,10 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
           output: '-',
           format: 'bestaudio/best',
           ffmpegLocation: ffmpeg,
-          noWarnings: true
+          extractorArgs: 'youtube:player_client=android',
+          noPlaylist: true,
+          noWarnings: true,
+          preferFreeFormats: true
         });
         if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
       }
