@@ -1,47 +1,44 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { generateWebToken } = require('../utils/tokenHelper');
 const { createErrorEmbed } = require('../utils/embed');
 const { isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const settingsManager = require('../structures/SettingsManager');
+const { createContext } = require('../utils/commandHelper');
 const config = require('../config');
-
-// Helper gửi thông báo tự động xóa sau delayMs (mặc định 7s)
-function sendTemp(message, payload, delayMs = 7000) {
-  message.reply(payload).then(msg => {
-    setTimeout(() => {
-      msg.delete().catch(() => {});
-      if (message.deletable) message.delete().catch(() => {});
-    }, delayMs);
-  }).catch(() => {});
-}
 
 module.exports = {
   name: 'web',
-  description: 'Mở giao diện Web Player điều khiển âm nhạc',
-  usage: '',
-  async execute(message, args) {
-    const client = message.client;
-    const guild = message.guild;
-    const member = message.member;
-    const author = message.author;
+  description: 'Open Web Player music controller interface and get PIN',
+  data: new SlashCommandBuilder()
+    .setName('web')
+    .setDescription('Open Web Player music controller interface and get PIN')
+    .setDescriptionLocalizations({
+      vi: 'Mở giao diện Web Player điều khiển âm nhạc và lấy mã PIN kết nối'
+    }),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    const client = ctx.client;
+    const guild = ctx.guild;
+    const member = ctx.member;
+    const author = ctx.user;
 
-    // 1. Kiểm tra User có trong kênh Voice hay không (Tự động xóa sau 7s)
+    // 1. Kiểm tra User có trong kênh Voice hay không
     const userVoice = member?.voice?.channel;
     if (!userVoice) {
-      return sendTemp(message, {
+      return ctx.sendTemp({
         embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
       }, 7000);
     }
 
-    // 2. Kiểm tra kênh Voice bị khóa (Tự động xóa sau 7s)
+    // 2. Kiểm tra kênh Voice bị khóa
     const guildSettings = settingsManager.get(guild.id);
     if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(member)) {
-      return sendTemp(message, {
+      return ctx.sendTemp({
         embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)]
       }, 7000);
     }
 
-    // 3. Tạo User data và Magic Token (kèm PIN 6 số)
+    // 3. Tạo User data và Magic Token (kèm PIN 6 số, hiệu lực 10 phút, session 24h)
     const isAdmin = member?.permissions?.has('Administrator') || member?.permissions?.has('ManageGuild') || guild.ownerId === author.id;
     const avatarUrl = author.displayAvatarURL({ dynamic: true, size: 256 });
     const userData = {
@@ -54,7 +51,7 @@ module.exports = {
       isAdmin: Boolean(isAdmin)
     };
 
-    const { token, pin } = generateWebToken(userData, 2); // Hiệu lực 2 phút
+    const { token, pin } = generateWebToken(userData, 10, 24);
     const baseUrl = (process.env.WEB_URL || 'https://anna-music-bot-ui.pages.dev').replace(/\/$/, '');
     const webUrl = `${baseUrl}/?token=${token}&guild=${guild.id}`;
 
@@ -68,7 +65,7 @@ module.exports = {
         `🔊 **Kênh Voice:** <#${userVoice.id}>\n` +
         `🔑 **Mã PIN:** \`${pin}\``
       )
-      .setFooter({ text: 'Mã PIN có hiệu lực trong 2 phút' });
+      .setFooter({ text: 'Mã PIN có hiệu lực trong 10 phút' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -79,12 +76,14 @@ module.exports = {
     );
 
     try {
-      const replyMsg = await message.reply({ embeds: [embed], components: [row], flags: 4096 });
-      // Tự động xóa tin nhắn bot và tin nhắn .web sau đúng 2 phút khi mã PIN hết hạn
-      setTimeout(() => {
-        replyMsg.delete().catch(() => {});
-        if (message.deletable) message.delete().catch(() => {});
-      }, 2 * 60 * 1000);
+      const replyMsg = await ctx.reply({ embeds: [embed], components: [row], flags: 4096 });
+      // Tự động xóa tin nhắn prefix sau 10 phút khi mã PIN hết hạn (nếu là prefix message)
+      if (replyMsg && !ctx.isInteraction) {
+        setTimeout(() => {
+          replyMsg.delete().catch(() => {});
+          if (ctx.message?.deletable) ctx.message.delete().catch(() => {});
+        }, 10 * 60 * 1000);
+      }
     } catch (err) {
       console.error('[Web Command Error]:', err);
     }

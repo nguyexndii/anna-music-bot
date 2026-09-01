@@ -93,8 +93,8 @@ module.exports = function createApiRouter(client) {
       ? Boolean(userVoice && userVoice.id === guildSettings.lockedVoiceChannelId)
       : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
 
-    // Cấp Session Token 2 tiếng (2h)
-    const sessionToken = createSessionToken(user, 2);
+    // Cấp Session Token 24 tiếng (24h)
+    const sessionToken = createSessionToken(user, 24);
 
     return res.json({
       success: true,

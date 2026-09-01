@@ -378,11 +378,18 @@ function createSettingsEmbed(guild, settings) {
 
   const aiText = settings.useAiAssistant !== false ? '`Bật`' : '`Tắt`';
 
+  const languageText = settings.language === 'vi' ? '`Tiếng Việt (VI)`' : '`English (EN)`';
+
   const embed = new EmbedBuilder()
     .setTitle(`Bảng Cài Đặt Âm Nhạc — ${guild.name}`)
     .setDescription('Chọn một mục từ danh sách **Dropdown** bên dưới để thay đổi cài đặt nhanh chóng:')
     .setColor('#5865F2')
     .addFields(
+      {
+        name: 'Ngôn ngữ hiển thị (Language)',
+        value: `Cài đặt hiện tại: ${languageText}`,
+        inline: true
+      },
       {
         name: 'Chế độ Auto (Tự động phát nhạc)',
         value: `Cài đặt hiện tại: ${aiText}`,
@@ -468,6 +475,11 @@ function createSettingsSelectMenu(settings) {
     .setCustomId('menu_settings')
     .setPlaceholder('Chọn một cài đặt bên dưới để thay đổi...')
     .addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Ngôn ngữ hiển thị (Language)')
+        .setDescription(`Chuyển đổi Tiếng Việt / English (Hiện tại: ${settings.language === 'vi' ? 'Tiếng Việt' : 'English'})`)
+        .setValue('set_language')
+        .setEmoji('🌐'),
       new StringSelectMenuOptionBuilder()
         .setLabel('Chế độ Auto (Tự động phát nhạc)')
         .setDescription(`Tự động tìm và nối tiếp bài hát cùng vibe (Hiện tại: ${settings.useAiAssistant !== false ? 'BẬT' : 'TẮT'})`)

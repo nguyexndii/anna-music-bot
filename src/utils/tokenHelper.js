@@ -29,17 +29,26 @@ if (!secretKeySource) {
 const SECRET_KEY = crypto.createHash('sha256').update(secretKeySource).digest();
 
 /**
- * Tạo Mã PIN 6 số và Token cho User khi gõ lệnh .web
+ * Tạo Mã PIN 6 số và Token cho User khi gõ lệnh /web hoặc .web
  * @param {Object} userData - { userId, username, displayName, avatar, guildId, guildName }
- * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 2 phút)
- * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập HMAC (mặc định 2 tiếng)
+ * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 10 phút)
+ * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập HMAC (mặc định 24 tiếng)
  * @returns {{ token: string, pin: string }}
  */
-function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2) {
+function generateWebToken(userData, pinExpiryMinutes = 10, sessionExpiryHours = 24) {
+  const userIdStr = String(userData.userId);
+
+  // 0. Vô hiệu hóa (xóa) toàn bộ mã PIN và Token cũ của user này trước khi tạo mới
+  for (const [key, val] of tokenStore.entries()) {
+    if (val && String(val.userId) === userIdStr) {
+      tokenStore.delete(key);
+    }
+  }
+
   const pinExp = Date.now() + pinExpiryMinutes * 60 * 1000;
   const sessionExp = Date.now() + sessionExpiryHours * 60 * 60 * 1000;
 
-  // 1. Tạo mã PIN 6 số ngẫu nhiên (hiệu lực ngắn: 2 phút)
+  // 1. Tạo mã PIN 6 số ngẫu nhiên mới (hiệu lực 10 phút)
   const pin = Math.floor(100000 + Math.random() * 900000).toString();
 
   const pinPayload = {
@@ -53,7 +62,7 @@ function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2
     exp: pinExp
   };
 
-  // 2. Tạo HMAC session token (hiệu lực 2 tiếng)
+  // 2. Tạo HMAC session token (hiệu lực 24 tiếng)
   const sessionPayload = {
     userId: String(userData.userId),
     username: userData.username,
@@ -67,7 +76,7 @@ function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2
   const signature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
   const token = `${base64Payload}.${signature}`;
 
-  // Lưu PIN vào store (ngắn hạn), Token lưu để HMAC fallback verify không cần store
+  // Lưu PIN vào store (10 phút), Token lưu để HMAC fallback verify không cần store
   tokenStore.set(pin, { ...pinPayload, sessionToken: token });
   tokenStore.set(token, sessionPayload);
 
@@ -75,12 +84,12 @@ function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2
 }
 
 /**
- * Tạo/Gia hạn một Session Token HMAC mới có thời hạn 2 giờ
+ * Tạo/Gia hạn một Session Token HMAC mới có thời hạn 24 giờ
  * @param {Object} userData
- * @param {number} sessionExpiryHours (mặc định 2 tiếng)
+ * @param {number} sessionExpiryHours (mặc định 24 tiếng)
  * @returns {string} HMAC Token
  */
-function createSessionToken(userData, sessionExpiryHours = 2) {
+function createSessionToken(userData, sessionExpiryHours = 24) {
   const sessionExp = Date.now() + sessionExpiryHours * 60 * 60 * 1000;
   const sessionPayload = {
     userId: String(userData.userId),

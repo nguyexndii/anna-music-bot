@@ -3,6 +3,7 @@ const {
   GatewayIntentBits,
   Collection,
   ActivityType,
+  Events,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -111,14 +112,22 @@ const serverPort = process.env.PORT && process.env.PORT !== '3005' ? Number(proc
 startServer(serverPort);
 
 // 4. Sự kiện khi Bot sẵn sàng
-client.once('clientReady', async () => {
+client.once(Events.ClientReady, async () => {
   console.log(`🚀 [Discord Bot Ready] Đăng nhập thành công: ${client.user.tag}`);
   logAction('SET_ACTIVITY', {
     type: 'Listening',
-    text: 'o_O 🫵 | .h'
+    text: 'o_O 🫵 | /help'
   });
-  client.user.setActivity('ò_Ó 🫵 | .h', { type: ActivityType.Listening });
+  client.user.setActivity('ò_Ó 🫵 | /help', { type: ActivityType.Listening });
   await connectDatabase();
+
+  // Đăng ký Slash Commands tự động lên Discord REST API
+  try {
+    const { deploySlashCommands } = require('./deploy-commands');
+    await deploySlashCommands(client);
+  } catch (deployErr) {
+    console.warn('[Auto-Deploy Slash Commands Error]:', deployErr.message);
+  }
 
   // 🔄 Tự động khôi phục kết nối các phòng Voice 24/7 khi bot khởi động lại / sau khi mất kết nối
   try {
@@ -166,76 +175,25 @@ client.once('clientReady', async () => {
   console.log('✨ Anna Music Bot đã sẵn sàng nhận lệnh 24/7!');
 });
 
-// Xử lý Lệnh tin nhắn (Có kiểm tra khóa kênh chat & tự xóa tin nhắn cảnh báo)
+// Ghi log tin nhắn của người dùng trong kênh voice / kênh âm nhạc hoặc có đính kèm
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith(config.prefix)) return;
 
-  const args = message.content.slice(config.prefix.length).trim().split(/ +/);
-  const commandName = args.shift().toLowerCase();
-
-  const cmdName = client.commands.has(commandName) ? commandName : client.aliases.get(commandName);
-  if (!cmdName) return;
-
-  // Kiểm tra khóa kênh lệnh âm nhạc (Admin luôn được phép dùng ở mọi kênh)
-  const isOwnerOrAdmin = message.author.id === message.guild.ownerId || message.member?.permissions.has('Administrator') || message.member?.permissions.has('ManageGuild');
+  const isVoiceText = message.channel.isVoiceBased?.() || message.channel.type === 2;
   const guildSettings = settingsManager.get(message.guild.id);
-  if (!isOwnerOrAdmin && guildSettings.musicChannelId && message.channel.id !== guildSettings.musicChannelId) {
-    if (cmdName !== 'setchannel' && cmdName !== 'caidat') {
-      logAction('MESSAGE_DELETE', {
-        type: 'WRONG_CHANNEL_CMD',
-        channelId: message.channel.id,
-        messageId: message.id,
-        guildId: message.guild.id
-      });
-      message.delete().catch(() => {});
+  const isMusicChan = guildSettings.musicChannelId && message.channel.id === guildSettings.musicChannelId;
 
-      logAction('MESSAGE_SEND', {
-        type: 'WRONG_CHANNEL_WARNING',
-        channelId: message.channel.id,
-        guildId: message.guild.id,
-        mentions: true,
-        flags: 'none',
-        content: `Chi duoc dung lenh tai #${guildSettings.musicChannelId}`
-      });
-      message.channel.send({
-        content: `⚠️ <@${message.author.id}>, bạn chỉ được phép dùng lệnh nhạc tại kênh <#${guildSettings.musicChannelId}>!`,
-        allowedMentions: { users: [] },
-        flags: 4096
-      }).then(warningMsg => {
-        setTimeout(() => {
-          logAction('MESSAGE_DELETE', {
-            type: 'WARNING_MSG_AUTO',
-            channelId: message.channel.id,
-            messageId: warningMsg.id
-          });
-          warningMsg.delete().catch(() => {});
-        }, 5000);
-      }).catch(() => {});
-
-      return;
-    }
-  }
-
-  const command = client.commands.get(cmdName);
-  try {
-    logAction('COMMAND_EXECUTE', {
+  if (isVoiceText || isMusicChan || message.attachments.size > 0) {
+    const attachmentUrls = message.attachments.map(a => a.url);
+    logAction('MESSAGE_USER_SEND', {
       guildId: message.guild.id,
       channelId: message.channel.id,
       userId: message.author.id,
       user: message.author.tag,
-      command: `.${cmdName}${args.length > 0 ? ' ' + args.join(' ') : ''}`
+      content: message.content,
+      attachments: attachmentUrls,
+      avatar: message.author.displayAvatarURL({ dynamic: true })
     });
-    await command.execute(message, args);
-  } catch (error) {
-    console.error(`[Command Error] Lỗi khi chạy lệnh .${commandName}:`, error);
-    logAction('MESSAGE_REPLY', {
-      type: 'COMMAND_ERROR',
-      channelId: message.channel.id,
-      guildId: message.guild.id,
-      content: 'Da xay ra loi khi thuc thi lenh nay!'
-    });
-    message.reply({ embeds: [createErrorEmbed('Đã xảy ra lỗi khi thực thi lệnh này!')] }).catch(() => {});
   }
 });
 
@@ -323,31 +281,127 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   }
 
   // 3. Xử lý phòng trống (không còn người nghe)
-  if (!queue || !queue.voiceChannel) return;
+  if (queue && queue.voiceChannel) {
+    const botVoiceChannel = guild.channels.cache.get(queue.voiceChannel.id);
+    if (botVoiceChannel) {
+      const humanMembers = botVoiceChannel.members.filter(m => !m.user.bot);
+      const guildSettings = settingsManager.get(guild.id);
 
-  const botVoiceChannel = guild.channels.cache.get(queue.voiceChannel.id);
-  if (!botVoiceChannel) return;
+      if (humanMembers.size === 0) {
+        logAction('VOICE_STATE_UPDATE', {
+          event: 'ROOM_EMPTY',
+          guildId: guild.id,
+          channelId: queue.voiceChannel.id,
+          userId: newState.id
+        });
+        queue.startEmptyRoomTimer(guildSettings.emptyChannelTimeout || 60);
+      } else {
+        logAction('VOICE_STATE_UPDATE', {
+          event: 'ROOM_NOT_EMPTY',
+          guildId: guild.id,
+          channelId: queue.voiceChannel.id,
+          humanCount: humanMembers.size,
+          userId: newState.id
+        });
+        queue.clearEmptyRoomTimer();
+      }
+    }
+  }
 
-  const humanMembers = botVoiceChannel.members.filter(m => !m.user.bot);
-  const guildSettings = settingsManager.get(guild.id);
+  // 4. Log chi tiết hoạt động của User trong phòng Voice (Ai vào, ra, đổi phòng, stream, cam, mic)
+  const member = newState.member || oldState.member;
+  if (member && !member.user.bot) {
+    const userTag = member.user.tag;
+    const userId = member.user.id;
+    const avatar = member.user.displayAvatarURL({ dynamic: true });
 
-  if (humanMembers.size === 0) {
-    logAction('VOICE_STATE_UPDATE', {
-      event: 'ROOM_EMPTY',
-      guildId: guild.id,
-      channelId: queue.voiceChannel.id,
-      userId: newState.id
-    });
-    queue.startEmptyRoomTimer(guildSettings.emptyChannelTimeout || 60);
-  } else {
-    logAction('VOICE_STATE_UPDATE', {
-      event: 'ROOM_NOT_EMPTY',
-      guildId: guild.id,
-      channelId: queue.voiceChannel.id,
-      humanCount: humanMembers.size,
-      userId: newState.id
-    });
-    queue.clearEmptyRoomTimer();
+    // A. User tham gia phòng Voice
+    if (!oldState.channelId && newState.channelId) {
+      logAction('VOICE_USER_JOIN', {
+        guildId: guild.id,
+        channelId: newState.channelId,
+        userId: userId,
+        user: userTag,
+        avatar: avatar
+      });
+    }
+    // B. User rời khỏi phòng Voice
+    else if (oldState.channelId && !newState.channelId) {
+      logAction('VOICE_USER_LEAVE', {
+        guildId: guild.id,
+        channelId: oldState.channelId,
+        userId: userId,
+        user: userTag,
+        avatar: avatar
+      });
+    }
+    // C. User chuyển phòng Voice
+    else if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+      logAction('VOICE_USER_MOVE', {
+        guildId: guild.id,
+        oldChannelId: oldState.channelId,
+        newChannelId: newState.channelId,
+        userId: userId,
+        user: userTag,
+        avatar: avatar
+      });
+    }
+
+    // D. User bật/tắt chia sẻ màn hình (Stream)
+    if (!oldState.streaming && newState.streaming) {
+      logAction('VOICE_USER_STREAM', {
+        guildId: guild.id,
+        channelId: newState.channelId,
+        userId: userId,
+        user: userTag,
+        status: `Bắt đầu chia sẻ màn hình trong <#${newState.channelId}>`,
+        avatar: avatar
+      });
+    } else if (oldState.streaming && !newState.streaming) {
+      logAction('VOICE_USER_STREAM', {
+        guildId: guild.id,
+        channelId: newState.channelId || oldState.channelId,
+        userId: userId,
+        user: userTag,
+        status: `Đã dừng chia sẻ màn hình`,
+        avatar: avatar
+      });
+    }
+
+    // E. User bật/tắt Camera
+    if (!oldState.selfVideo && newState.selfVideo) {
+      logAction('VOICE_USER_VIDEO', {
+        guildId: guild.id,
+        channelId: newState.channelId,
+        userId: userId,
+        user: userTag,
+        status: `Đã bật Camera trong <#${newState.channelId}>`,
+        avatar: avatar
+      });
+    } else if (oldState.selfVideo && !newState.selfVideo) {
+      logAction('VOICE_USER_VIDEO', {
+        guildId: guild.id,
+        channelId: newState.channelId || oldState.channelId,
+        userId: userId,
+        user: userTag,
+        status: `Đã tắt Camera`,
+        avatar: avatar
+      });
+    }
+
+    // F. User Mute / Deafen
+    if ((oldState.selfMute !== newState.selfMute || oldState.selfDeaf !== newState.selfDeaf) && (newState.channelId || oldState.channelId)) {
+      const muteStatus = newState.selfMute ? 'Tắt Mic (Muted)' : 'Mở Mic (Unmuted)';
+      const deafStatus = newState.selfDeaf ? 'Tắt Tai nghe (Deafened)' : 'Mở Tai nghe (Undeafened)';
+      logAction('VOICE_USER_MUTE_DEAF', {
+        guildId: guild.id,
+        channelId: newState.channelId || oldState.channelId,
+        userId: userId,
+        user: userTag,
+        status: `${muteStatus} • ${deafStatus}`,
+        avatar: avatar
+      });
+    }
   }
 });
 
@@ -362,9 +416,51 @@ client.on('guildDelete', async (guild) => {
   }
 });
 
-// Xử lý Tương tác (Nút bấm, Menu Dropdown, Modal thêm bài hát)
+// Xử lý Tương tác (Slash Commands, Nút bấm, Menu Dropdown, Modal thêm bài hát)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.guild) return;
+
+  // 0. Xử lý Slash Commands (Chat Input)
+  if (interaction.isChatInputCommand()) {
+    const commandName = interaction.commandName;
+    const command = client.commands.get(commandName) || client.commands.get(client.aliases.get(commandName));
+    if (!command) return;
+
+    // Kiểm tra kênh văn bản nhận lệnh
+    const guildSettings = settingsManager.get(interaction.guild.id);
+    if (guildSettings.musicChannelId && guildSettings.musicChannelId !== interaction.channelId) {
+      const isOwner = interaction.guild.ownerId === interaction.user.id;
+      const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
+      if (!isOwner && !hasAdminPerm) {
+        return interaction.reply({
+          content: `⚠️ Bot chỉ nhận lệnh trong kênh <#${guildSettings.musicChannelId}>!`,
+          flags: 64
+        });
+      }
+    }
+
+    logAction('SLASH_COMMAND', {
+      guildId: interaction.guild.id,
+      channelId: interaction.channelId,
+      userId: interaction.user.id,
+      user: interaction.user.tag,
+      command: `/${commandName}`,
+      avatar: interaction.user.displayAvatarURL({ dynamic: true })
+    });
+
+    try {
+      await command.execute(interaction);
+    } catch (err) {
+      console.error(`[Slash Command Error - /${commandName}]:`, err);
+      const errMsg = `Đã xảy ra lỗi khi thực thi lệnh: ${err.message}`;
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: errMsg, embeds: [] }).catch(() => {});
+      } else {
+        await interaction.reply({ content: errMsg, flags: 64 }).catch(() => {});
+      }
+    }
+    return;
+  }
 
   // 1. Xử lý Popup Modal Thêm bài hát (Hỗ trợ cả Playlist tối đa 20 bài)
   if (interaction.isModalSubmit()) {
@@ -495,7 +591,10 @@ client.on('interactionCreate', async (interaction) => {
 
       let updatedSettings = {};
 
-      if (selectedValue === 'set_ai') {
+      if (selectedValue === 'set_language') {
+        const newLang = currentSettings.language === 'en' ? 'vi' : 'en';
+        updatedSettings = settingsManager.update(guildId, { language: newLang });
+      } else if (selectedValue === 'set_ai') {
         const newVal = !(currentSettings.useAiAssistant !== false);
         updatedSettings = settingsManager.update(guildId, { useAiAssistant: newVal });
       } else if (selectedValue === 'set_247') {

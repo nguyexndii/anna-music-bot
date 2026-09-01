@@ -25,6 +25,55 @@ function initLogger(client) {
 function getActionInfo(action, details = {}) {
   const type = details.type || details.event || '';
   
+  if (action === 'VOICE_USER_JOIN') {
+    return {
+      title: '🟢 Tham Gia Phòng Voice (Voice Join)',
+      color: 0x57F287,
+      desc: details.user ? `**${details.user}** đã vào phòng Voice` : 'Người dùng vào phòng Voice'
+    };
+  }
+  if (action === 'VOICE_USER_LEAVE') {
+    return {
+      title: '🔴 Rời Khỏi Phòng Voice (Voice Leave)',
+      color: 0xED4245,
+      desc: details.user ? `**${details.user}** đã rời phòng Voice` : 'Người dùng rời phòng Voice'
+    };
+  }
+  if (action === 'VOICE_USER_MOVE') {
+    return {
+      title: '🔀 Chuyển Phòng Voice (Voice Move)',
+      color: 0xFEE75C,
+      desc: details.user ? `**${details.user}** đã chuyển phòng Voice` : 'Người dùng đổi phòng Voice'
+    };
+  }
+  if (action === 'VOICE_USER_STREAM') {
+    return {
+      title: '📺 Chia Sẻ Màn Hình / Stream (Screen Share)',
+      color: 0x9B59B6,
+      desc: details.status || 'Bắt đầu chia sẻ màn hình'
+    };
+  }
+  if (action === 'VOICE_USER_VIDEO') {
+    return {
+      title: '📷 Camera Video (Webcam)',
+      color: 0x3498DB,
+      desc: details.status || 'Bật/tắt camera video'
+    };
+  }
+  if (action === 'VOICE_USER_MUTE_DEAF') {
+    return {
+      title: '🎙️ Trạng Thái Mic / Tai Nghe',
+      color: 0x7289DA,
+      desc: details.status || 'Thay đổi trạng thái Mic / Tai nghe'
+    };
+  }
+  if (action === 'MESSAGE_USER_SEND') {
+    return {
+      title: '💬 Tin Nhắn Trên Kênh (Channel Message)',
+      color: 0x5865F2,
+      desc: details.user ? `Người gửi: **${details.user}**` : 'Tin nhắn mới'
+    };
+  }
   if (action === 'MESSAGE_EDIT') {
     return {
       title: '✏️ Sửa Tin Nhắn (Message Edit)',
@@ -46,7 +95,7 @@ function getActionInfo(action, details = {}) {
       desc: details.type ? `Loại: \`${details.type}\`` : 'Bot gửi phản hồi / thông báo'
     };
   }
-  if (action === 'COMMAND_EXECUTE') {
+  if (action === 'COMMAND_EXECUTE' || action === 'SLASH_COMMAND') {
     return {
       title: '⚡ Thực Thi Lệnh (Command Execute)',
       color: 0x5865F2,
@@ -55,14 +104,14 @@ function getActionInfo(action, details = {}) {
   }
   if (action === 'VOICE_STATE_UPDATE') {
     return {
-      title: '🔊 Thay Đổi Voice (Voice State Update)',
+      title: '🔊 Thay Đổi Trạng Thái Voice (Voice State Update)',
       color: 0x9B59B6,
-      desc: details.event ? `Sự kiện: \`${details.event}\`` : 'Thay đổi trạng thái phòng Voice'
+      desc: details.event ? `Trạng thái: \`${details.event}\`` : 'Thay đổi trạng thái phòng Voice'
     };
   }
   if (action === 'VOICE_STATUS_UPDATE' || action === 'VOICE_STATUS_CLEAR') {
     return {
-      title: '📡 Trạng Thái Voice (Voice Channel Status)',
+      title: '📡 Trạng Thái Kênh Voice (Channel Status)',
       color: 0x3498DB,
       desc: details.status ? `Trạng thái: **${details.status}**` : 'Cập nhật trạng thái kênh Voice'
     };
@@ -127,7 +176,7 @@ async function processLogQueue() {
 
 /**
  * Ghi 1 dòng log debug voi timestamp ISO hien tai và tự động bắn vào Kênh Log Discord nếu có
- * @param {string} action  Tên hành động viết HOA (e.g. MESSAGE_SEND, MESSAGE_EDIT)
+ * @param {string} action  Tên hành động viết HOA (e.g. VOICE_USER_JOIN, MESSAGE_USER_SEND)
  * @param {Object} details Các cặp key-value bổ sung (tùy chọn)
  */
 function logAction(action, details = {}) {
@@ -164,33 +213,45 @@ function logAction(action, details = {}) {
     const logChannel = discordClient.channels.cache.get(logChannelId);
 
     const info = getActionInfo(action, details);
-    const timeFormatted = `<t:${Math.floor(Date.now() / 1000)}:T>`;
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const timeFull = `<t:${nowUnix}:F> (<t:${nowUnix}:R>)`;
 
     const embed = new EmbedBuilder()
       .setColor(info.color)
       .setTitle(info.title)
       .setTimestamp();
 
-    let desc = `${timeFormatted} • ${info.desc}\n`;
+    if (details.avatar) {
+      embed.setThumbnail(details.avatar);
+    }
 
-    if (details.channelId) {
-      desc += `📁 **Kênh:** <#${details.channelId}>\n`;
-    }
+    let desc = `⏰ **Thời gian:** ${timeFull}\n`;
+    desc += `📌 **Sự kiện:** ${info.desc}\n\n`;
+
     if (details.userId) {
-      desc += `👤 **Người thực hiện:** <@${details.userId}>\n`;
+      desc += `👤 **Người dùng:** <@${details.userId}> (\`${details.userId}\`)\n`;
+    } else if (details.user) {
+      desc += `👤 **Người dùng:** ${details.user}\n`;
     }
-    if (details.user) {
-      desc += `👤 **Người thực hiện:** ${details.user}\n`;
+
+    if (details.oldChannelId && details.newChannelId) {
+      desc += `🚪 **Từ phòng:** <#${details.oldChannelId}> ➔ **Sang phòng:** <#${details.newChannelId}>\n`;
+    } else if (details.channelId) {
+      desc += `📁 **Kênh / Phòng:** <#${details.channelId}>\n`;
     }
-    if (details.messageId) {
-      desc += `🆔 **Tin nhắn ID:** \`${details.messageId}\`\n`;
+
+    if (details.command) {
+      desc += `⚡ **Lệnh:** \`${details.command}\`\n`;
     }
     if (details.song) {
       desc += `🎵 **Bài hát:** ${details.song}\n`;
     }
     if (details.content) {
-      const cleanContent = String(details.content).slice(0, 300);
-      desc += `📝 **Nội dung:** \`${cleanContent}\`\n`;
+      const cleanContent = String(details.content).slice(0, 500);
+      desc += `📝 **Nội dung:** \`\`\`${cleanContent}\`\`\`\n`;
+    }
+    if (details.attachments && details.attachments.length > 0) {
+      desc += `📎 **Đính kèm:** ${details.attachments.join(', ')}\n`;
     }
     if (details.oldContent && details.newContent) {
       desc += `📝 **Cũ:** \`${String(details.oldContent).slice(0, 150)}\`\n`;

@@ -1,14 +1,23 @@
+const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const { createNowPlayingEmbed, createMusicControls, createErrorEmbed } = require('../utils/embed');
+const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
-  name: 'control',
-  aliases: ['np', 'nowplaying', 'c', 'panel', 'dieukhien'],
-  description: 'Gọi lại bảng điều khiển âm nhạc tương tác',
-  async execute(message) {
-    const queue = musicManager.get(message.guild.id);
+  name: 'nowplaying',
+  aliases: ['np', 'control', 'c', 'panel', 'dieukhien'],
+  description: 'View now playing song details and interactive controls',
+  data: new SlashCommandBuilder()
+    .setName('nowplaying')
+    .setDescription('View now playing song details and interactive controls')
+    .setDescriptionLocalizations({
+      vi: 'Xem thông tin chi tiết bài hát đang phát và bảng điều khiển'
+    }),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    const queue = musicManager.get(ctx.guild.id);
     if (!queue || !queue.currentSong) {
-      return message.reply('Hiện không có bài hát nào đang phát!');
+      return ctx.reply('Hiện không có bài hát nào đang phát!');
     }
 
     // Xóa tin nhắn cũ nếu có để tránh trôi và trùng lặp
@@ -20,8 +29,12 @@ module.exports = {
     const embed = createNowPlayingEmbed(queue.currentSong, queue);
     const controls = createMusicControls(queue);
 
-    const msg = await message.channel.send({ embeds: [embed], components: controls });
-    queue.nowPlayingMessage = msg;
-    message.delete().catch(() => {});
+    if (ctx.isInteraction) {
+      return ctx.reply({ embeds: [embed], components: controls });
+    } else {
+      const msg = await ctx.channel.send({ embeds: [embed], components: controls });
+      queue.nowPlayingMessage = msg;
+      ctx.message?.delete().catch(() => {});
+    }
   }
 };

@@ -1,27 +1,36 @@
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
 const { createSettingsEmbed, createSettingsSelectMenu, createErrorEmbed } = require('../utils/embed');
+const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
-  name: 'caidat',
-  aliases: ['settings', 'set', 'config', 'setup'],
-  description: 'Mở bảng điều khiển cài đặt bot (Chỉ Quản trị viên máy chủ mới được sử dụng)',
-  async execute(message) {
-    if (!message.guild) return;
+  name: 'settings',
+  aliases: ['caidat', 'set', 'config', 'setup'],
+  description: 'Open bot configuration control panel (Server Managers only)',
+  data: new SlashCommandBuilder()
+    .setName('settings')
+    .setDescription('Open bot configuration control panel (Server Managers only)')
+    .setDescriptionLocalizations({
+      vi: 'Mở bảng điều khiển cài đặt bot (Chỉ Quản trị viên máy chủ)'
+    })
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    if (!ctx.guild) return;
 
-    // Chỉ Admin máy chủ (Owner, Administrator, ManageGuild) mới được phép sử dụng
-    const isOwner = message.guild.ownerId === message.author.id;
-    const hasAdminPerm = message.member.permissions.has('Administrator') || message.member.permissions.has('ManageGuild');
+    const isOwner = ctx.guild.ownerId === ctx.user.id;
+    const hasAdminPerm = ctx.member.permissions.has('Administrator') || ctx.member.permissions.has('ManageGuild');
 
     if (!isOwner && !hasAdminPerm) {
-      return message.reply({
-        embeds: [createErrorEmbed('Bạn không có quyền sử dụng lệnh này! Lệnh `.caidat` chỉ dành cho **Chủ sở hữu máy chủ (Server Owner)** hoặc thành viên có quyền **Quản trị viên (Administrator) / Quản lý máy chủ**.')]
+      return ctx.reply({
+        embeds: [createErrorEmbed('Bạn không có quyền sử dụng lệnh này! Lệnh `/settings` chỉ dành cho **Chủ sở hữu máy chủ (Server Owner)** hoặc thành viên có quyền **Quản trị viên (Administrator) / Quản lý máy chủ**.')]
       });
     }
 
-    const guildSettings = settingsManager.get(message.guild.id);
-    const embed = createSettingsEmbed(message.guild, guildSettings);
+    const guildSettings = settingsManager.get(ctx.guild.id);
+    const embed = createSettingsEmbed(ctx.guild, guildSettings);
     const row = createSettingsSelectMenu(guildSettings);
 
-    return message.reply({ embeds: [embed], components: [row] });
+    return ctx.reply({ embeds: [embed], components: [row] });
   }
 };

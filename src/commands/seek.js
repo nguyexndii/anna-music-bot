@@ -1,7 +1,9 @@
+const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { hasMusicPermission } = require('../utils/permissionHelper');
+const { createContext } = require('../utils/commandHelper');
 
 function parseTimeToSeconds(timeStr) {
   if (!timeStr) return null;
@@ -22,37 +24,53 @@ function formatSeconds(sec) {
 module.exports = {
   name: 'seek',
   aliases: ['tua', 'forward', 'rewind'],
-  description: 'Tua bài hát đang phát đến thời điểm chỉ định (Ví dụ: .seek 1:30 hoặc .seek 90)',
-  usage: '<mm:ss | số giây>',
-  async execute(message, args) {
-    if (!hasMusicPermission(message.member)) {
-      const guildSettings = settingsManager.get(message.guild.id);
+  description: 'Seek to a specific timestamp in currently playing song',
+  data: new SlashCommandBuilder()
+    .setName('seek')
+    .setDescription('Seek to a specific timestamp in currently playing song')
+    .setDescriptionLocalizations({
+      vi: 'Tua bài hát đang phát đến thời điểm chỉ định'
+    })
+    .addStringOption(opt =>
+      opt
+        .setName('time')
+        .setDescription('Target timestamp (e.g. 1:30 or 90)')
+        .setDescriptionLocalizations({
+          vi: 'Thời gian cần tua đến (VD: 1:30 hoặc 90)'
+        })
+        .setRequired(true)
+    ),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    if (!hasMusicPermission(ctx.member)) {
+      const guildSettings = settingsManager.get(ctx.guild.id);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
-      return message.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để tua nhạc.`)] });
+      return ctx.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để tua nhạc.`)] });
     }
 
-    const queue = musicManager.get(message.guild.id);
+    const queue = musicManager.get(ctx.guild.id);
     if (!queue || !queue.currentSong) {
-      return message.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát để tua!')] });
+      return ctx.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát để tua!')] });
     }
 
-    if (!args[0]) {
-      return message.reply({ embeds: [createErrorEmbed('Vui lòng nhập thời gian muốn tua tới! Ví dụ: `.seek 1:30` hoặc `.seek 90`')] });
+    const timeInput = ctx.options.getString('time') || (args ? args[0] : null);
+    if (!timeInput) {
+      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập thời gian muốn tua tới! Ví dụ: `/seek 1:30` hoặc `/seek 90`')] });
     }
 
-    const targetSeconds = parseTimeToSeconds(args[0]);
+    const targetSeconds = parseTimeToSeconds(timeInput);
     if (targetSeconds === null || targetSeconds < 0) {
-      return message.reply({ embeds: [createErrorEmbed('Thời gian không hợp lệ! Vui lòng nhập định dạng `mm:ss` hoặc số giây (VD: `.seek 1:30`).')] });
+      return ctx.reply({ embeds: [createErrorEmbed('Thời gian không hợp lệ! Vui lòng nhập định dạng `mm:ss` hoặc số giây (VD: `1:30`).')] });
     }
 
     try {
       await queue.seek(targetSeconds);
-      return message.reply({
+      return ctx.reply({
         embeds: [createSuccessEmbed(`⏩ Đã tua bài hát [**${queue.currentSong.title}**](${queue.currentSong.url}) đến **${formatSeconds(targetSeconds)}**`)]
       });
     } catch (err) {
       console.error('[Seek Command Error]:', err);
-      return message.reply({ embeds: [createErrorEmbed(`Lỗi khi tua bài hát: ${err.message}`)] });
+      return ctx.reply({ embeds: [createErrorEmbed(`Lỗi khi tua bài hát: ${err.message}`)] });
     }
   }
 };

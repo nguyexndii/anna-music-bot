@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bảng Tổng Hợp Slash Commands, Text Discord, Cảnh Báo & Web Player</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #0f1117;
+      color: #e2e8f0;
+    }
+    .glass-panel {
+      background: rgba(26, 31, 46, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    .badge-admin {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .badge-all {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .badge-warn {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 custom-scrollbar">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- Header -->
+    <header class="glass-panel p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xl">
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-3xl shadow-lg shadow-indigo-500/30">
+          🎵
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-white via-indigo-200 to-indigo-400 bg-clip-text text-transparent">
+            ANNA MUSIC BOT — Bảng Tổng Hợp Văn Bản Toàn Diện
+          </h1>
+          <p class="text-sm text-slate-400 mt-1">
+            Xem chi tiết Slash Commands, Lệnh tắt, Cảnh báo sai kênh/quyền, Thông báo lỗi và Giao diện Web Player
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="px-3 py-1.5 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs font-semibold">
+          ⚡ 8 Lệnh Tắt Nhanh
+        </span>
+        <span class="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-semibold">
+          🚨 Cảnh Báo & Tự Hủy
+        </span>
+        <span class="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+          🌐 Đa Ngôn Ngữ
+        </span>
+      </div>
+    </header>
+
+    <!-- Tab Navigation -->
+    <div class="flex flex-wrap gap-2 p-1.5 glass-panel rounded-xl">
+      <button onclick="switchTab('tab-slash')" id="btn-tab-slash" class="tab-btn flex-1 min-w-[170px] py-3 px-3 rounded-lg font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 bg-indigo-600 text-white shadow-lg shadow-indigo-600/30">
+        <span>⚡</span> Bảng 1: Lệnh Slash & Lệnh Tắt
+      </button>
+      <button onclick="switchTab('tab-warnings')" id="btn-tab-warnings" class="tab-btn flex-1 min-w-[170px] py-3 px-3 rounded-lg font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60">
+        <span>🚨</span> Bảng 2: Cảnh Báo Sai Kênh & Quyền
+      </button>
+      <button onclick="switchTab('tab-discord')" id="btn-tab-discord" class="tab-btn flex-1 min-w-[170px] py-3 px-3 rounded-lg font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60">
+        <span>💬</span> Bảng 3: Embeds & Logs Discord
+      </button>
+      <button onclick="switchTab('tab-web')" id="btn-tab-web" class="tab-btn flex-1 min-w-[170px] py-3 px-3 rounded-lg font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60">
+        <span>🌐</span> Bảng 4: Text Trên Web Player
+      </button>
+    </div>
+
+    <!-- TAB 1: SLASH COMMANDS -->
+    <div id="tab-slash" class="tab-content space-y-4">
+      <div class="glass-panel p-6 rounded-2xl space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+              <span>⚡</span> Danh Sách 28 Slash Commands & 8 Lệnh Tắt
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Mặc định hiển thị Tiếng Anh, tự động chuyển sang Tiếng Việt khi tài khoản Discord đặt Tiếng Việt.
+            </p>
+          </div>
+          <input type="text" id="searchSlash" onkeyup="filterSlashTable()" placeholder="🔍 Tìm kiếm lệnh..." class="px-4 py-2 bg-slate-900/80 border border-slate-700/60 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500 w-full md:w-64">
+        </div>
+
+        <div class="overflow-x-auto custom-scrollbar">
+          <table class="w-full text-left border-collapse" id="slashTable">
+            <thead>
+              <tr class="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-900/40">
+                <th class="p-3.5 rounded-l-xl">Lệnh Slash & Lệnh Tắt</th>
+                <th class="p-3.5">Mặc định (Tiếng Anh)</th>
+                <th class="p-3.5">Bản địa hóa (Tiếng Việt)</th>
+                <th class="p-3.5">Phân quyền</th>
+                <th class="p-3.5 rounded-r-xl">Tùy chọn / Tham số</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 text-sm">
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /play <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/p</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Play a song or playlist from YouTube, Spotify, SoundCloud</td>
+                <td class="p-3.5 text-emerald-300">Phát bài hát hoặc Playlist từ YouTube, Spotify, SoundCloud</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">query</span>: Tên bài hát hoặc link</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/web</td>
+                <td class="p-3.5 text-slate-300">Open Web Player music controller interface and get PIN</td>
+                <td class="p-3.5 text-emerald-300">Mở giao diện Web Player điều khiển âm nhạc và lấy mã PIN kết nối</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/pause</td>
+                <td class="p-3.5 text-slate-300">Pause currently playing song</td>
+                <td class="p-3.5 text-emerald-300">Tạm dừng bài hát đang phát</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/resume</td>
+                <td class="p-3.5 text-slate-300">Resume paused song</td>
+                <td class="p-3.5 text-emerald-300">Tiếp tục phát bài hát đang tạm dừng</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /skip <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/s</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Skip current song</td>
+                <td class="p-3.5 text-emerald-300">Bỏ qua bài hát hiện tại</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/stop</td>
+                <td class="p-3.5 text-slate-300">Stop music playback and clear queue</td>
+                <td class="p-3.5 text-emerald-300">Dừng phát nhạc và xóa toàn bộ hàng chờ</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /queue <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/q</span>
+                </td>
+                <td class="p-3.5 text-slate-300">View current music queue</td>
+                <td class="p-3.5 text-emerald-300">Xem danh sách bài hát trong hàng chờ</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">page</span>: Số trang cần xem</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /nowplaying <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/np</span>
+                </td>
+                <td class="p-3.5 text-slate-300">View now playing song details and interactive controls</td>
+                <td class="p-3.5 text-emerald-300">Xem thông tin chi tiết bài hát đang phát và bảng điều khiển</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /volume <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/vol</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Adjust playback volume (1 - 100)</td>
+                <td class="p-3.5 text-emerald-300">Điều chỉnh âm lượng phát nhạc (1 - 100)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">level</span>: 1 - 100</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/loop</td>
+                <td class="p-3.5 text-slate-300">Toggle loop mode for current song or entire queue</td>
+                <td class="p-3.5 text-emerald-300">Bật/tắt chế độ lặp lại bài hát hoặc hàng chờ</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">mode</span>: Off / Song / Queue</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/shuffle</td>
+                <td class="p-3.5 text-slate-300">Randomly shuffle songs in the queue</td>
+                <td class="p-3.5 text-emerald-300">Xáo trộn ngẫu nhiên thứ tự các bài hát trong hàng chờ</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/seek</td>
+                <td class="p-3.5 text-slate-300">Seek to a specific timestamp in currently playing song</td>
+                <td class="p-3.5 text-emerald-300">Tua bài hát đang phát đến thời điểm chỉ định</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">time</span>: mm:ss hoặc số giây</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/remove</td>
+                <td class="p-3.5 text-slate-300">Remove a song from the queue by its position number</td>
+                <td class="p-3.5 text-emerald-300">Xóa một bài hát ra khỏi hàng chờ theo số thứ tự</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">position</span>: Vị trí bài cần xóa</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/join</td>
+                <td class="p-3.5 text-slate-300">Invite bot to join your current voice channel</td>
+                <td class="p-3.5 text-emerald-300">Mời bot tham gia vào kênh Voice của bạn</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/leave</td>
+                <td class="p-3.5 text-slate-300">Disconnect bot from current voice channel</td>
+                <td class="p-3.5 text-emerald-300">Yêu cầu bot rời khỏi kênh Voice</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /lyrics <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/ly</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Display synchronized song lyrics from Spotify/Musixmatch</td>
+                <td class="p-3.5 text-emerald-300">Hiển thị lời bài hát (Lyrics) chuẩn xác từ Spotify/Musixmatch</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">query</span>: Tên bài hát (tùy chọn)</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /favorite <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/fav</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Manage and play your personal favorite songs list</td>
+                <td class="p-3.5 text-emerald-300">Quản lý và phát danh sách bài hát yêu thích cá nhân</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono">Subcommands: list, play, add, remove, clear</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/feedback</td>
+                <td class="p-3.5 text-slate-300">Send feedback, suggestions, or bug reports to developers</td>
+                <td class="p-3.5 text-emerald-300">Gửi ý kiến đóng góp hoặc báo lỗi tới ban phát triển</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">message</span>: Nội dung góp ý</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">
+                  /help <span class="ml-1.5 px-1.5 py-0.5 text-xs rounded bg-purple-950 text-purple-300 border border-purple-500/30">/h</span>
+                </td>
+                <td class="p-3.5 text-slate-300">Display bot command list and usage guide</td>
+                <td class="p-3.5 text-emerald-300">Xem danh sách và hướng dẫn sử dụng các lệnh của bot</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="p-3.5 font-bold text-indigo-400 font-mono">/ping</td>
+                <td class="p-3.5 text-slate-300">Check bot network latency to Discord</td>
+                <td class="p-3.5 text-emerald-300">Kiểm tra độ trễ mạng của bot tới Discord</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-all">Mọi người</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+
+              <!-- ADMIN COMMANDS (HIDDEN FOR NORMAL USERS) -->
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /settings
+                </td>
+                <td class="p-3.5 text-slate-300">Open bot configuration control panel (Server Managers only)</td>
+                <td class="p-3.5 text-emerald-300">Mở bảng điều khiển cài đặt bot (Chỉ Quản trị viên máy chủ)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-500 italic">Không có</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /setchannel
+                </td>
+                <td class="p-3.5 text-slate-300">Set dedicated text channel for bot music commands</td>
+                <td class="p-3.5 text-emerald-300">Cài đặt kênh văn bản nhận lệnh âm nhạc (Chỉ Quản trị viên)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">channel</span>, <span class="text-indigo-300">reset</span></td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /lockvoice
+                </td>
+                <td class="p-3.5 text-slate-300">Lock bot playback to a fixed voice channel</td>
+                <td class="p-3.5 text-emerald-300">Khóa kênh Voice cố định cho bot phát nhạc (Chỉ Quản trị viên)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">channel</span>, <span class="text-indigo-300">reset</span></td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /setdj
+                </td>
+                <td class="p-3.5 text-slate-300">Configure DJ role and DJ-only mode</td>
+                <td class="p-3.5 text-emerald-300">Cài đặt vai trò DJ cho máy chủ (Chỉ Quản trị viên)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">role</span>, <span class="text-indigo-300">mode</span> (On/Off/Reset)</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /setlog
+                </td>
+                <td class="p-3.5 text-slate-300">Configure text channel for bot activity & voice logs</td>
+                <td class="p-3.5 text-emerald-300">Cài đặt kênh văn bản ghi toàn bộ nhật ký hoạt động bot</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">channel</span>, <span class="text-indigo-300">reset</span></td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /crossfade
+                </td>
+                <td class="p-3.5 text-slate-300">Configure smooth crossfade track transition (0 - 10s)</td>
+                <td class="p-3.5 text-emerald-300">Cài đặt thời gian hòa âm chuyển bài mượt mà (0 - 10 giây)</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">seconds</span>: 0 - 10 giây</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /autoplay
+                </td>
+                <td class="p-3.5 text-slate-300">Toggle autoplaying similar tracks when queue ends</td>
+                <td class="p-3.5 text-emerald-300">Bật/Tắt tự động phát bài hát tương tự khi hết nhạc</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">status</span>: On / Off</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition-colors bg-red-950/10">
+                <td class="p-3.5 font-bold text-red-400 font-mono flex items-center gap-1.5">
+                  <span>👑</span> /247
+                </td>
+                <td class="p-3.5 text-slate-300">Toggle 24/7 voice stay & relaxing Lofi background playback</td>
+                <td class="p-3.5 text-emerald-300">Bật/tắt duy trì bot trong Voice 24/7 và phát Lofi thư giãn</td>
+                <td class="p-3.5"><span class="px-2 py-1 rounded-md text-xs font-semibold badge-admin">Chỉ Admin / Quản lý</span></td>
+                <td class="p-3.5 text-xs text-slate-400 font-mono"><span class="text-indigo-300">status</span>: On / Off</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: CẢNH BÁO SAI KÊNH & QUYỀN HẠN (MỚI) -->
+    <div id="tab-warnings" class="tab-content hidden space-y-4">
+      <div class="glass-panel p-6 rounded-2xl space-y-6">
+        <div>
+          <h2 class="text-xl font-bold text-amber-400 flex items-center gap-2">
+            <span>🚨</span> Toàn Bộ Text Cảnh Báo Sai Kênh, Quyền Hạn & Tự Hủy
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Các tin nhắn cảnh báo người dùng khi gõ sai kênh, thiếu quyền DJ, thiếu phòng Voice hoặc sai cú pháp.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- Sai Kênh Văn Bản -->
+          <div class="p-5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-3">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-2">
+              <span class="text-xs font-bold text-amber-400 uppercase">1. Cảnh Báo Gõ Sai Kênh Chat (Khi đã khóa kênh)</span>
+              <span class="text-xs text-amber-300 font-semibold">Tự xóa sau 5s</span>
+            </div>
+            <div class="space-y-2 text-xs bg-slate-950/80 p-3.5 rounded-lg border border-amber-500/20 font-mono">
+              <p class="text-slate-400">• <b>Với tin nhắn thường:</b> Bot tự động xóa tin nhắn người dùng và gửi thông báo tự hủy:</p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                ⚠️ &lt;@User&gt;, bạn chỉ được phép dùng lệnh nhạc tại kênh &lt;#KênhNhạc&gt;!
+              </p>
+              <p class="text-slate-400 mt-2">• <b>Với Slash Command:</b> Bot gửi phản hồi ẩn (Ephemeral - chỉ người gõ mới thấy):</p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                ⚠️ Bot chỉ nhận lệnh trong kênh &lt;#KênhNhạc&gt;!
+              </p>
+            </div>
+          </div>
+
+          <!-- Chưa Vào Voice / Voice Bị Khóa -->
+          <div class="p-5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-3">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-2">
+              <span class="text-xs font-bold text-amber-400 uppercase">2. Cảnh Báo Phòng Voice</span>
+              <span class="text-xs text-amber-300 font-semibold">Tự xóa sau 7s</span>
+            </div>
+            <div class="space-y-2 text-xs bg-slate-950/80 p-3.5 rounded-lg border border-amber-500/20 font-mono">
+              <p class="text-slate-400">• <b>Khi chưa vào Voice:</b></p>
+              <p class="text-red-300 bg-red-950/40 p-2 rounded border border-red-500/20">
+                Bạn cần tham gia vào một kênh Voice trước!
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi phòng Voice bị Admin khóa cố định:</b></p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                Máy chủ đã khóa kênh Voice cố định! Vui lòng vào kênh &lt;#KênhVoiceCốĐịnh&gt; để nghe nhạc.
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi bot thiếu quyền vào Voice:</b></p>
+              <p class="text-red-300 bg-red-950/40 p-2 rounded border border-red-500/20">
+                Bot không có quyền kết nối hoặc phát âm thanh trong kênh Voice của bạn!
+              </p>
+            </div>
+          </div>
+
+          <!-- Thiếu Quyền DJ -->
+          <div class="p-5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-3">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-2">
+              <span class="text-xs font-bold text-amber-400 uppercase">3. Cảnh Báo Thiếu Quyền DJ (Khi bật DJ-Only)</span>
+              <span class="text-xs text-amber-300 font-semibold">Tự xóa sau 7s</span>
+            </div>
+            <div class="space-y-2 text-xs bg-slate-950/80 p-3.5 rounded-lg border border-amber-500/20 font-mono">
+              <p class="text-slate-400">• <b>Khi bấm /play hoặc thêm bài:</b></p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                Bạn cần có vai trò &lt;@&amp;VaiTròDJ&gt; để phát nhạc.
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi bấm /skip hoặc /stop:</b></p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                Bạn cần có vai trò &lt;@&amp;VaiTròDJ&gt; để bỏ qua bài hát / dừng nhạc.
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi dùng /seek tua nhạc:</b></p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                Chế độ DJ đang bật! Bạn cần có vai trò &lt;@&amp;VaiTròDJ&gt; để tua nhạc.
+              </p>
+            </div>
+          </div>
+
+          <!-- Thiếu Quyền Quản Trị & Bảo Vệ 24/7 -->
+          <div class="p-5 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-3">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-2">
+              <span class="text-xs font-bold text-amber-400 uppercase">4. Cảnh Báo Quyền Quản Trị & Bảo Vệ 24/7</span>
+              <span class="text-xs text-amber-300 font-semibold">Bảo mật hệ thống</span>
+            </div>
+            <div class="space-y-2 text-xs bg-slate-950/80 p-3.5 rounded-lg border border-amber-500/20 font-mono">
+              <p class="text-slate-400">• <b>Khi người thường cố truy cập lệnh Admin:</b></p>
+              <p class="text-red-300 bg-red-950/40 p-2 rounded border border-red-500/20">
+                Bạn không có quyền sử dụng lệnh này! Lệnh /settings chỉ dành cho Chủ sở hữu máy chủ (Server Owner) hoặc thành viên có quyền Quản trị viên (Administrator) / Quản lý máy chủ.
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi người thường dùng /leave lúc đang bật 24/7:</b></p>
+              <p class="text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/20">
+                ⚠️ Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể yêu cầu bot rời phòng!
+              </p>
+              <p class="text-slate-400 mt-1">• <b>Khi phòng trống (Hết người nghe):</b></p>
+              <p class="text-slate-300 bg-slate-900/60 p-2 rounded border border-slate-700/40">
+                Phòng không còn người nghe, bot sẽ tự rời sau 60 giây.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: DISCORD TEXT & EMBEDS -->
+    <div id="tab-discord" class="tab-content hidden space-y-4">
+      <div class="glass-panel p-6 rounded-2xl space-y-6">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <span>💬</span> Bảng Text & Embeds Hiển Thị Trên Discord
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Tất cả các tin nhắn thông báo, bảng điều khiển, card trạng thái và nhật ký gửi vào server.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- Card Ready -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-indigo-400 uppercase">Card Trình Phát Sẵn Sàng (Khi /play trống)</span>
+              <span class="text-xs text-slate-500">Tương tác nút</span>
+            </div>
+            <div class="space-y-1 text-sm bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p class="text-white font-bold">🎵 Trình Phát Âm Nhạc — Sẵn sàng nhận yêu cầu bài hát</p>
+              <p class="text-slate-400 text-xs">➕ @User • #KênhVoice</p>
+              <p class="text-slate-300 text-xs mt-2">Nhấn nút <b>[Thêm bài hát]</b> bên dưới hoặc gõ lệnh <code class="text-indigo-300">/play &lt;tên_bài_hát&gt;</code> (hoặc <code class="text-purple-300">/p &lt;tên_bài_hát&gt;</code>) để phát nhạc ngay lập tức!</p>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs">
+              <span class="px-2.5 py-1 bg-indigo-600/30 text-indigo-300 rounded-md border border-indigo-500/30">➕ Thêm bài hát</span>
+              <span class="px-2.5 py-1 bg-slate-700/30 text-slate-300 rounded-md border border-slate-600/30">📋 Hàng chờ</span>
+              <span class="px-2.5 py-1 bg-emerald-600/30 text-emerald-300 rounded-md border border-emerald-500/30">🌐 Web Player</span>
+            </div>
+          </div>
+
+          <!-- Web PIN -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-indigo-400 uppercase">Lệnh /web (Mã PIN & Link)</span>
+              <span class="text-xs text-slate-500">Hiệu lực 10 phút</span>
+            </div>
+            <div class="space-y-1.5 text-sm bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p class="text-white font-bold">🌐 ANNA MUSIC — Bảng Điều Khiển Web Player</p>
+              <p class="text-slate-300 text-xs">Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ <b>Server Name</b>.</p>
+              <p class="text-slate-300 text-xs mt-2">🔊 <b>Kênh Voice:</b> <span class="text-indigo-300">#Voice-Room</span></p>
+              <p class="text-emerald-400 font-bold text-xs">🔑 <b>Mã PIN:</b> <code class="bg-emerald-950 px-2 py-0.5 rounded text-emerald-300 font-mono text-sm">123456</code></p>
+              <p class="text-slate-500 text-[11px] italic mt-1">Mã PIN có hiệu lực trong 10 phút</p>
+            </div>
+            <div class="flex gap-2 text-xs">
+              <span class="px-3 py-1.5 bg-emerald-600 text-white font-bold rounded-lg flex items-center gap-1">🌐 Mở Web Player</span>
+            </div>
+          </div>
+
+          <!-- Now Playing -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-indigo-400 uppercase">Now Playing (/nowplaying hoặc /np)</span>
+              <span class="text-xs text-slate-500">Điều khiển bài hát</span>
+            </div>
+            <div class="space-y-1.5 text-sm bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p class="text-white font-bold text-xs">🎶 Đang phát: <span class="text-indigo-300">Tên Bài Hát Đang Nghe</span></p>
+              <p class="text-slate-400 text-xs">👤 Yêu cầu bởi: @User • 🔊 Kênh: #Voice</p>
+              <p class="text-amber-400 text-xs font-mono">01:23 ━━━━🔘───────── 04:15</p>
+              <p class="text-slate-400 text-xs">🔊 Âm lượng: 100% • 🔁 Lặp: Tắt / Bài / Hàng chờ</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5 text-xs">
+              <span class="px-2 py-1 bg-slate-800 text-pink-400 rounded">♡ Thích</span>
+              <span class="px-2 py-1 bg-slate-800 text-indigo-300 rounded">⏸ Tạm dừng</span>
+              <span class="px-2 py-1 bg-slate-800 text-indigo-300 rounded">⏭ Bỏ qua</span>
+              <span class="px-2 py-1 bg-slate-800 text-indigo-300 rounded">🔁 Lặp</span>
+              <span class="px-2 py-1 bg-slate-800 text-red-400 rounded">⏹ Dừng</span>
+            </div>
+          </div>
+
+          <!-- Voice Logs -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-purple-400 uppercase">Hệ Thống Log Phòng Voice (Kênh Log)</span>
+              <span class="text-xs text-slate-500">Thời gian thực</span>
+            </div>
+            <div class="space-y-2 text-xs bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p class="text-emerald-400">🟢 <b>Tham Gia Phòng Voice:</b> @User đã vào phòng &lt;#Voice&gt; • 12:00:00 (Hôm nay lúc 12:00)</p>
+              <p class="text-red-400">🔴 <b>Rời Khỏi Phòng Voice:</b> @User đã rời phòng &lt;#Voice&gt;</p>
+              <p class="text-amber-400">🔀 <b>Chuyển Phòng:</b> @User từ &lt;#Phòng1&gt; ➔ &lt;#Phòng2&gt;</p>
+              <p class="text-purple-400">📺 <b>Chia Sẻ Màn Hình:</b> @User bắt đầu chia sẻ màn hình trong &lt;#Voice&gt;</p>
+              <p class="text-blue-400">📷 <b>Camera Video:</b> @User đã bật Camera</p>
+              <p class="text-cyan-400">🎙️ <b>Mic / Tai nghe:</b> Tắt Mic (Muted) • Mở Tai nghe (Undeafened)</p>
+              <p class="text-indigo-400">💬 <b>Tin Nhắn Kênh:</b> Người gửi: @User • Nội dung: "tin nhắn test"</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: WEB PLAYER TEXTS -->
+    <div id="tab-web" class="tab-content hidden space-y-4">
+      <div class="glass-panel p-6 rounded-2xl space-y-6">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <span>🌐</span> Bảng Text Hiển Thị Trên Web Player
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Toàn bộ câu chữ, nhãn, nút bấm, modal và thông báo Toast trên giao diện Web Player.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- Header & Auth -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-indigo-400 uppercase">1. Thanh Điều Hướng & Đăng Nhập PIN</h3>
+            <div class="space-y-2 text-xs bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p>• <b>Logo:</b> <span class="text-white font-bold">ANNA MUSIC</span></p>
+              <p>• <b>Trạng thái:</b> <span class="text-emerald-400">🟢 Đã kết nối Voice</span> / <span class="text-red-400">🔴 Chưa vào Voice</span></p>
+              <p>• <b>Tabs:</b> Trình phát, Hàng chờ, Lời bài hát, Lịch sử, Cài đặt</p>
+              <p>• <b>Màn hình nhập PIN:</b> "Kết Nối Web Player — Nhập mã PIN 6 số nhận được từ lệnh /web trên Discord"</p>
+              <p>• <b>Thông báo hết hạn:</b> "Mã PIN hoặc phiên đăng nhập đã hết hạn. Vui lòng gõ /web trên Discord để lấy mã PIN mới!"</p>
+            </div>
+          </div>
+
+          <!-- Queue Manager & Move Modal -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-indigo-400 uppercase">2. Hàng Chờ & Modal Đổi Vị Trí</h3>
+            <div class="space-y-2 text-xs bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p>• <b>Tiêu đề:</b> "Hàng Chờ Phát Nhạc • X bài hát • Tổng thời lượng: MM:SS"</p>
+              <p>• <b>Tìm kiếm:</b> "🔍 Tìm kiếm bài hát trong danh sách..."</p>
+              <p>• <b>Nút trên mỗi bài:</b></p>
+              <p class="pl-3 text-slate-400">- <span class="text-emerald-300">▶ Phát ngay</span>: Phát bài này ngay lập tức</p>
+              <p class="pl-3 text-slate-400">- <span class="text-indigo-300">⬆️ Đưa lên đầu</span>: Đưa bài về vị trí kế tiếp (#1)</p>
+              <p class="pl-3 text-slate-400">- <span class="text-amber-300">↕️ Chuyển vị trí</span>: Mở popup chọn số thứ tự bất kỳ</p>
+              <p class="pl-3 text-slate-400">- <span class="text-red-300">🗑️ Xóa</span>: Xóa bài khỏi danh sách</p>
+              <p>• <b>Modal chuyển vị trí:</b> "Chuyển vị trí bài hát" • Nhập số thứ tự (từ 1 đến X) • Chọn nhanh [#1], [#2], [#5], [#10]</p>
+            </div>
+          </div>
+
+          <!-- Lyrics & History -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-indigo-400 uppercase">3. Lời Bài Hát & Lịch Sử Playlist</h3>
+            <div class="space-y-2 text-xs bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p>• <b>Lyrics Tab:</b> "Lời Bài Hát Đồng Bộ (Synced Lyrics)"</p>
+              <p>• <b>Tùy chọn:</b> "Tự động cuộn theo nhạc (Auto Scroll)"</p>
+              <p>• <b>Trạng thái trống:</b> "Không tìm thấy lời bài hát cho bài này."</p>
+              <p>• <b>History Tab:</b> "Lịch Sử Nghe Nhạc & Playlist Đã Phát"</p>
+              <p>• <b>Nút thao tác:</b> "Phát lại bài này", "Thêm lại toàn bộ Playlist"</p>
+              <p>• <b>Ảnh đại diện:</b> Tự động hiển thị thumbnail HD chuẩn của video YouTube</p>
+            </div>
+          </div>
+
+          <!-- Toasts & Settings -->
+          <div class="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-indigo-400 uppercase">4. Cài Đặt & Thông Báo Nổi (Toast)</h3>
+            <div class="space-y-2 text-xs bg-slate-950/70 p-3.5 rounded-lg border border-slate-800/80 font-mono">
+              <p>• <b>Cài đặt:</b> Thời gian hòa âm (0 - 10s), Tự động phát (Autoplay), Chế độ treo 24/7</p>
+              <p>• <b>Toast thành công:</b> "✅ Đã thêm bài hát vào hàng chờ thành công!"</p>
+              <p>• <b>Toast chuyển bài:</b> "✅ Đã chuyển bài hát lên vị trí #X!"</p>
+              <p>• <b>Toast xóa:</b> "✅ Đã xóa bài hát khỏi hàng chờ!"</p>
+              <p>• <b>Toast điều khiển:</b> "⏸ Đã tạm dừng phát nhạc." / "▶ Đã tiếp tục phát nhạc."</p>
+              <p>• <b>Toast cảnh báo:</b> "⚠️ Bạn cần ở trong phòng Voice để điều khiển!"</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-600/30');
+        btn.classList.add('text-slate-400');
+      });
+
+      document.getElementById(tabId).classList.remove('hidden');
+      const activeBtn = document.getElementById('btn-' + tabId);
+      activeBtn.classList.add('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-600/30');
+      activeBtn.classList.remove('text-slate-400');
+    }
+
+    function filterSlashTable() {
+      const input = document.getElementById('searchSlash');
+      const filter = input.value.toLowerCase();
+      const table = document.getElementById('slashTable');
+      const trs = table.getElementsByTagName('tr');
+
+      for (let i = 1; i < trs.length; i++) {
+        const text = trs[i].innerText.toLowerCase();
+        trs[i].style.display = text.includes(filter) ? '' : 'none';
+      }
+    }
+  </script>
+</body>
+</html>

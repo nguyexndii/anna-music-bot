@@ -1,28 +1,58 @@
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
+const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
   name: 'autoplay',
   aliases: ['ap', 'auto'],
-  description: 'Bật/Tắt chế độ tự động tìm và phát bài hát tương tự khi hết nhạc',
-  async execute(message) {
-    if (!message.guild) return;
+  description: 'Toggle autoplaying similar tracks when queue ends (Server Managers only)',
+  data: new SlashCommandBuilder()
+    .setName('autoplay')
+    .setDescription('Toggle autoplaying similar tracks when queue ends (Server Managers only)')
+    .setDescriptionLocalizations({
+      vi: 'Bật/Tắt tự động phát bài hát tương tự khi hết nhạc (Chỉ Quản trị viên)'
+    })
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(opt =>
+      opt
+        .setName('status')
+        .setDescription('Turn autoplay on or off')
+        .setDescriptionLocalizations({
+          vi: 'Bật hoặc tắt chế độ tự động phát'
+        })
+        .setRequired(false)
+        .addChoices(
+          { name: 'On', name_localizations: { vi: 'Bật (ON)' }, value: 'on' },
+          { name: 'Off', name_localizations: { vi: 'Tắt (OFF)' }, value: 'off' }
+        )
+    ),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    if (!ctx.guild) return;
 
-    // Chỉ Admin máy chủ mới được phép cấu hình chế độ Autoplay
-    const isOwner = message.guild.ownerId === message.author.id;
-    const hasAdminPerm = message.member?.permissions.has('Administrator') || message.member?.permissions.has('ManageGuild');
+    const isOwner = ctx.guild.ownerId === ctx.user.id;
+    const hasAdminPerm = ctx.member?.permissions.has('Administrator') || ctx.member?.permissions.has('ManageGuild');
     if (!isOwner && !hasAdminPerm) {
-      const { createErrorEmbed } = require('../utils/embed');
-      return message.reply({
+      return ctx.reply({
         embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt Autoplay!')]
       });
     }
 
-    const current = settingsManager.get(message.guild.id);
-    const newVal = !current.autoplay;
-    settingsManager.update(message.guild.id, { autoplay: newVal });
+    const current = settingsManager.get(ctx.guild.id);
+    const statusOption = ctx.options.getString('status');
+    let newVal;
+    if (statusOption === 'on') {
+      newVal = true;
+    } else if (statusOption === 'off') {
+      newVal = false;
+    } else {
+      newVal = !current.autoplay;
+    }
+
+    settingsManager.update(ctx.guild.id, { autoplay: newVal });
 
     const statusText = newVal ? '🟢 BẬT (Tự động phát bài tương tự khi hết hàng chờ)' : '🔴 TẮT (Dừng lại khi phát hết nhạc)';
-    return message.reply({ embeds: [createSuccessEmbed(`Chế độ Tự động phát (Autoplay): **${statusText}**`)] });
+    return ctx.reply({ embeds: [createSuccessEmbed(`Chế độ Tự động phát (Autoplay): **${statusText}**`)] });
   }
 };

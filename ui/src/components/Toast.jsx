@@ -5,8 +5,8 @@ export default function Toast({ toast }) {
   if (!toast) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 transition-all duration-300 pointer-events-none">
-      <div className="bg-anna-card/95 border border-anna-border backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold text-white">
+    <div className="fixed bottom-24 right-4 sm:right-6 z-[100] transition-all duration-300 pointer-events-none animate-in slide-in-from-bottom-2 fade-in">
+      <div className="bg-anna-surface/95 border border-anna-border/90 backdrop-blur-xl px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold text-white">
         <div
           className={`w-6 h-6 rounded-lg flex items-center justify-center ${
             toast.type === 'error'

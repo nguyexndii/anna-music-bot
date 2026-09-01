@@ -18,6 +18,35 @@ function formatMs(ms) {
 }
 
 /**
+ * Trích xuất ảnh thumbnail chất lượng cao và chuẩn xác nhất cho bài hát YouTube/Web
+ */
+function resolveBestThumbnail(entry, fallbackId = null) {
+  if (!entry && !fallbackId) return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+  
+  const id = (typeof entry === 'object' ? entry?.id : null) || fallbackId || (typeof entry?.url === 'string' ? entry.url.match(/(?:v=|\/vi\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] : null);
+  
+  // 1. Nếu có YouTube Video ID hợp lệ -> Luôn ưu tiên ảnh hqdefault.jpg chuẩn theo video
+  if (id && typeof id === 'string' && id.length === 11) {
+    return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  }
+
+  // 2. Nếu có mảng thumbnails trong metadata
+  if (entry && Array.isArray(entry.thumbnails) && entry.thumbnails.length > 0) {
+    const validThumbs = entry.thumbnails.filter(t => t?.url && !t.url.includes('yt3.ggpht.com') && !t.url.includes('default_user') && !t.url.includes('avatar'));
+    if (validThumbs.length > 0) {
+      const sorted = [...validThumbs].sort((a, b) => (b.width || 0) - (a.width || 0));
+      return sorted[0]?.url || validThumbs[validThumbs.length - 1]?.url;
+    }
+  }
+
+  if (entry?.thumbnail && typeof entry.thumbnail === 'string' && !entry.thumbnail.includes('yt3.ggpht.com') && !entry.thumbnail.includes('default_user')) {
+    return entry.thumbnail;
+  }
+
+  return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+}
+
+/**
  * Tách tên nghệ sĩ và tên bài hát từ tiêu đề
  */
 function parseArtistAndTitle(rawTitle) {
@@ -186,7 +215,7 @@ async function searchTrack(query) {
               url: trackUrl,
               searchQuery: e.title,
               duration: e.duration ? `${Math.floor(e.duration / 60)}:${String(e.duration % 60).padStart(2, '0')}` : '3:30',
-              thumbnail: e.thumbnails?.[0]?.url || (e.id ? `https://i.ytimg.com/vi/${e.id}/hqdefault.jpg` : null),
+              thumbnail: resolveBestThumbnail(e),
               isLive: false
             };
           });
@@ -338,7 +367,7 @@ function extractSoundCloudTitleFromUrl(url) {
           title: track.title,
           url: track.url,
           duration: track.durationRaw || '3:30',
-          thumbnail: track.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`,
+          thumbnail: resolveBestThumbnail(track),
           artist: track.channel?.name || 'YouTube',
           isLive: Boolean(track.live)
         }];
@@ -362,7 +391,7 @@ function extractSoundCloudTitleFromUrl(url) {
           title: bestEntry.title,
           url: url,
           duration: bestEntry.duration ? `${Math.floor(bestEntry.duration / 60)}:${String(bestEntry.duration % 60).padStart(2, '0')}` : '3:30',
-          thumbnail: bestEntry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${bestEntry.id}/hqdefault.jpg`,
+          thumbnail: resolveBestThumbnail(bestEntry),
           artist: bestEntry.uploader || bestEntry.channel || 'YouTube',
           isLive: false
         }];
@@ -835,7 +864,7 @@ async function searchMultipleTracks(query, limit = 8) {
         title: track.title,
         url: track.url,
         duration: track.durationRaw || '3:30',
-        thumbnail: track.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`,
+        thumbnail: resolveBestThumbnail(track),
         artist: track.channel?.name || 'YouTube',
         isLive: Boolean(track.live)
       }));
@@ -861,7 +890,7 @@ async function searchMultipleTracks(query, limit = 8) {
           title: entry.title,
           url: url,
           duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(Math.floor(entry.duration % 60)).padStart(2, '0')}` : '3:30',
-          thumbnail: entry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
+          thumbnail: resolveBestThumbnail(entry),
           artist: entry.uploader || entry.channel || 'YouTube',
           isLive: false
         });

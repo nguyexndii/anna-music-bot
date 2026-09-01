@@ -18,7 +18,8 @@ const DEFAULT_GUILD_SETTINGS = {
   announceSongs: true,         // Bật/Tắt thông báo Embed bài đang phát
   updateVoiceStatus: true,     // Bật/Tắt tự động đổi trạng thái dòng chữ trên kênh Voice
   loopMode: 'off',             // Chế độ lặp: 'off' (Tắt) | 'song' (Lặp bài) | 'queue' (Lặp hàng chờ)
-  useAiAssistant: true         // Bật/Tắt Trợ lý DJ Gemini AI để gợi ý và tìm nhạc thông minh
+  useAiAssistant: true,        // Bật/Tắt Trợ lý DJ Gemini AI để gợi ý và tìm nhạc thông minh
+  language: 'en'               // Ngôn ngữ hệ thống: 'en' (English) | 'vi' (Tiếng Việt)
 };
 
 class SettingsManager {

@@ -1,57 +1,56 @@
+const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { hasMusicPermission } = require('../utils/permissionHelper');
-
-function sendTemp(message, payload, delayMs = 5000) {
-  message.reply(payload).then(msg => {
-    setTimeout(() => {
-      msg.delete().catch(() => {});
-      message.delete().catch(() => {});
-    }, delayMs);
-  }).catch(() => {});
-}
+const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
   name: 'leave',
   aliases: ['dc', 'dis', 'disconnect', 'out', 'roi'],
-  description: 'Cho bot rời khỏi kênh Voice',
-  async execute(message) {
-    const guildSettings = settingsManager.get(message.guild.id);
-    const queue = musicManager.get(message.guild.id);
+  description: 'Disconnect bot from current voice channel',
+  data: new SlashCommandBuilder()
+    .setName('leave')
+    .setDescription('Disconnect bot from current voice channel')
+    .setDescriptionLocalizations({
+      vi: 'Yêu cầu bot rời khỏi kênh Voice'
+    }),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    const guildSettings = settingsManager.get(ctx.guild.id);
+    const queue = musicManager.get(ctx.guild.id);
 
     // BẢO VỆ CHẾ ĐỘ 24/7
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247) {
-      const isAdmin = message.member.permissions.has('Administrator') || 
-                      message.member.permissions.has('ManageGuild') || 
-                      message.guild.ownerId === message.author.id;
+      const isAdmin = ctx.member.permissions.has('Administrator') || 
+                      ctx.member.permissions.has('ManageGuild') || 
+                      ctx.guild.ownerId === ctx.user.id;
       if (!isAdmin) {
-        return sendTemp(message, 'Đang bật chế độ 24/7.', 3000);
+        return ctx.reply('⚠️ Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể yêu cầu bot rời phòng!');
       }
     }
 
-    if (!hasMusicPermission(message.member)) {
+    if (!hasMusicPermission(ctx.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return sendTemp(message, `Cần vai trò ${roleText} để out bot.`, 3000);
+      return ctx.reply(`Cần vai trò ${roleText} để mời bot rời phòng.`);
     }
 
     if (!queue) {
-      return sendTemp(message, 'Bot không ở trong phòng Voice nào!', 3000);
+      return ctx.reply('Bot hiện không ở trong phòng Voice nào!');
     }
 
-    const memberVoice = message.member?.voice?.channel;
+    const memberVoice = ctx.member?.voice?.channel;
     if (!memberVoice) {
-      return sendTemp(message, 'Bạn cần vào phòng Voice trước!', 3000);
+      return ctx.reply('Bạn cần vào phòng Voice trước!');
     }
 
     // Nếu Admin đồng ý rời phòng, tắt 24/7
     if (queue.mode247) {
       queue.mode247 = false;
-      settingsManager.update(message.guild.id, { mode247: false });
+      settingsManager.update(ctx.guild.id, { mode247: false });
     }
 
     queue.destroy();
-    return sendTemp(message, 'Đã ngắt kết nối và rời Voice.', 3000);
+    return ctx.reply('👋 Đã ngắt kết nối và rời phòng Voice.');
   }
 };

@@ -1,30 +1,29 @@
+const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
-const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
-
-function sendTemp(message, payload, delayMs = 5000) {
-  message.reply(payload).then(msg => {
-    setTimeout(() => {
-      msg.delete().catch(() => {});
-      message.delete().catch(() => {});
-    }, delayMs);
-  }).catch(() => {});
-}
+const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
   name: 'pause',
   aliases: [],
-  description: 'Tạm dừng bài hát đang phát',
-  async execute(message) {
-    const queue = musicManager.get(message.guild.id);
+  description: 'Pause currently playing song',
+  data: new SlashCommandBuilder()
+    .setName('pause')
+    .setDescription('Pause currently playing song')
+    .setDescriptionLocalizations({
+      vi: 'Tạm dừng bài hát đang phát'
+    }),
+  async execute(source, args) {
+    const ctx = createContext(source, args);
+    const queue = musicManager.get(ctx.guild.id);
     if (!queue || !queue.currentSong) {
-      return message.reply('Hiện không có bài hát nào đang phát!');
+      return ctx.reply('Hiện không có bài hát nào đang phát!');
     }
 
     if (queue.paused) {
-      return message.reply('Nhạc hiện tại đã bị tạm dừng trước đó!');
+      return ctx.reply('Nhạc hiện tại đã bị tạm dừng trước đó!');
     }
 
     queue.togglePause();
-    return message.reply('Đã tạm dừng phát nhạc.');
+    return ctx.reply('⏸️ Đã tạm dừng phát nhạc.');
   }
 };
