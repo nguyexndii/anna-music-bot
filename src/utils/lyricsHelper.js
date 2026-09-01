@@ -11,60 +11,68 @@ function normalizeStr(str) {
     .trim();
 }
 
-function cleanSearchVariants(rawTitle, rawArtist = '') {
-  if (!rawTitle) return [];
-
-  // Remove common YouTube clutter
-  let clean = rawTitle
-    .replace(/\[(?:official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat).*?\]/gi, '')
-    .replace(/\((?:official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?).*?\)/gi, '')
-    .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?)/gi, '')
+function cleanTitle(str) {
+  if (!str) return '';
+  return str
+    .replace(/\[.*?\]/g, '')
+    .replace(/\((?:piano|acoustic|live|remix|official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?|version|ver|catena).*?\)/gi, '')
+    .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?|mv\s*official|official)/gi, '')
     .replace(/4k|hd|1080p/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function extractArtists(artistStr) {
+  if (!artistStr) return [];
+  const clean = artistStr.replace(/prod\.?\s*by.*/gi, '').trim();
+  const parts = clean.split(/\s*(?:ft\.?|feat\.?|x|&|\+|cùng|với|,)\s*/i).map(s => s.trim()).filter(Boolean);
+  return parts;
+}
+
+function generateSearchVariants(rawTitle, rawArtist = '') {
+  if (!rawTitle) return [];
 
   const queries = [];
+  const primaryClean = cleanTitle(rawTitle);
 
-  // Require whitespace around separator to not break names like B-Ray or T-Ara
-  const separatorParts = clean.split(/\s+[-|:/\\–—]\s+/).map(s => s.trim()).filter(Boolean);
+  const rawSegments = primaryClean.split(/\s*[-|:/\\–—]\s*/).map(s => cleanTitle(s)).filter(Boolean);
+  const meaningfulSegments = rawSegments.filter(s => s.length >= 2 && !/^(mv|official|audio|video|lyrics)$/i.test(s));
 
-  if (separatorParts.length >= 2) {
-    const p1 = separatorParts[0].replace(/prod\.?\s*by.*/gi, '').trim();
-    const p2 = separatorParts[1].replace(/prod\.?\s*by.*/gi, '').trim();
+  if (meaningfulSegments.length >= 2) {
+    const s1 = meaningfulSegments[0];
+    const s2 = meaningfulSegments[1];
 
-    // 1. Direct get: Artist = p1, Track = p2
-    queries.push({ track: p2, artist: p1, expectedTrack: p2, expectedArtist: p1 });
-    // 2. Direct get: Track = p1, Artist = p2
-    queries.push({ track: p1, artist: p2, expectedTrack: p1, expectedArtist: p2 });
+    const s1Artists = extractArtists(s1);
+    const s2Artists = extractArtists(s2);
 
-    queries.push({ q: `${p1} ${p2}`, expectedTrack: p2, expectedArtist: p1 });
-    queries.push({ q: `${p2} ${p1}`, expectedTrack: p1, expectedArtist: p2 });
+    for (const art of s2Artists) {
+      queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
+      queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
+    }
+    queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
+    queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
+
+    for (const art of s1Artists) {
+      queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
+      queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
+    }
+    queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
+    queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
   }
 
-  // Check for ft. / feat. / x / &
-  const ftMatch = clean.match(/(.*?)\s+(?:ft\.?|feat\.?|x|&)\s+(.*)/i);
-  if (ftMatch) {
-    const mainPart = ftMatch[1].trim();
-    const guestPart = ftMatch[2].trim();
-    queries.push({ track: mainPart, artist: guestPart, expectedTrack: mainPart, expectedArtist: guestPart });
-    queries.push({ q: `${mainPart} ${guestPart}`, expectedTrack: mainPart, expectedArtist: guestPart });
-    queries.push({ q: mainPart, expectedTrack: mainPart });
+  for (const seg of meaningfulSegments) {
+    queries.push({ q: seg, expectedTrack: seg });
   }
 
-  // Provided artist if not YouTube Music / unknown
-  if (rawArtist && rawArtist !== 'Unknown' && rawArtist !== 'YouTube Music' && !rawArtist.includes('WxLF') && !rawArtist.includes('Topic')) {
-    queries.push({ track: clean, artist: rawArtist, expectedTrack: clean, expectedArtist: rawArtist });
-    queries.push({ q: `${clean} ${rawArtist}`, expectedTrack: clean, expectedArtist: rawArtist });
+  if (rawArtist && rawArtist !== 'Unknown' && rawArtist !== 'YouTube Music' && !rawArtist.includes('Topic') && !rawArtist.includes('Entertainment') && !rawArtist.includes('WxLF')) {
+    queries.push({ track: primaryClean, artist: rawArtist, expectedTrack: primaryClean, expectedArtist: rawArtist });
+    queries.push({ q: `${primaryClean} ${rawArtist}`, expectedTrack: primaryClean, expectedArtist: rawArtist });
   }
 
-  // Raw clean query fallback (must match track title)
-  queries.push({ q: clean, expectedTrack: clean });
-
-  // Deduplicate
   const seen = new Set();
   const deduped = [];
   for (const item of queries) {
-    const key = item.track && item.artist ? `${item.track.toLowerCase()}|${item.artist.toLowerCase()}` : (item.q || '').toLowerCase();
+    const key = (item.track && item.artist ? `${item.track}|${item.artist}` : (item.q || '')).toLowerCase();
     if (key && !seen.has(key)) {
       seen.add(key);
       deduped.push(item);
@@ -80,7 +88,7 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
   const mArtist = normalizeStr(match.artistName);
 
   if (expectedTrack) {
-    const eTrack = normalizeStr(expectedTrack);
+    const eTrack = normalizeStr(cleanTitle(expectedTrack));
     const trackOk = mTrack.includes(eTrack) || eTrack.includes(mTrack);
     if (!trackOk) {
       const eWords = eTrack.split(' ').filter(w => w.length >= 2);
@@ -92,8 +100,11 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
 
   if (expectedArtist) {
     const eArtist = normalizeStr(expectedArtist);
-    const artistOk = mArtist.includes(eArtist) || eArtist.includes(mArtist) || mTrack.includes(eArtist);
-    if (!artistOk) return false; // Prevent foreign unrelated artists
+    const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
+    if (artistWords.length > 0) {
+      const artistOk = artistWords.some(w => mArtist.includes(w) || mTrack.includes(w));
+      if (!artistOk) return false;
+    }
   }
 
   return true;
@@ -137,7 +148,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
     };
   }
 
-  const variants = cleanSearchVariants(rawTitle, artist);
+  const variants = generateSearchVariants(rawTitle, artist);
   const targetDurationSec = durationMs ? durationMs / 1000 : 0;
 
   for (const item of variants) {
@@ -216,7 +227,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
 }
 
 module.exports = {
-  cleanSearchVariants,
+  cleanSearchVariants: generateSearchVariants,
   fetchLyrics,
   getLyrics: fetchLyrics
 };
