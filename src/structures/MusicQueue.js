@@ -520,6 +520,15 @@ class MusicQueue {
       this.player.play(resource);
       if (this.currentSong) {
         this.currentSong.startTime = Date.now();
+        
+        // Ghi nhận ngay vào lịch sử bài hát khi bắt đầu phát!
+        if (!this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
+          if (!this.history.includes(this.currentSong.url)) {
+            this.history.unshift(this.currentSong.url);
+            if (this.history.length > 50) this.history.pop();
+          }
+          historyManager.addSong(this.guild.id, this.currentSong).catch(() => {});
+        }
       }
 
       // Cập nhật trạng thái kênh Voice (Voice Channel Status)

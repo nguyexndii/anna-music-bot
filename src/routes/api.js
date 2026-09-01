@@ -116,19 +116,20 @@ module.exports = function createApiRouter(client) {
   // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache)
   router.get('/search', async (req, res) => {
     const query = req.query.q?.trim();
-    const limit = parseInt(req.query.limit, 10) || 8;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const mode = req.query.mode || 'official';
 
     if (!query) {
       return res.json({ success: true, results: [] });
     }
 
-    const cacheKey = `${query.toLowerCase()}_${limit}`;
+    const cacheKey = `${query.toLowerCase()}_${limit}_${mode}`;
     if (searchCache.has(cacheKey)) {
       return res.json({ success: true, results: searchCache.get(cacheKey) });
     }
 
     try {
-      const results = await searchMultipleTracks(query, limit);
+      const results = await searchMultipleTracks(query, limit, mode);
       if (results && results.length > 0) {
         searchCache.set(cacheKey, results);
       }
@@ -227,7 +228,17 @@ module.exports = function createApiRouter(client) {
         lyricsSync: queue ? (guildSettings.lyricsSync !== false) : true,
         current: currentTrack ? {
           title: currentTrack.title,
-          artist: currentTrack.artist || (currentTrack.title.includes(' - ') ? currentTrack.title.split(' - ')[0].trim() : 'Unknown'),
+          artist: (() => {
+            if (currentTrack.artist && currentTrack.artist !== 'Unknown' && !currentTrack.artist.startsWith('[') && !currentTrack.artist.includes('Topic')) {
+              return currentTrack.artist;
+            }
+            const clean = (currentTrack.title || '').replace(/\[.*?\]|【.*?】/g, ' ').replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
+            const segs = clean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => s.trim()).filter(Boolean);
+            if (segs.length >= 2) {
+              return segs[1].replace(/\(.*?prod.*?\)/gi, '').replace(/prod\.?\s*by.*/gi, '').trim() || segs[0];
+            }
+            return currentTrack.artist || 'YouTube Music';
+          })(),
           url: currentTrack.url,
           thumbnail: currentTrack.thumbnail,
           duration: currentTrack.duration,
@@ -247,7 +258,17 @@ module.exports = function createApiRouter(client) {
         queue: (queue?.songs || []).map((t, idx) => ({
           index: idx,
           title: t.title,
-          artist: t.artist || (t.title.includes(' - ') ? t.title.split(' - ')[0].trim() : 'YouTube Music'),
+          artist: (() => {
+            if (t.artist && t.artist !== 'Unknown' && !t.artist.startsWith('[') && !t.artist.includes('Topic')) {
+              return t.artist;
+            }
+            const clean = (t.title || '').replace(/\[.*?\]|【.*?】/g, ' ').replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
+            const segs = clean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => s.trim()).filter(Boolean);
+            if (segs.length >= 2) {
+              return segs[1].replace(/\(.*?prod.*?\)/gi, '').replace(/prod\.?\s*by.*/gi, '').trim() || segs[0];
+            }
+            return t.artist || 'YouTube Music';
+          })(),
           url: t.url,
           thumbnail: t.thumbnail,
           duration: t.duration,
