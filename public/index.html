@@ -1,23 +1,27 @@
 <!DOCTYPE html>
-<html lang="vi" class="dark">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Anna Music • Web Player & Dashboard</title>
+    <title>Anna Music • Web Player</title>
     <link rel="icon" type="image/jpeg" href="/logo.jpg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-C17GHlQm.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Jr0XctJQ.css">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-BgFUxla-.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BLgBgCOV.css">
   </head>
-  <body class="bg-anna-bg text-anna-text font-sans antialiased min-h-screen selection:bg-anna-accent selection:text-white">
+  <body>
     <div id="root">
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f1015; color: #949ba4; font-family: sans-serif; text-align: center; padding: 20px;">
-        <div style="width: 48px; height: 48px; border: 3px solid rgba(88, 101, 242, 0.2); border-top-color: #5865f2; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;"></div>
-        <p style="font-size: 14px; font-weight: bold; color: #fff; margin: 0 0 8px 0;">Đang khởi động Anna Music Web...</p>
-        <p style="font-size: 12px; margin: 0;">Nếu trang không tải, vui lòng gõ <b style="color: #5865f2;">.web</b> trên Discord để mở lại.</p>
-        <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #111316; color: #777b80; font-family: 'DM Sans', sans-serif; text-align: center; padding: 20px;">
+        <div style="font-family: Georgia, serif; font-size: 40px; letter-spacing: -5px; padding-right: 5px; line-height: 1; margin-bottom: 24px;">
+          <span style="color: #e8c977;">an</span><span style="color: #ef7864;">na</span>
+        </div>
+        <p style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.18em; color: #777b80; margin: 0 0 24px;">ĐANG KHỞI ĐỘNG...</p>
+        <div style="width: 32px; height: 2px; background: #2a2d31; border-radius: 2px; overflow: hidden;">
+          <div style="height: 100%; width: 40%; background: #e8c977; border-radius: 2px; animation: slide 1.2s ease-in-out infinite;"></div>
+        </div>
+        <style>@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }</style>
       </div>
     </div>
   </body>
