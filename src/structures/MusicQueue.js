@@ -498,8 +498,9 @@ class MusicQueue {
   }
 
   /**
-   * Lập lịch tải trước bài tiếp theo khi bài hiện tại còn 20 giây cuối
-   * Giúp tiết kiệm RAM tối đa cho VPS 2GB (tránh chạy đồng thời 2 tiến trình yt-dlp & ffmpeg)
+   * Lập lịch tìm trước bài tiếp theo (Metadata Pre-fetch) khi bài hiện tại còn 20 giây cuối.
+   * LƯU Ý: Chỉ tìm kiếm metadata (URL/Title) nhẹ nhàng, TUYỆT ĐỐI KHÔNG spawn tiến trình
+   * stream yt-dlp & ffmpeg song song để tránh làm quá tải CPU 100% gây mất tiếng ở 20s cuối bài!
    */
   schedulePreload() {
     this.clearPreloadTimer();
@@ -509,16 +510,14 @@ class MusicQueue {
     const totalSec = parseDurationToSeconds(this.currentSong.duration);
 
     if (is247 || totalSec <= 0) {
-      this._preloadNextTrackResource();
       return;
     }
 
-    // Với bài hát có thời lượng: Kích hoạt khi còn 20 giây cuối
+    // Với bài hát có thời lượng: Kích hoạt tìm trước metadata bài tiếp theo ở 20s cuối
     const triggerAfterMs = Math.max(1000, (totalSec - 20) * 1000);
     this.preloadTimer = setTimeout(() => {
       this.preloadTimer = null;
       this._prefetchAutoplayTrack();
-      this._preloadNextTrackResource();
     }, triggerAfterMs);
   }
 
@@ -898,8 +897,7 @@ class MusicQueue {
         if (nextTrack) {
           nextTrack.requestedBy = 'Tự động phát 🎵';
           this.prefetchedSong = nextTrack;
-          // Tải trước ngầm luồng âm thanh vào RAM
-          this._preloadNextTrackResource();
+          console.log(`[Autoplay Metadata Pre-fetch] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'})`);
         }
       } catch (err) {
         console.warn('[Autoplay Pre-fetch Error]:', err.message);
@@ -910,39 +908,10 @@ class MusicQueue {
   }
 
   /**
-   * Tải trước tài nguyên âm thanh (AudioResource) của bài tiếp theo vào RAM
-   * Giúp chuyển bài tức thì (0.001 giây) không có khoảng nghỉ / dead air
+   * Giữ lại để tương thích ngược nhưng không spawn tiến trình song song gây mất tiếng
    */
   async _preloadNextTrackResource() {
-    if (this._isPreloading || this.isDestroyed || this.isStopped) return;
-    const nextTrack = this.songs.length > 0 ? this.songs[0] : this.prefetchedSong;
-    if (!nextTrack) return;
-
-    const nextKey = nextTrack.url || nextTrack.searchQuery;
-    if (this.preloadedResource && this.preloadedSongUrl === nextKey) return;
-
-    // RAM Guard: Kiểm tra hệ thống có đủ RAM trống không trước khi spawn tiến trình nặng
-    if (!hasEnoughMemoryToPreload()) {
-      return;
-    }
-
-    this._isPreloading = true;
-    logMemoryUsage(`Preload Start: ${(nextTrack.title || '').slice(0, 25)}`);
-    try {
-      const guildSettings = settingsManager.get(this.guild.id);
-      const crossfade = guildSettings.crossfadeDuration || 0;
-      const resource = await createResource(nextTrack, crossfade);
-      if (resource) {
-        this._cleanupResource(this.preloadedResource);
-        this.preloadedResource = resource;
-        this.preloadedSongUrl = nextKey;
-        logMemoryUsage(`Preload Done: ${(nextTrack.title || '').slice(0, 25)}`);
-      }
-    } catch (e) {
-      // Bỏ qua lỗi preload, playNext sẽ tự tạo lại on-demand
-    } finally {
-      this._isPreloading = false;
-    }
+    return;
   }
 }
 

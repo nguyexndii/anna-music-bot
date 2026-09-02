@@ -907,10 +907,16 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
     return directRes || [];
   }
 
+  // Helper chạy tác vụ với timeout an toàn, tránh treo Node.js Event Loop
+  const withTimeout = (promise, ms) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Search timeout (${ms}ms)`)), ms))
+  ]);
+
   // 1. Ưu tiên cao nhất: yt-search (Lấy cả Playlists/Albums và Videos đầy đủ)
   try {
     const isPlaylistQuery = /\balbum\b|\bplaylist\b|\btuyển tập\b|\bdanh sách phát\b/i.test(query);
-    const r = await yts(query);
+    const r = await withTimeout(yts(query), 4000);
     if (r) {
       const playlistResults = (r.playlists || []).slice(0, isPlaylistQuery ? 8 : 4).map(p => ({
         title: p.title,
@@ -988,12 +994,15 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
       }
     }
   } catch (ytsErr) {
-    console.warn('[searchMultipleTracks yt-search error]:', ytsErr.message);
+    console.warn('[searchMultipleTracks yt-search notice]:', ytsErr.message);
   }
 
-  // 2. Fallback qua play-dl
+  // 2. Fallback nhẹ qua play-dl (không spawn process nặng)
   try {
-    const searchResults = await play.search(query, { limit: Math.min(limit, 15), source: { youtube: 'video' } });
+    const searchResults = await withTimeout(
+      play.search(query, { limit: Math.min(limit, 15), source: { youtube: 'video' } }),
+      3000
+    );
     if (searchResults && searchResults.length > 0) {
       return searchResults.map(track => ({
         title: track.title,
@@ -1005,35 +1014,6 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
       }));
     }
   } catch (err) {}
-
-  // 3. Fallback qua yt-dlp nếu cả 2 gặp lỗi
-  try {
-    const res = await ytdlp(`ytsearch${Math.min(limit, 15)}:${query}`, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      flatPlaylist: true
-    });
-
-    if (res && res.entries && res.entries.length > 0) {
-      const results = [];
-      for (const entry of res.entries) {
-        if (!entry || !entry.title) continue;
-        const url = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
-        results.push({
-          title: entry.title,
-          url: url,
-          duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(Math.floor(entry.duration % 60)).padStart(2, '0')}` : '3:30',
-          thumbnail: resolveBestThumbnail(entry),
-          artist: entry.uploader || entry.channel || 'YouTube',
-          isLive: false
-        });
-        if (results.length >= limit) break;
-      }
-      if (results.length > 0) return results;
-    }
-  } catch (err) {
-    console.warn('[searchMultipleTracks yt-dlp fallback error]:', err.message);
-  }
 
   return [];
 }

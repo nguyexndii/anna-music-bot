@@ -120,7 +120,7 @@ module.exports = function createApiRouter(client) {
     const limit = parseInt(req.query.limit, 10) || 20;
     const mode = req.query.mode || 'official';
 
-    if (!query) {
+    if (!query || query.length < 2) {
       return res.json({ success: true, results: [] });
     }
 
