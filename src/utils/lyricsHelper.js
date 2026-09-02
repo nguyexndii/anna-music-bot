@@ -289,9 +289,20 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
   try {
     const primaryClean = stripParentheses(cleanTitle(rawTitle));
     const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
-    const cleanArt = cleanArtistName(artist);
+    let cleanArt = cleanArtistName(artist);
+
+    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "Bước Qua Nhau / Vũ.")
+    let cleanTitleOnly = primaryClean;
+    const segs = primaryClean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).filter(Boolean);
+    if (segs.length >= 2) {
+      cleanTitleOnly = segs[0].trim();
+      if (!cleanArt || cleanArt === 'Unknown') {
+        cleanArt = cleanArtistName(segs[1]);
+      }
+    }
+
     const url = new URL(fallbackBaseUrl);
-    url.searchParams.set('title', primaryClean);
+    url.searchParams.set('title', cleanTitleOnly);
     if (cleanArt && cleanArt !== 'Unknown') {
       url.searchParams.set('artist', cleanArt);
     }
