@@ -662,21 +662,21 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
   }
 
   // 1. Lớp 1: YouTube Mix (Ưu tiên cao)
-  const ytMixTrack = await getYoutubeMix(lastSong, playedUrls);
+  const ytMixTrack = await getYoutubeMix(lastSong, playedList);
   if (ytMixTrack) {
     console.log('[Autoplay] Found via YouTube Mix');
     return ytMixTrack;
   }
 
   // 2. Lớp 2: Last.fm Similar Track (Fallback thứ 2)
-  const lastfmTrack = await getLastfmSimilar(lastSong, playedUrls);
+  const lastfmTrack = await getLastfmSimilar(lastSong, playedList);
   if (lastfmTrack) {
     console.log('[Autoplay] Found via Last.fm');
     return lastfmTrack;
   }
 
   // 3. Lớp 3: Heuristic Fallback (Fallback cuối cùng)
-  const heuristicTrack = await getHeuristicRelatedTrack(lastSong, playedUrls);
+  const heuristicTrack = await getHeuristicRelatedTrack(lastSong, playedList);
   if (heuristicTrack) {
     console.log('[Autoplay] Found via heuristic fallback');
     return heuristicTrack;
@@ -928,6 +928,18 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
           // Giảm điểm video rác/chế không chuẩn nhịp
           if (title.includes('karaoke') || title.includes('parody') || title.includes('reaction') || title.includes('speed up') || title.includes('slowed') || title.includes('nightcore')) {
             score -= 60;
+          }
+
+          // Phạt nặng video tổng hợp / compilation / liên khúc / dài lê thê khi tìm kiếm bài hát đơn lẻ
+          if (!isPlaylistQuery) {
+            const compilationRegex = /liên khúc|nonstop|tuyển tập|top\s*\d+|\d+\s*(ca khúc|bài hát|bản hit|hits)|nhạc tổng hợp|album|playlist|gây nghiện|hay nhất/i;
+            if (compilationRegex.test(title)) {
+              score -= 80;
+            }
+            const durationSec = v.seconds || 0;
+            if (durationSec > 480) {
+              score -= 50 + Math.min(50, Math.floor(durationSec / 300) * 10);
+            }
           }
 
           return { ...v, score };

@@ -169,18 +169,26 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
         if (res.ok) {
           const match = await res.json();
           if (match && (match.plainLyrics || match.syncedLyrics)) {
-            if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-              const lyrics = match.plainLyrics || match.syncedLyrics;
-              const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+            // Kiểm tra thời lượng nếu endpoint có trả về duration
+            const durationDiff = (targetDurationSec > 0 && typeof match.duration === 'number')
+              ? Math.abs(match.duration - targetDurationSec)
+              : 0;
 
-              return {
-                title: match.trackName || rawTitle,
-                artist: match.artistName || artist || '',
-                lyrics: cleanLyrics,
-                syncedLyrics: parseLrc(match.syncedLyrics),
-                duration: match.duration,
-                autoOffsetMs: 0
-              };
+            // Nếu lệch quá xa (> 12s) so với bài đang phát thực tế thì bỏ qua, tiếp tục thử tiếp
+            if (!(targetDurationSec > 0 && typeof match.duration === 'number' && durationDiff > 12)) {
+              if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+                const lyrics = match.plainLyrics || match.syncedLyrics;
+                const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+
+                return {
+                  title: match.trackName || rawTitle,
+                  artist: match.artistName || artist || '',
+                  lyrics: cleanLyrics,
+                  syncedLyrics: parseLrc(match.syncedLyrics),
+                  duration: match.duration,
+                  autoOffsetMs: 0
+                };
+              }
             }
           }
         }
@@ -196,8 +204,25 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
 
         if (res.ok) {
           const data = await res.json();
-          const results = Array.isArray(data) ? data : [data];
+          let results = Array.isArray(data) ? data : [data];
           if (results.length > 0) {
+            // Sắp xếp kết quả: Khi durationMs > 0, ưu tiên |match.duration - targetDurationSec| <= 7s lên trước
+            if (targetDurationSec > 0) {
+              results.sort((a, b) => {
+                const aHasDur = typeof a.duration === 'number' && a.duration > 0;
+                const bHasDur = typeof b.duration === 'number' && b.duration > 0;
+                const aDiff = aHasDur ? Math.abs(a.duration - targetDurationSec) : 9999;
+                const bDiff = bHasDur ? Math.abs(b.duration - targetDurationSec) : 9999;
+
+                const aClose = aDiff <= 7;
+                const bClose = bDiff <= 7;
+                if (aClose && !bClose) return -1;
+                if (!aClose && bClose) return 1;
+
+                return aDiff - bDiff;
+              });
+            }
+
             for (const match of results) {
               const lyrics = match?.syncedLyrics || match?.plainLyrics;
               if (lyrics && lyrics.trim().length > 10) {
@@ -220,11 +245,65 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
       }
     } catch (e) {}
   }
+
+  // 3. Fallback qua microservice Python (syncedlyrics đa nguồn) nếu LRCLIB không tìm thấy
+  const fallbackResult = await fetchLyricsFallback(rawTitle, artist, durationMs);
+  if (fallbackResult) {
+    return fallbackResult;
+  }
+
+  return null;
+}
+
+/**
+ * Microservice fallback đa nguồn qua Python syncedlyrics (Musixmatch, NetEase, Genius...)
+ */
+async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
+  const fallbackBaseUrl = process.env.LYRICS_FALLBACK_URL || 'http://127.0.0.1:8787/lyrics';
+  try {
+    const primaryClean = cleanTitle(rawTitle);
+    const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
+    const url = new URL(fallbackBaseUrl);
+    url.searchParams.set('title', primaryClean);
+    if (artist && artist !== 'Unknown' && !artist.includes('Topic')) {
+      url.searchParams.set('artist', cleanTitle(artist));
+    }
+    if (targetDurationSec > 0) {
+      url.searchParams.set('duration', String(targetDurationSec));
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'AnnaMusicBot/2.0 (Discord Music Bot)' },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && (data.syncedLyrics || data.plainLyrics)) {
+        const plain = data.plainLyrics || (Array.isArray(data.syncedLyrics) ? data.syncedLyrics.map(l => l.text).join('\n') : '');
+        return {
+          title: rawTitle,
+          artist: artist || '',
+          lyrics: plain.trim(),
+          syncedLyrics: Array.isArray(data.syncedLyrics) && data.syncedLyrics.length > 0 ? data.syncedLyrics : null,
+          duration: targetDurationSec || null,
+          autoOffsetMs: 0
+        };
+      }
+    }
+  } catch (e) {
+    // An toàn: không bao giờ làm crash bot chính nếu microservice offline hoặc timeout
+  }
   return null;
 }
 
 module.exports = {
   cleanSearchVariants: generateSearchVariants,
   fetchLyrics,
+  fetchLyricsFallback,
   getLyrics: fetchLyrics
 };

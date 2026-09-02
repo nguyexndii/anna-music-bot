@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const { fetchLyrics } = require('../utils/lyricsHelper');
-const { createEmbed, createErrorEmbed } = require('../utils/embed');
+const { createEmbed, createErrorEmbed, parseDurationToMs } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
@@ -28,6 +28,7 @@ module.exports = {
     const queue = musicManager.get(ctx.guild.id);
     let targetTitle = '';
     let targetArtist = '';
+    let targetDurationMs = 0;
 
     const queryInput = ctx.options.getString('query');
     if (queryInput) {
@@ -36,7 +37,8 @@ module.exports = {
       targetTitle = args.join(' ');
     } else if (queue && queue.currentSong && queue.currentSong.requestedBy !== 'Auto (24/7)') {
       targetTitle = queue.currentSong.title;
-      targetArtist = queue.currentSong.author || '';
+      targetArtist = queue.currentSong.author || queue.currentSong.artist || '';
+      targetDurationMs = queue.currentSong.durationMs || (queue.currentSong.duration ? parseDurationToMs(queue.currentSong.duration) : 0);
     } else {
       return ctx.reply('Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`');
     }
@@ -44,7 +46,7 @@ module.exports = {
     await ctx.deferReply();
 
     try {
-      const result = await fetchLyrics(targetTitle, targetArtist);
+      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs);
 
       if (!result || !result.lyrics || result.lyrics.trim().length === 0) {
         const notFoundEmbed = createErrorEmbed(`Không tìm thấy lời bài hát cho **${targetTitle}**!\nHãy thử nhập đầy đủ tên bài hát kèm tên ca sĩ (vd: \`/lyrics Có Em Madihu\`).`);
