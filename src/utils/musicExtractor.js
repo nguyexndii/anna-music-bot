@@ -1,3 +1,19 @@
+// Tự động vá lỗi thư viện yt-search (tránh lỗi title.trim() undefined khi YouTube trả về playlist/mix không có tiêu đề)
+try {
+  const fs = require('fs');
+  const path = require('path');
+  const ytSearchDist = path.join(__dirname, '../../node_modules/yt-search/dist/yt-search.js');
+  if (fs.existsSync(ytSearchDist)) {
+    let code = fs.readFileSync(ytSearchDist, 'utf8');
+    if (code.includes('_title.trim()')) {
+      code = code.replace(/_title\.trim\(\)/g, '(_title || "").trim()');
+      code = code.replace(/_title2\.trim\(\)/g, '(_title2 || "").trim()');
+      code = code.replace(/_title3\.trim\(\)/g, '(_title3 || "").trim()');
+      fs.writeFileSync(ytSearchDist, code, 'utf8');
+    }
+  }
+} catch (e) {}
+
 const ytdlp = require('yt-dlp-exec');
 const play = require('play-dl');
 const yts = require('yt-search');
