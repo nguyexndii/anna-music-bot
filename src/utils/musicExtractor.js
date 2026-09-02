@@ -937,9 +937,15 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
 
           // Điểm cộng kênh chính chủ và bản thu chuẩn
           if (author.includes('topic') || author.includes('official') || author.includes('records') || author.includes('vevo')) score += 30;
-          if (title.includes('official audio') || title.includes('audio') || title.includes('bản thu')) score += 25;
-          if (title.includes('official music video') || title.includes('official mv') || title.includes('official video')) score += 20;
-          if (title.includes('lyric video') || title.includes('lyrics')) score += 15;
+          // Ưu tiên mạnh bản audio
+          if (title.includes('official audio') || title.includes('(audio)') || title.includes('audio version')) score += 50;
+          if (title.includes('audio') || title.includes('bản thu')) score += 20;
+          if (title.includes('lyric video') || title.includes('lyrics')) score += 10;
+
+          // Phạt MV — lời nhạc thường lệch so với bản thu chuẩn
+          if (title.includes('official music video') || title.includes('official mv') || title.includes('official video') || title.includes('(mv)') || title.includes('[mv]') || title.includes('(m/v)') || title.includes('[m/v]')) {
+            score -= 40;
+          }
 
           // Giảm điểm video rác/chế không chuẩn nhịp
           if (title.includes('karaoke') || title.includes('parody') || title.includes('reaction') || title.includes('speed up') || title.includes('slowed') || title.includes('nightcore')) {
