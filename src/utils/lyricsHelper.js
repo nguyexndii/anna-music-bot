@@ -27,6 +27,16 @@ function cleanTitle(str) {
   return s;
 }
 
+function stripParentheses(str) {
+  if (!str) return '';
+  return str.replace(/\(.*?\)/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function cleanArtistName(str) {
+  if (!str) return '';
+  return cleanTitle(str).replace(/(?:official\s*(?:channel)?|channel|topic|vevo|records|entertainment)/gi, '').trim();
+}
+
 function extractArtists(artistStr) {
   if (!artistStr) return [];
   const clean = artistStr.replace(/prod\.?\s*(?:by)?\s*[\w\d_]+/gi, '').trim();
@@ -39,41 +49,49 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
 
   const queries = [];
   const primaryClean = cleanTitle(rawTitle);
+  const deepClean = stripParentheses(primaryClean);
+  const cleanArt = cleanArtistName(rawArtist);
 
-  const rawSegments = primaryClean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => cleanTitle(s)).filter(Boolean);
-  const meaningfulSegments = rawSegments.filter(s => s.length >= 2 && !/^(mv|official|audio|video|lyrics)$/i.test(s));
-
-  if (meaningfulSegments.length >= 2) {
-    const s1 = meaningfulSegments[0];
-    const s2 = meaningfulSegments[1];
-
-    const s1Artists = extractArtists(s1);
-    const s2Artists = extractArtists(s2);
-
-    // Combination A: s1 is track, s2 is artist
-    for (const art of s2Artists) {
-      queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
-      queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
-    }
-    queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
-    queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
-
-    // Combination B: s2 is track, s1 is artist
-    for (const art of s1Artists) {
-      queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
-      queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
-    }
-    queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
-    queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
+  const titlesToProcess = [primaryClean];
+  if (deepClean && deepClean !== primaryClean) {
+    titlesToProcess.unshift(deepClean); // Ưu tiên bản đã bỏ ngoặc đơn phụ đề tiếng Anh
   }
 
-  // Full clean title query
-  queries.push({ q: primaryClean, expectedTrack: primaryClean });
+  for (const t of titlesToProcess) {
+    const rawSegments = t.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => cleanTitle(s)).filter(Boolean);
+    const meaningfulSegments = rawSegments.filter(s => s.length >= 2 && !/^(mv|official|audio|video|lyrics)$/i.test(s));
 
-  if (rawArtist && rawArtist !== 'Unknown' && rawArtist !== 'YouTube Music' && !rawArtist.includes('Topic') && !rawArtist.includes('Entertainment') && !rawArtist.includes('02.') && !rawArtist.includes('03.')) {
-    const cleanArt = cleanTitle(rawArtist);
-    queries.push({ track: primaryClean, artist: cleanArt, expectedTrack: primaryClean, expectedArtist: cleanArt });
-    queries.push({ q: `${primaryClean} ${cleanArt}`, expectedTrack: primaryClean, expectedArtist: cleanArt });
+    if (meaningfulSegments.length >= 2) {
+      const s1 = meaningfulSegments[0];
+      const s2 = meaningfulSegments[1];
+
+      const s1Artists = extractArtists(s1);
+      const s2Artists = extractArtists(s2);
+
+      // Combination A: s1 is track, s2 is artist
+      for (const art of s2Artists) {
+        queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
+        queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
+      }
+      queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
+      queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
+
+      // Combination B: s2 is track, s1 is artist
+      for (const art of s1Artists) {
+        queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
+        queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
+      }
+      queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
+      queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
+    }
+
+    // Full clean title query
+    queries.push({ q: t, expectedTrack: t, expectedArtist: cleanArt || undefined });
+
+    if (cleanArt && cleanArt !== 'Unknown' && cleanArt !== 'YouTube Music') {
+      queries.push({ track: t, artist: cleanArt, expectedTrack: t, expectedArtist: cleanArt });
+      queries.push({ q: `${t} ${cleanArt}`, expectedTrack: t, expectedArtist: cleanArt });
+    }
   }
 
   const seen = new Set();
@@ -96,17 +114,26 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
 
   if (expectedTrack) {
     const eTrack = normalizeStr(cleanTitle(expectedTrack));
-    const exactSub = mTrack.includes(eTrack) || eTrack.includes(mTrack);
+    const exactSub = mTrack === eTrack || mTrack.startsWith(eTrack + ' ') || eTrack.startsWith(mTrack + ' ');
     if (!exactSub) {
       const eWords = eTrack.split(' ').filter(w => w.length >= 2);
       if (eWords.length === 0) return false;
-      const matchWords = eWords.filter(w => mTrack.includes(w));
-      if (matchWords.length < Math.ceil(eWords.length * 0.65)) return false;
+      if (eWords.length <= 3) {
+        // Tên ngắn (<= 3 từ): Không được chèn từ lạ vào giữa (ví dụ "bước qua nhau" vs "bước qua đời nhau")
+        const mCompact = mTrack.replace(/\s+/g, '');
+        const eCompact = eTrack.replace(/\s+/g, '');
+        if (!mCompact.includes(eCompact) && !eCompact.includes(mCompact)) {
+          return false;
+        }
+      } else {
+        const matchWords = eWords.filter(w => mTrack.includes(w));
+        if (matchWords.length < Math.ceil(eWords.length * 0.7)) return false;
+      }
     }
   }
 
   if (expectedArtist) {
-    const eArtist = normalizeStr(cleanTitle(expectedArtist));
+    const eArtist = normalizeStr(cleanArtistName(expectedArtist));
     const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
     if (artistWords.length > 0) {
       const artistOk = artistWords.some(w => mArtist.includes(w) || mTrack.includes(w));
@@ -169,26 +196,18 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
         if (res.ok) {
           const match = await res.json();
           if (match && (match.plainLyrics || match.syncedLyrics)) {
-            // Kiểm tra thời lượng nếu endpoint có trả về duration
-            const durationDiff = (targetDurationSec > 0 && typeof match.duration === 'number')
-              ? Math.abs(match.duration - targetDurationSec)
-              : 0;
+            if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+              const lyrics = match.plainLyrics || match.syncedLyrics;
+              const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
 
-            // Nếu lệch quá xa (> 12s) so với bài đang phát thực tế thì bỏ qua, tiếp tục thử tiếp
-            if (!(targetDurationSec > 0 && typeof match.duration === 'number' && durationDiff > 12)) {
-              if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-                const lyrics = match.plainLyrics || match.syncedLyrics;
-                const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
-
-                return {
-                  title: match.trackName || rawTitle,
-                  artist: match.artistName || artist || '',
-                  lyrics: cleanLyrics,
-                  syncedLyrics: parseLrc(match.syncedLyrics),
-                  duration: match.duration,
-                  autoOffsetMs: 0
-                };
-              }
+              return {
+                title: match.trackName || rawTitle,
+                artist: match.artistName || artist || '',
+                lyrics: cleanLyrics,
+                syncedLyrics: parseLrc(match.syncedLyrics),
+                duration: match.duration,
+                autoOffsetMs: 0
+              };
             }
           }
         }
@@ -206,9 +225,16 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
           const data = await res.json();
           let results = Array.isArray(data) ? data : [data];
           if (results.length > 0) {
-            // Sắp xếp kết quả: Khi durationMs > 0, ưu tiên |match.duration - targetDurationSec| <= 7s lên trước
+            // Sắp xếp kết quả:
+            // 1. Ưu tiên bài hợp lệ cả tên lẫn ca sĩ (isValidMatch)
+            // 2. Khi có targetDurationSec > 0: ưu tiên |match.duration - targetDurationSec| <= 7s lên trước
             if (targetDurationSec > 0) {
               results.sort((a, b) => {
+                const aValid = isValidMatch(a, item.expectedTrack || item.track, item.expectedArtist || item.artist);
+                const bValid = isValidMatch(b, item.expectedTrack || item.track, item.expectedArtist || item.artist);
+                if (aValid && !bValid) return -1;
+                if (!aValid && bValid) return 1;
+
                 const aHasDur = typeof a.duration === 'number' && a.duration > 0;
                 const bHasDur = typeof b.duration === 'number' && b.duration > 0;
                 const aDiff = aHasDur ? Math.abs(a.duration - targetDurationSec) : 9999;
@@ -261,12 +287,13 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
 async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
   const fallbackBaseUrl = process.env.LYRICS_FALLBACK_URL || 'http://127.0.0.1:8787/lyrics';
   try {
-    const primaryClean = cleanTitle(rawTitle);
+    const primaryClean = stripParentheses(cleanTitle(rawTitle));
     const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
+    const cleanArt = cleanArtistName(artist);
     const url = new URL(fallbackBaseUrl);
     url.searchParams.set('title', primaryClean);
-    if (artist && artist !== 'Unknown' && !artist.includes('Topic')) {
-      url.searchParams.set('artist', cleanTitle(artist));
+    if (cleanArt && cleanArt !== 'Unknown') {
+      url.searchParams.set('artist', cleanArt);
     }
     if (targetDurationSec > 0) {
       url.searchParams.set('duration', String(targetDurationSec));
