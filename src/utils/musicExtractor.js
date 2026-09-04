@@ -947,7 +947,13 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     // TẦNG 2 (FAILOVER TỰ ĐỘNG): Chuyển ngay lập tức sang nguồn SoundCloud
     // SoundCloud KHÔNG BAO GIỜ chặn IP Datacenter của VPS, không cần cookies, phát ngay lập tức
     console.log(`[Failover] Đang tự động chuyển sang phát "${trackTitle}" từ SoundCloud dự phòng...`);
-    const cleanSearch = (trackTitle || targetUrl).replace(/https?:\/\/\S+/g, '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').trim();
+    const cleanSearch = (trackTitle || targetUrl)
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ')
+      .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?|mv\s*official|official|full\s*hd|4k|1080p)/gi, ' ')
+      .replace(/[-|:/\\–—]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     const scQuery = `scsearch1:${cleanSearch || 'lofi hip hop'}`;
     try {
       return await createSingleStream(scQuery, crossfadeSeconds, seekSeconds, true);

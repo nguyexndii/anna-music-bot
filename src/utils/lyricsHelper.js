@@ -82,19 +82,18 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
       const s1IsArtist = normCleanArt && (s1Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
       const s2IsArtist = normCleanArt && (s2Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
 
-      // 1. Combination A: s1 is track, s2 is artist (Mặc định chuẩn nhất cho định dạng YouTube "Tên Bài | Ca Sĩ")
-      if (!s1IsArtist) {
-        for (const art of s2Artists) {
-          queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
-          queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
-        }
-        queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
-        queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
+      // 1. Combination A: s1 là Tên Bài, s2 là Ca Sĩ
+      for (const art of s2Artists) {
+        queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
+        queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
       }
+      queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
+      queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2Artists });
+      queries.push({ q: s1, expectedTrack: s1, expectedArtist: s2Artists });
 
-      // 2. Trường hợp s2 có feat rõ ràng (e.g. "Donald Gold - OBGTLH ft. Lil Shady" -> s1 là Artist, s2 là Track ft. Artist2)
+      // 2. Trường hợp s2 có feat rõ ràng (e.g. "Donald Gold - OBGTLH ft. Lil Shady")
       const feat2 = splitFeat(s2);
-      if (feat2 && s1IsArtist) {
+      if (feat2) {
         const exp = [s1, feat2.artistPart];
         queries.push({ track: feat2.titlePart, artist: s1, expectedTrack: feat2.titlePart, expectedArtist: exp });
         queries.push({ track: feat2.titlePart, artist: feat2.artistPart, expectedTrack: feat2.titlePart, expectedArtist: exp });
@@ -103,19 +102,18 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         queries.push({ q: feat2.titlePart, expectedTrack: feat2.titlePart, expectedArtist: exp });
       }
 
-      // 3. Combination B: s2 is track, s1 is artist (Dành cho định dạng "Ca Sĩ - Tên Bài")
-      if (s1IsArtist || !s2IsArtist) {
-        for (const art of s1Artists) {
-          queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
-          queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
-        }
-        queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
-        queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
+      // 3. Combination B: s2 là Tên Bài, s1 là Ca Sĩ (e.g. "Lil Wuyn - TOKYO Cypher", "DONALD GOLD - ADAMN")
+      for (const art of s1Artists) {
+        queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
+        queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
       }
+      queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
+      queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1Artists });
+      queries.push({ q: s2, expectedTrack: s2, expectedArtist: s1Artists });
 
       // 4. Trường hợp s1 có feat: e.g. "OBGTLH ft. Lil Shady - Donald Gold"
       const feat1 = splitFeat(s1);
-      if (feat1 && s2IsArtist) {
+      if (feat1) {
         const exp = [s2, feat1.artistPart];
         queries.push({ track: feat1.titlePart, artist: s2, expectedTrack: feat1.titlePart, expectedArtist: exp });
         queries.push({ track: feat1.titlePart, artist: feat1.artistPart, expectedTrack: feat1.titlePart, expectedArtist: exp });
