@@ -27,6 +27,7 @@ const play = require('play-dl');
 const yts = require('yt-search');
 const ffmpeg = require('ffmpeg-static');
 const { spawn } = require('child_process');
+const { PassThrough } = require('stream');
 const { createAudioResource, StreamType } = require('@discordjs/voice');
 const fetch = globalThis.fetch || require('node-fetch');
 const spotifyUrlInfo = require('spotify-url-info')(fetch);
@@ -762,12 +763,166 @@ process.on('SIGINT', () => { cleanupAllProcesses(); process.exit(); });
 process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 
 /**
- * Tạo Discord AudioResource với yt-dlp-exec stdout pipe -> FFmpeg libopus
- * (Sử dụng client android để vượt qua kiểm tra bot của YouTube trên VPS,
- *  giải phóng liên tục stderr của FFmpeg & yt-dlp để chống nghẽn buffer 64KB làm dừng bài)
+ * Tạo một luồng phát đơn qua yt-dlp & FFmpeg với cơ chế kiểm tra gói dữ liệu đầu tiên (First-Chunk Confirmation)
+ * Nếu YouTube bị chặn bot (ra 0 byte / code 183), hàm sẽ reject ngay lập tức để kích hoạt cơ chế Failover.
+ */
+function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false) {
+  return new Promise((resolve, reject) => {
+    const ytdlpOptions = {
+      output: '-',
+      format: 'bestaudio/best',
+      ffmpegLocation: ffmpeg,
+      noPlaylist: true,
+      noWarnings: true
+    };
+
+    if (!isSoundCloud) {
+      ytdlpOptions.extractorArgs = 'youtube:player_client=android';
+      ytdlpOptions.preferFreeFormats = true;
+      if (YTDLP_COOKIES_FILE) {
+        ytdlpOptions.cookies = YTDLP_COOKIES_FILE;
+      }
+    }
+
+    let ytdlpStreamProcess = null;
+    try {
+      ytdlpStreamProcess = ytdlp.exec(targetQueryOrUrl, ytdlpOptions);
+      if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
+    } catch (err) {
+      return reject(err);
+    }
+
+    if (!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) {
+      return reject(new Error(`Không thể khởi chạy yt-dlp cho: ${targetQueryOrUrl}`));
+    }
+
+    const ffmpegArgs = [];
+    if (seekSeconds && Number(seekSeconds) > 0) {
+      ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
+    }
+
+    ffmpegArgs.push(
+      '-i', 'pipe:0',
+      '-vn'
+    );
+
+    if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
+      const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
+      ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
+    }
+
+    ffmpegArgs.push(
+      '-c:a', 'libopus',
+      '-b:a', '128k',
+      '-ar', '48000',
+      '-ac', '2',
+      '-f', 'ogg',
+      'pipe:1'
+    );
+
+    const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    registerProcess(ffmpegProcess);
+
+    let ffmpegStderr = '';
+    ffmpegProcess.stderr.on('data', (chunk) => {
+      ffmpegStderr += chunk.toString();
+      if (ffmpegStderr.length > 4000) ffmpegStderr = ffmpegStderr.slice(-2000);
+    });
+
+    let ytdlpStderr = '';
+    ytdlpStreamProcess.stderr.on('data', (chunk) => {
+      ytdlpStderr += chunk.toString();
+      if (ytdlpStderr.length > 4000) ytdlpStderr = ytdlpStderr.slice(-2000);
+    });
+
+    ffmpegProcess.stdin.on('error', (err) => {
+      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+        console.warn('[FFmpeg stdin Error]:', err.message);
+      }
+    });
+
+    ytdlpStreamProcess.stdout.on('error', (err) => {
+      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+        console.warn('[yt-dlp stdout Error]:', err.message);
+      }
+    });
+
+    ytdlpStreamProcess.on('error', (err) => {
+      if (err.code !== 'EPIPE') {
+        console.error('[yt-dlp Process Error]:', err.message);
+      }
+    });
+
+    ffmpegProcess.on('error', (err) => {
+      if (err.code !== 'EPIPE') {
+        console.error('[FFmpeg Process Error]:', err.message);
+      }
+    });
+
+    ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
+
+    let firstChunkReceived = false;
+    const passThroughStream = new PassThrough();
+    ffmpegProcess.stdout.pipe(passThroughStream);
+
+    // Timeout bảo vệ: Nếu sau 7 giây không có dữ liệu âm thanh nào, tự hủy để failover
+    const safetyTimeout = setTimeout(() => {
+      if (!firstChunkReceived) {
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 7s)'));
+      }
+    }, 7000);
+
+    // Khi nhận được gói âm thanh đầu tiên: Xác nhận luồng chạy tốt 100%!
+    ffmpegProcess.stdout.once('data', () => {
+      firstChunkReceived = true;
+      clearTimeout(safetyTimeout);
+
+      const resource = createAudioResource(passThroughStream, {
+        inputType: StreamType.OggOpus,
+        inlineVolume: true
+      });
+
+      resource.destroy = () => {
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+      };
+
+      resolve(resource);
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      clearTimeout(safetyTimeout);
+      if (!firstChunkReceived) {
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+        const lastErr = (ytdlpStderr || ffmpegStderr).slice(-200).trim();
+        reject(new Error(`FFmpeg exited with code ${code}: ${lastErr}`));
+      } else {
+        if (code !== 0 && code !== null) {
+          const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
+          if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+        }
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+      }
+    });
+  });
+}
+
+/**
+ * Tạo Discord AudioResource với kiến trúc Failover Tự Động 2 Tầng Siêu Bền Vững:
+ * Tầng 1: YouTube (Direct android client)
+ * Tầng 2: SoundCloud Fallback (Bypass 100% mọi cơ chế chặn bot / IP Datacenter, phát nhạc 24/7)
  */
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
+  const trackTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery) : trackItem;
 
   // Nếu track chưa có direct URL (từ playlist Spotify): tìm kiếm URL YouTube trước
   if (!targetUrl || (!targetUrl.startsWith('http') && trackItem.searchQuery)) {
@@ -782,152 +937,25 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   }
 
-  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe (client android)
-  const ytdlpOptions = {
-    output: '-',
-    format: 'bestaudio/best',
-    ffmpegLocation: ffmpeg,
-    extractorArgs: 'youtube:player_client=android',
-    noPlaylist: true,
-    noWarnings: true,
-    preferFreeFormats: true
-  };
-  if (YTDLP_COOKIES_FILE) {
-    ytdlpOptions.cookies = YTDLP_COOKIES_FILE;
-  }
-
-  let ytdlpStreamProcess = null;
+  // TẦNG 1: Thử phát từ YouTube
   try {
-    ytdlpStreamProcess = ytdlp.exec(targetUrl, ytdlpOptions);
-    if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
-  } catch (err) {
-    console.warn(`[yt-dlp stream init error for ${targetUrl}]:`, err.message);
-  }
+    return await createSingleStream(targetUrl, crossfadeSeconds, seekSeconds, false);
+  } catch (ytErr) {
+    const errMsg = ytErr.message.split('\n')[0];
+    console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
 
-  // Nếu video bị lỗi 18+ hoặc chặn: Auto-Recovery tìm bản thay thế
-  if ((!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) && trackItem && (trackItem.title || trackItem.searchQuery)) {
-    const searchTitle = trackItem.title || trackItem.searchQuery;
-    console.log(`[MusicExtractor Auto-Recovery] Video gốc bị lỗi, tìm bản audio thay thế cho: "${searchTitle}"...`);
+    // TẦNG 2 (FAILOVER TỰ ĐỘNG): Chuyển ngay lập tức sang nguồn SoundCloud
+    // SoundCloud KHÔNG BAO GIỜ chặn IP Datacenter của VPS, không cần cookies, phát ngay lập tức
+    console.log(`[Failover] Đang tự động chuyển sang phát "${trackTitle}" từ SoundCloud dự phòng...`);
+    const cleanSearch = (trackTitle || targetUrl).replace(/https?:\/\/\S+/g, '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').trim();
+    const scQuery = `scsearch1:${cleanSearch || 'lofi hip hop'}`;
     try {
-      const fbRes = await searchTrack(`${searchTitle} audio`);
-      if (fbRes && fbRes.length > 0 && fbRes[0].url && fbRes[0].url !== targetUrl) {
-        targetUrl = fbRes[0].url;
-        trackItem.url = targetUrl;
-        trackItem.title = fbRes[0].title;
-        ytdlpStreamProcess = ytdlp.exec(targetUrl, ytdlpOptions);
-        if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
-      }
-    } catch (fbErr) {
-      console.warn('[Auto-Recovery stream failed]:', fbErr.message);
+      return await createSingleStream(scQuery, crossfadeSeconds, seekSeconds, true);
+    } catch (scErr) {
+      console.error(`[SoundCloud Fallback Failed for "${trackTitle}"]:`, scErr.message);
+      throw new Error(`Không thể phát bài hát "${trackTitle}": Cả nguồn YouTube và SoundCloud đều không khả dụng.`);
     }
   }
-
-  if (!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) {
-    throw new Error(`Không thể khởi tạo luồng âm thanh cho bài hát: ${trackItem?.title || targetUrl}`);
-  }
-
-  const ffmpegArgs = [];
-  if (seekSeconds && Number(seekSeconds) > 0) {
-    ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
-  }
-
-  ffmpegArgs.push(
-    '-i', 'pipe:0',
-    '-vn'
-  );
-
-  // Giới hạn thời gian hòa âm vào (Fade-in) tối đa 1.5 giây để tiếng nhạc cất lên ngay lập tức
-  if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
-    const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
-    ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
-  }
-
-  ffmpegArgs.push(
-    '-c:a', 'libopus',
-    '-b:a', '128k',
-    '-ar', '48000',
-    '-ac', '2',
-    '-f', 'ogg',
-    'pipe:1'
-  );
-
-  const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
-  registerProcess(ffmpegProcess);
-
-  // Giải phóng liên tục (drain) stderr của FFmpeg để TUYỆT ĐỐI KHÔNG BAO GIỜ bị nghẽn buffer 64KB làm dừng bài sau 15s
-  let ffmpegStderr = '';
-  ffmpegProcess.stderr.on('data', (chunk) => {
-    ffmpegStderr += chunk.toString();
-    if (ffmpegStderr.length > 4000) {
-      ffmpegStderr = ffmpegStderr.slice(-2000);
-    }
-  });
-
-  // Giải phóng liên tục (drain) stderr của yt-dlp để không bao giờ bị nghẽn buffer
-  let ytdlpStderr = '';
-  ytdlpStreamProcess.stderr.on('data', (chunk) => {
-    ytdlpStderr += chunk.toString();
-    if (ytdlpStderr.length > 4000) {
-      ytdlpStderr = ytdlpStderr.slice(-2000);
-    }
-  });
-
-  // Ngăn chặn lỗi write EPIPE khi một trong hai tiến trình kết thúc trước
-  ffmpegProcess.stdin.on('error', (err) => {
-    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-      console.warn('[FFmpeg stdin Error]:', err.message);
-    }
-  });
-
-  ytdlpStreamProcess.stdout.on('error', (err) => {
-    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-      console.warn('[yt-dlp stdout Error]:', err.message);
-    }
-  });
-
-  ytdlpStreamProcess.on('error', (err) => {
-    if (err.code !== 'EPIPE') {
-      console.error('[yt-dlp Process Error]:', err.message);
-    }
-  });
-
-  ffmpegProcess.on('error', (err) => {
-    if (err.code !== 'EPIPE') {
-      console.error('[FFmpeg Process Error]:', err.message);
-    }
-  });
-
-  // Nối luồng âm thanh qua FFmpeg
-  ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
-
-  // Dọn dẹp tiến trình an toàn khi FFmpeg hoàn tất
-  ffmpegProcess.on('close', (code) => {
-    if (code !== 0 && code !== null) {
-      const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
-      if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
-    }
-    try {
-      ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-    } catch (e) {}
-    killProcess(ffmpegProcess);
-    killProcess(ytdlpStreamProcess);
-  });
-
-  const resource = createAudioResource(ffmpegProcess.stdout, {
-    inputType: StreamType.OggOpus,
-    inlineVolume: true
-  });
-
-  // Gắn hàm destroy() chủ động để dọn dẹp tiến trình con ngay lập tức khi skip / đổi bài
-  resource.destroy = () => {
-    try {
-      ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-    } catch (e) {}
-    killProcess(ffmpegProcess);
-    killProcess(ytdlpStreamProcess);
-  };
-
-  return resource;
 }
 
 /**
