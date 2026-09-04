@@ -307,7 +307,7 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
               border: '1px solid rgba(232, 201, 119, 0.3)', borderRadius: 6, padding: '4px 8px', background: 'rgba(232, 201, 119, 0.08)',
               fontWeight: 600
             }}>
-              {lyricsData.isAiGenerated ? 'LỜI ĐỌC (AI)' : 'LỜI ĐỌC (PLAIN)'}
+              LỜI ĐỌC
             </span>
           )}
         </div>
@@ -460,7 +460,7 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
                   borderRadius: 999, border: '1px solid rgba(232, 201, 119, 0.25)', marginBottom: 18,
                   fontWeight: 600
                 }}>
-                  {lyricsData.isAiGenerated ? 'LỜI BÀI HÁT (BẢN ĐỌC TỔNG HỢP BỞI GEMINI AI)' : 'LỜI BÀI HÁT (BẢN ĐỌC TOÀN DIỆN)'}
+                  LỜI BÀI HÁT
                 </div>
                 <div style={{ whiteSpace: 'pre-line', fontSize: 15.5, lineHeight: 2.2, color: 'var(--ink)', padding: '8px 20px', maxWidth: '92%', textAlign: 'center', opacity: 0.95 }}>
                   {lyricsData.lyrics}

@@ -777,14 +777,13 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   }
 
-  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe (Tối ưu memory với client android)
+  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe (Pure audio stream)
   let ytdlpStreamProcess = null;
   try {
     ytdlpStreamProcess = ytdlp.exec(targetUrl, {
       output: '-',
       format: 'bestaudio/best',
       ffmpegLocation: ffmpeg,
-      extractorArgs: 'youtube:player_client=android',
       noPlaylist: true,
       noWarnings: true,
       preferFreeFormats: true
@@ -794,7 +793,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     console.warn(`[yt-dlp stream init error for ${targetUrl}]:`, err.message);
   }
 
-  // Nếu video bị lỗi 18+ hoặc chặn: Auto-Recovery tìm bản thay thế
+  // Nếu video bị lỗi hoặc chặn: Auto-Recovery tìm bản thay thế
   if ((!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) && trackItem && (trackItem.title || trackItem.searchQuery)) {
     const searchTitle = trackItem.title || trackItem.searchQuery;
     console.log(`[MusicExtractor Auto-Recovery] Video gốc bị lỗi, tìm bản audio thay thế cho: "${searchTitle}"...`);
@@ -808,7 +807,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
           output: '-',
           format: 'bestaudio/best',
           ffmpegLocation: ffmpeg,
-          extractorArgs: 'youtube:player_client=android',
           noPlaylist: true,
           noWarnings: true,
           preferFreeFormats: true
@@ -834,8 +832,10 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     '-vn'
   );
 
+  // Giới hạn thời gian hòa âm vào (Fade-in) tối đa 1.5 giây để bài hát luôn nghe rõ lời ngay lập tức
   if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
-    ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${Number(crossfadeSeconds)}:curve=esin`);
+    const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
+    ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
   }
 
   ffmpegArgs.push(
@@ -849,6 +849,15 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
 
   const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   registerProcess(ffmpegProcess);
+
+  // Giải phóng liên tục (drain) stderr của FFmpeg để TUYỆT ĐỐI KHÔNG BAO GIỜ bị nghẽn buffer 64KB gây ngắt bài sau 15 giây
+  let ffmpegStderr = '';
+  ffmpegProcess.stderr.on('data', (chunk) => {
+    ffmpegStderr += chunk.toString();
+    if (ffmpegStderr.length > 4000) {
+      ffmpegStderr = ffmpegStderr.slice(-2000);
+    }
+  });
 
   // Ngăn chặn lỗi write EPIPE khi một trong hai tiến trình kết thúc trước
   ffmpegProcess.stdin.on('error', (err) => {
@@ -875,20 +884,20 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   });
 
+  // Nối luồng âm thanh qua FFmpeg (pipe tự động xử lý backpressure và đóng stdin khi xong)
   ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
-  // Tự động dọn dẹp và ngắt luồng khi một trong hai tiến trình đóng
-  ffmpegProcess.on('close', () => {
+  // Dọn dẹp tiến trình an toàn khi FFmpeg hoàn tất
+  ffmpegProcess.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      const lastErr = ffmpegStderr.slice(-200).trim();
+      if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+    }
     try {
       ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-      killProcess(ytdlpStreamProcess);
     } catch (e) {}
-  });
-
-  ytdlpStreamProcess.on('close', () => {
-    try {
-      if (!ffmpegProcess.killed) ffmpegProcess.stdin.end();
-    } catch (e) {}
+    killProcess(ffmpegProcess);
+    killProcess(ytdlpStreamProcess);
   });
 
   const resource = createAudioResource(ffmpegProcess.stdout, {
@@ -904,11 +913,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     killProcess(ffmpegProcess);
     killProcess(ytdlpStreamProcess);
   };
-
-  ffmpegProcess.stdout.on('close', () => {
-    killProcess(ffmpegProcess);
-    killProcess(ytdlpStreamProcess);
-  });
 
   return resource;
 }

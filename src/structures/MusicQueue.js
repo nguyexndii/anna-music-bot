@@ -311,8 +311,12 @@ class MusicQueue {
       // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay (DJ AI) gợi ý bài tương tự!
       if (guildSettings.autoplay !== false && songToRelate && !isLofiTrack) {
         const useAi = guildSettings.useAiAssistant !== false;
-        console.log(`[Autoplay DJ AI] Phòng có ${humanCount} người nghe, tiếp tục tìm bài tương tự sau "${songToRelate.title}"...`);
-        let relatedTrack = await getRelatedTrack(songToRelate, this.guild.id, useAi);
+        let relatedTrack = null;
+        try {
+          relatedTrack = await getRelatedTrack(songToRelate, this.guild.id, useAi);
+        } catch (getRelErr) {
+          console.warn('[getRelatedTrack Error]:', getRelErr.message);
+        }
 
         // Fallback tự động nếu không tìm được: Tìm bài hát hay nhất cùng ca sĩ hoặc cùng thể loại
         if (!relatedTrack) {
