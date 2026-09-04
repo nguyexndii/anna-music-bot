@@ -46,7 +46,8 @@ function extractArtists(artistStr) {
 
 function splitFeat(str) {
   if (!str) return null;
-  const m = str.match(/^(.+?)\s+(?:x|ft\.?|feat\.?|cùng|với)\s+(.+)$/i);
+  // Không dùng 'x' ở đây vì 'x' là ký hiệu kết hợp giữa các nghệ sĩ (Low G x tlinh), không phải tên bài
+  const m = str.match(/^(.+?)\s+(?:ft\.?|feat\.?|cùng|với)\s+(.+)$/i);
   if (m) {
     return { titlePart: m[1].trim(), artistPart: m[2].trim() };
   }
@@ -74,9 +75,26 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
       const s1 = meaningfulSegments[0];
       const s2 = meaningfulSegments[1];
 
-      // Trường hợp tiêu đề có feat: e.g. "Donald Gold - OBGTLH x Lil Shady"
+      const s1Artists = extractArtists(s1);
+      const s2Artists = extractArtists(s2);
+
+      const normCleanArt = cleanArt ? normalizeStr(cleanArt) : '';
+      const s1IsArtist = normCleanArt && (s1Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
+      const s2IsArtist = normCleanArt && (s2Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
+
+      // 1. Combination A: s1 is track, s2 is artist (Mặc định chuẩn nhất cho định dạng YouTube "Tên Bài | Ca Sĩ")
+      if (!s1IsArtist) {
+        for (const art of s2Artists) {
+          queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
+          queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
+        }
+        queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
+        queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
+      }
+
+      // 2. Trường hợp s2 có feat rõ ràng (e.g. "Donald Gold - OBGTLH ft. Lil Shady" -> s1 là Artist, s2 là Track ft. Artist2)
       const feat2 = splitFeat(s2);
-      if (feat2) {
+      if (feat2 && s1IsArtist) {
         const exp = [s1, feat2.artistPart];
         queries.push({ track: feat2.titlePart, artist: s1, expectedTrack: feat2.titlePart, expectedArtist: exp });
         queries.push({ track: feat2.titlePart, artist: feat2.artistPart, expectedTrack: feat2.titlePart, expectedArtist: exp });
@@ -85,9 +103,19 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         queries.push({ q: feat2.titlePart, expectedTrack: feat2.titlePart, expectedArtist: exp });
       }
 
-      // Trường hợp s1 có feat: e.g. "OBGTLH x Lil Shady - Donald Gold"
+      // 3. Combination B: s2 is track, s1 is artist (Dành cho định dạng "Ca Sĩ - Tên Bài")
+      if (s1IsArtist || !s2IsArtist) {
+        for (const art of s1Artists) {
+          queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
+          queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
+        }
+        queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
+        queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
+      }
+
+      // 4. Trường hợp s1 có feat: e.g. "OBGTLH ft. Lil Shady - Donald Gold"
       const feat1 = splitFeat(s1);
-      if (feat1) {
+      if (feat1 && s2IsArtist) {
         const exp = [s2, feat1.artistPart];
         queries.push({ track: feat1.titlePart, artist: s2, expectedTrack: feat1.titlePart, expectedArtist: exp });
         queries.push({ track: feat1.titlePart, artist: feat1.artistPart, expectedTrack: feat1.titlePart, expectedArtist: exp });
@@ -95,25 +123,6 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         queries.push({ q: `${feat1.titlePart} ${feat1.artistPart}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
         queries.push({ q: feat1.titlePart, expectedTrack: feat1.titlePart, expectedArtist: exp });
       }
-
-      const s1Artists = extractArtists(s1);
-      const s2Artists = extractArtists(s2);
-
-      // Combination A: s1 is track, s2 is artist
-      for (const art of s2Artists) {
-        queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
-        queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
-      }
-      queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
-      queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2 });
-
-      // Combination B: s2 is track, s1 is artist
-      for (const art of s1Artists) {
-        queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
-        queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
-      }
-      queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
-      queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1 });
     }
 
     // Full clean title query
@@ -140,12 +149,21 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
 
 function isValidMatch(match, expectedTrack, expectedArtist) {
   if (!match || !match.trackName) return false;
-  const mTrack = normalizeStr(match.trackName);
+
+  // Xử lý trường hợp LRCLIB lưu nguyên tiêu đề video YouTube vào trackName (vd "DÂU TẰM | Low G x tlinh")
+  let cleanMatchTrack = match.trackName;
+  const trackSegs = cleanMatchTrack.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/);
+  if (trackSegs.length > 1) {
+    cleanMatchTrack = trackSegs[0];
+  }
+
+  const mTrack = normalizeStr(cleanTitle(cleanMatchTrack));
+  const mFullTrack = normalizeStr(cleanTitle(match.trackName));
   const mArtist = normalizeStr(match.artistName);
 
   if (expectedTrack) {
     const eTrack = normalizeStr(cleanTitle(expectedTrack));
-    const exactSub = mTrack === eTrack || mTrack.startsWith(eTrack + ' ') || eTrack.startsWith(mTrack + ' ');
+    const exactSub = mTrack === eTrack || mTrack.startsWith(eTrack + ' ') || eTrack.startsWith(mTrack + ' ') || mFullTrack === eTrack;
     if (!exactSub) {
       const eWords = eTrack.split(' ').filter(w => w.length >= 2);
       if (eWords.length === 0) return false;
@@ -170,7 +188,7 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
       const eArtist = normalizeStr(cleanArtistName(art));
       const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
       if (artistWords.length === 0) return true;
-      return artistWords.some(w => mArtist.includes(w) || mTrack.includes(w));
+      return artistWords.some(w => mArtist.includes(w) || mFullTrack.includes(w));
     });
     if (!artistOk) return false;
   }

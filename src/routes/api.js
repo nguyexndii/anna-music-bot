@@ -15,8 +15,9 @@ module.exports = function createApiRouter(client) {
   const router = express.Router();
   router.use(express.json());
 
-  // Search in-memory cache
+  // Search in-memory cache & In-flight request deduplication
   const searchCache = new Map();
+  const inFlightSearches = new Map();
   setInterval(() => {
     if (searchCache.size > 300) searchCache.clear();
   }, 10 * 60 * 1000);
@@ -114,7 +115,7 @@ module.exports = function createApiRouter(client) {
     });
   });
 
-  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache)
+  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp)
   router.get('/search', async (req, res) => {
     const query = req.query.q?.trim();
     const limit = parseInt(req.query.limit, 10) || 20;
@@ -129,11 +130,31 @@ module.exports = function createApiRouter(client) {
       return res.json({ success: true, results: searchCache.get(cacheKey) });
     }
 
-    try {
-      const results = await searchMultipleTracks(query, limit, mode);
-      if (results && results.length > 0) {
-        searchCache.set(cacheKey, results);
+    if (inFlightSearches.has(cacheKey)) {
+      try {
+        const results = await inFlightSearches.get(cacheKey);
+        return res.json({ success: true, results });
+      } catch (e) {
+        return res.json({ success: true, results: [] });
       }
+    }
+
+    const searchPromise = (async () => {
+      try {
+        const results = await searchMultipleTracks(query, limit, mode);
+        if (results && results.length > 0) {
+          searchCache.set(cacheKey, results);
+        }
+        return results || [];
+      } finally {
+        inFlightSearches.delete(cacheKey);
+      }
+    })();
+
+    inFlightSearches.set(cacheKey, searchPromise);
+
+    try {
+      const results = await searchPromise;
       return res.json({ success: true, results });
     } catch (err) {
       console.error('[API Search Error]:', err);

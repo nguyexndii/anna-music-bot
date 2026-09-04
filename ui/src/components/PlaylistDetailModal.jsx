@@ -28,16 +28,13 @@ export default function PlaylistDetailModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [filterQuery, setFilterQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
   const [addedTracks, setAddedTracks] = useState(new Set());
-  const pageSize = 7;
 
   // Fetch / load playlist tracks
   useEffect(() => {
     if (!isOpen || !playlist) return;
 
     setFilterQuery('');
-    setCurrentPage(1);
     setError(null);
     setAddedTracks(new Set());
 
@@ -101,10 +98,6 @@ export default function PlaylistDetailModal({
         (t.artist && t.artist.toLowerCase().includes(q))
     );
   }, [tracks, filterQuery]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredTracks.length / pageSize));
-  const startIndex = (currentPage - 1) * pageSize;
-  const currentTracks = filteredTracks.slice(startIndex, startIndex + pageSize);
 
   // Actions
   const handlePlayAll = () => {
@@ -307,10 +300,7 @@ export default function PlaylistDetailModal({
             <input
               type="text"
               value={filterQuery}
-              onChange={(e) => {
-                setFilterQuery(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => setFilterQuery(e.target.value)}
               placeholder={`Lọc trong ${tracks.length} bài hát...`}
               style={{
                 flex: 1,
@@ -338,7 +328,7 @@ export default function PlaylistDetailModal({
           </div>
         )}
 
-        {/* Body: Tracks List */}
+        {/* Body: Tracks List (Scroll toàn bộ danh sách mượt mà) */}
         <div
           style={{
             padding: '12px 20px',
@@ -347,7 +337,7 @@ export default function PlaylistDetailModal({
             display: 'flex',
             flexDirection: 'column',
             gap: 6,
-            minHeight: 280
+            maxHeight: '62vh'
           }}
         >
           {loading ? (
@@ -404,8 +394,8 @@ export default function PlaylistDetailModal({
               Không tìm thấy bài hát nào trong playlist.
             </div>
           ) : (
-            currentTracks.map((song, idx) => {
-              const globalIndex = startIndex + idx + 1;
+            filteredTracks.map((song, idx) => {
+              const globalIndex = idx + 1;
               const isAdded = addedTracks.has(song.url || song.title);
 
               return (
@@ -533,8 +523,8 @@ export default function PlaylistDetailModal({
           )}
         </div>
 
-        {/* Footer: Pagination */}
-        {totalPages > 1 && !loading && (
+        {/* Footer: Thông tin & Nút hành động */}
+        {!loading && tracks.length > 0 && (
           <div
             style={{
               padding: '10px 20px',
@@ -543,7 +533,7 @@ export default function PlaylistDetailModal({
               alignItems: 'center',
               justifyContent: 'space-between',
               flexShrink: 0,
-              background: 'rgba(255, 255, 255, 0.01)'
+              background: 'rgba(255, 255, 255, 0.015)'
             }}
           >
             <span
@@ -553,52 +543,29 @@ export default function PlaylistDetailModal({
                 color: 'var(--muted)'
               }}
             >
-              Trang {currentPage} / {totalPages} ({filteredTracks.length} bài)
+              {filterQuery ? `Tìm thấy ${filteredTracks.length} / ${tracks.length} bài hát` : `Danh sách ${tracks.length} bài hát • Cuộn để xem tất cả`}
             </span>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--border)',
-                  background: currentPage === 1 ? 'transparent' : 'var(--soft)',
-                  color: currentPage === 1 ? '#444850' : 'var(--ink)',
-                  fontSize: 11,
-                  cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s'
-                }}
-              >
-                <ChevronLeft size={13} />
-                <span>Trước</span>
-              </button>
-
-              <button
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--border)',
-                  background: currentPage === totalPages ? 'transparent' : 'var(--soft)',
-                  color: currentPage === totalPages ? '#444850' : 'var(--ink)',
-                  fontSize: 11,
-                  cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s'
-                }}
-              >
-                <span>Sau</span>
-                <ChevronRight size={13} />
-              </button>
-            </div>
+            <button
+              onClick={handlePlayAll}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid rgba(232, 201, 119, 0.3)',
+                background: 'rgba(232, 201, 119, 0.1)',
+                color: 'var(--yellow)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+            >
+              <ListPlus size={13} />
+              <span>Phát cả bộ</span>
+            </button>
           </div>
         )}
       </div>

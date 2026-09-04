@@ -13,25 +13,26 @@ function createHelpMenu(activeTab = 'music', isAdmin = false) {
     music: {
       title: '🎵 Hướng Dẫn Lệnh Âm Nhạc • Music Commands',
       desc: [
-        `**/play** (hoặc **/p**) \`<tên/link>\` — Phát bài hát hoặc playlist (YouTube, Spotify, SoundCloud)`,
-        `**/web** — Mở giao diện Web Player điều khiển âm nhạc trực quan`,
-        `**/seek** \`<thời_gian>\` — Tua bài hát tới vị trí (vd: \`/seek 1:30\` hoặc \`/seek 90\`)`,
+        `**/play** (hoặc **/p**) \`[tên/link]\` — Phát bài hát hoặc Playlist (YouTube, Spotify, SoundCloud)`,
+        `**/web** — Mở Web UI điều khiển âm nhạc trực quan, tìm kiếm & quản lý hàng chờ`,
+        `**/seek** \`<thời_gian>\` — Tua bài hát đến thời điểm (vd: \`/seek 1:30\` hoặc \`/seek 90\`)`,
         `**/pause** — Tạm dừng bài hát đang phát`,
-        `**/resume** — Tiếp tục phát bài hát`,
+        `**/resume** — Tiếp tục phát bài hát đang tạm dừng`,
         `**/skip** (hoặc **/s**) — Bỏ qua bài hát hiện tại`,
-        `**/stop** — Dừng phát và dọn dẹp hàng chờ`,
-        `**/join** — Mời bot vào kênh đàm thoại Voice`,
-        `**/leave** — Cho bot rời khỏi kênh Voice`,
-        `**/lyrics** (hoặc **/ly**) — Tìm và xem lời bài hát đồng bộ`,
-        `**/favorite** (hoặc **/fav**) — Xem và phát danh sách bài hát yêu thích cá nhân`
+        `**/stop** — Dừng phát nhạc và dọn dẹp hàng chờ`,
+        `**/lyrics** (hoặc **/ly**) \`[tên_bài]\` — Xem lời bài hát đồng bộ (để trống để tự lấy bài đang phát)`,
+        `**/favorite** (hoặc **/fav**) — Quản lý & phát danh sách bài hát yêu thích cá nhân`,
+        `**/join** — Mời bot tham gia kênh thoại của bạn`,
+        `**/leave** — Cho bot rời khỏi kênh thoại`
       ].join('\n'),
-      footer: '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /q, /np, /vol, /fav, /ly, /h'
+      footer: '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /q, /np, /vol, /fav, /ly, /mv, /h'
     },
     queue: {
       title: '📋 Hướng Dẫn Hàng Chờ • Queue Commands',
       desc: [
-        `**/queue** (hoặc **/q**) \`[trang]\` — Xem danh sách bài hát đang chờ phát`,
-        `**/remove** \`<vị_trí>\` — Xóa bài hát khỏi hàng chờ (vd: \`/remove position:2\`)`,
+        `**/queue** (hoặc **/q**) \`[trang]\` — Xem danh sách bài chờ (hỗ trợ nút chuyển trang & menu xóa bài)`,
+        `**/move** (hoặc **/mv**) \`<từ_vị_trí> [đến_vị_trí]\` — Đổi vị trí bài hát (mặc định đưa lên vị trí 1 để phát kế tiếp)`,
+        `**/remove** \`<vị_trí>\` — Xóa bài hát ra khỏi hàng chờ theo số thứ tự`,
         `**/shuffle** — Xáo trộn ngẫu nhiên thứ tự các bài trong hàng chờ`
       ].join('\n'),
       footer: 'Quản lý, sắp xếp và xóa bài hát trong hàng chờ'
@@ -39,18 +40,20 @@ function createHelpMenu(activeTab = 'music', isAdmin = false) {
     controls: {
       title: '🎛️ Hướng Dẫn Điều Khiển • Audio Controls',
       desc: [
-        `**/nowplaying** (hoặc **/np**) — Xem thông tin bài đang phát & bảng nút điều khiển`,
-        `**/loop** \`[chế_độ]\` — Bật/tắt chế độ lặp: Tắt ➔ Lặp bài ➔ Lặp hàng chờ`,
-        `**/volume** (hoặc **/vol**) \`<1-100>\` — Điều chỉnh âm lượng phát nhạc của bot`
+        `**/nowplaying** (hoặc **/np**) — Xem bài đang phát & bảng nút điều khiển tương tác`,
+        `**/volume** (hoặc **/vol**) \`[1-100]\` — Điều chỉnh âm lượng phát nhạc của bot (1-100%)`,
+        `**/loop** \`[chế_độ]\` — Đổi chế độ lặp: Tắt ➔ Lặp bài hiện tại ➔ Lặp hàng chờ`,
+        `**/crossfade** \`[giây: 0-10]\` — Bật hiệu ứng hòa âm fade in mượt mà khi chuyển bài`,
+        `**/autoplay** \`[on/off]\` — Tự động tìm và phát bài tương tự khi hết nhạc`
       ].join('\n'),
-      footer: 'Điều chỉnh âm lượng và chế độ lặp lại'
+      footer: 'Điều chỉnh âm lượng, chế độ lặp và hiệu ứng chuyển bài'
     },
     utility: {
       title: '⚙️ Tiện Ích • Utility Commands',
       desc: [
         `**/ping** — Kiểm tra độ trễ (latency) và trạng thái hoạt động của bot`,
         `**/feedback** \`<nội_dung>\` — Gửi góp ý / báo lỗi trực tiếp tới nhà phát triển`,
-        `**/help** (hoặc **/h**) — Mở bảng hướng dẫn sử dụng lệnh này`
+        `**/help** (hoặc **/h**) — Mở bảng hướng dẫn sử dụng toàn diện này`
       ].join('\n'),
       footer: 'Tiện ích hệ thống và trợ giúp'
     }
@@ -61,12 +64,10 @@ function createHelpMenu(activeTab = 'music', isAdmin = false) {
       title: '👑 Bảng Lệnh Quản Trị Viên (Admin Controls)',
       desc: [
         `**/settings** — Mở Menu Cài Đặt toàn diện bằng tương tác Dropdown`,
-        `**/setlog** \`[channel] [reset]\` — Cài đặt kênh ghi toàn bộ nhật ký hoạt động`,
         `**/247** \`[status:On/Off]\` — Bật/tắt duy trì Voice và phát Lofi thư giãn 24/7`,
-        `**/autoplay** \`[status:On/Off]\` — Bật/tắt tự động phát bài tương tự khi hết nhạc`,
-        `**/crossfade** \`[seconds:0-10]\` — Cài đặt thời gian hòa âm chuyển bài mượt mà`,
         `**/lockvoice** \`[channel] [reset]\` — Khóa phòng Voice cố định cho bot`,
         `**/setchannel** \`[channel] [reset]\` — Khóa kênh văn bản nhận lệnh bot`,
+        `**/setlog** \`[channel] [reset]\` — Cài đặt kênh ghi toàn bộ nhật ký hoạt động`,
         `**/setdj** \`[role] [mode]\` — Cài đặt vai trò DJ cho máy chủ`
       ].join('\n'),
       footer: 'Dành riêng cho Quản trị viên máy chủ • Bạn có toàn quyền quản trị'

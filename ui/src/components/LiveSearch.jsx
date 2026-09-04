@@ -131,7 +131,7 @@ export default function LiveSearch({ onOrderSong, player, guildId, token }) {
           setLoading(false);
         }
       }
-    }, 450);
+    }, 520);
 
     return () => {
       clearTimeout(debounceRef.current);

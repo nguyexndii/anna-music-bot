@@ -5,10 +5,18 @@ try {
   const ytSearchDist = path.join(__dirname, '../../node_modules/yt-search/dist/yt-search.js');
   if (fs.existsSync(ytSearchDist)) {
     let code = fs.readFileSync(ytSearchDist, 'utf8');
+    let changed = false;
+    if (code.includes('title: title.trim()')) {
+      code = code.replace(/title:\s*title\.trim\(\)/g, 'title: (typeof title === "string" ? title.trim() : "")');
+      changed = true;
+    }
     if (code.includes('_title.trim()')) {
       code = code.replace(/_title\.trim\(\)/g, '(_title || "").trim()');
       code = code.replace(/_title2\.trim\(\)/g, '(_title2 || "").trim()');
       code = code.replace(/_title3\.trim\(\)/g, '(_title3 || "").trim()');
+      changed = true;
+    }
+    if (changed) {
       fs.writeFileSync(ytSearchDist, code, 'utf8');
     }
   }
@@ -1029,6 +1037,30 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
       }));
     }
   } catch (err) {}
+
+  // 3. Fallback an toàn qua yt-dlp nếu cả yt-search và play-dl đều không trả về kết quả
+  try {
+    const ytRes = await withTimeout(
+      ytdlp(`ytsearch${Math.min(limit, 15)}:${query}`, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        flatPlaylist: true
+      }),
+      4500
+    );
+    if (ytRes && ytRes.entries && Array.isArray(ytRes.entries) && ytRes.entries.length > 0) {
+      return ytRes.entries.map(e => ({
+        title: e.title,
+        url: e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null),
+        duration: e.duration ? `${Math.floor(e.duration / 60)}:${String(e.duration % 60).padStart(2, '0')}` : '3:30',
+        thumbnail: resolveBestThumbnail(e),
+        artist: e.uploader || e.channel || 'YouTube',
+        isLive: false
+      })).filter(t => t.url);
+    }
+  } catch (ytErr) {
+    console.warn('[searchMultipleTracks yt-dlp fallback notice]:', ytErr.message);
+  }
 
   return [];
 }

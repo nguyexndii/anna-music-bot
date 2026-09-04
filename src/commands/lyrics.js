@@ -35,7 +35,7 @@ module.exports = {
       targetTitle = queryInput.trim();
     } else if (args && args.length > 0) {
       targetTitle = args.join(' ');
-    } else if (queue && queue.currentSong && queue.currentSong.requestedBy !== 'Auto (24/7)') {
+    } else if (queue && queue.currentSong) {
       targetTitle = queue.currentSong.title;
       targetArtist = queue.currentSong.author || queue.currentSong.artist || '';
       targetDurationMs = queue.currentSong.durationMs || (queue.currentSong.duration ? parseDurationToMs(queue.currentSong.duration) : 0);
