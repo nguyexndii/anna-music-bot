@@ -31,6 +31,10 @@ const { createAudioResource, StreamType } = require('@discordjs/voice');
 const fetch = globalThis.fetch || require('node-fetch');
 const spotifyUrlInfo = require('spotify-url-info')(fetch);
 
+// Đường dẫn file cookies YouTube (Netscape format). Cài trong .env: YTDLP_COOKIES_FILE=/root/anna-music-bot/youtube.cookies
+// File này giúp yt-dlp xác thực để bypass kiểm tra bot của YouTube trên Datacenter IP
+const YTDLP_COOKIES_FILE = process.env.YTDLP_COOKIES_FILE || null;
+
 
 /**
  * Định dạng mili-giây sang MM:SS
@@ -760,39 +764,46 @@ process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 /**
  * Lấy URL luồng âm thanh trực tiếp (Direct Audio Stream URL) từ YouTube / Web
  * Bỏ qua hoàn toàn cơ chế chặn bot / Datacenter IP của YouTube bằng iOS/Android Player Client.
+ * Nếu cấu hình YTDLP_COOKIES_FILE, sẽ gửi kèm cookies để xác thực account YouTube.
  */
 async function getDirectStreamUrl(targetUrl) {
   if (!targetUrl || typeof targetUrl !== 'string') return null;
 
-  // 1. Thử qua yt-dlp với iOS và Android client (Bypass 100% chặn Datacenter IP)
+  const cookiesOpts = YTDLP_COOKIES_FILE ? { cookies: YTDLP_COOKIES_FILE } : {};
+
+  // 1. Thử với cookies + iOS/Android client (phương án mạnh nhất, bypass hoàn toàn bot-check)
   try {
-    const directUrl = await ytdlp(targetUrl, {
+    const opts = {
       getUrl: true,
       format: 'bestaudio/best',
-      extractorArgs: 'youtube:player_client=ios,android',
+      extractorArgs: 'youtube:player_client=ios,android,tv_embedded',
       noPlaylist: true,
-      noWarnings: true
-    });
+      noWarnings: true,
+      ...cookiesOpts
+    };
+    const directUrl = await ytdlp(targetUrl, opts);
     if (directUrl && typeof directUrl === 'string' && directUrl.trim().startsWith('http')) {
       return directUrl.trim().split('\n')[0].trim();
     }
   } catch (e) {
-    console.warn(`[yt-dlp getUrl ios/android failed for ${targetUrl}]:`, e.message);
+    console.warn(`[yt-dlp getUrl ios/android failed for ${targetUrl}]:`, e.message.split('\n').filter(l => l.includes('ERROR:')).join(' ') || e.message.slice(0, 120));
   }
 
-  // 2. Thử qua yt-dlp mặc định
+  // 2. Thử với cookies + web client mặc định
   try {
-    const directUrl = await ytdlp(targetUrl, {
+    const opts = {
       getUrl: true,
       format: 'bestaudio/best',
       noPlaylist: true,
-      noWarnings: true
-    });
+      noWarnings: true,
+      ...cookiesOpts
+    };
+    const directUrl = await ytdlp(targetUrl, opts);
     if (directUrl && typeof directUrl === 'string' && directUrl.trim().startsWith('http')) {
       return directUrl.trim().split('\n')[0].trim();
     }
   } catch (e) {
-    console.warn(`[yt-dlp getUrl default failed for ${targetUrl}]:`, e.message);
+    console.warn(`[yt-dlp getUrl default failed for ${targetUrl}]:`, e.message.split('\n').filter(l => l.includes('ERROR:')).join(' ') || e.message.slice(0, 120));
   }
 
   return null;
@@ -911,15 +922,17 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   console.log(`[MusicExtractor Fallback] Chuyển sang chế độ piped stream cho: ${targetUrl}`);
   let ytdlpStreamProcess = null;
   try {
-    ytdlpStreamProcess = ytdlp.exec(targetUrl, {
+    const fallbackOpts = {
       output: '-',
       format: 'bestaudio/best',
-      extractorArgs: 'youtube:player_client=ios,android',
+      extractorArgs: 'youtube:player_client=ios,android,tv_embedded',
       ffmpegLocation: ffmpeg,
       noPlaylist: true,
       noWarnings: true,
       preferFreeFormats: true
-    });
+    };
+    if (YTDLP_COOKIES_FILE) fallbackOpts.cookies = YTDLP_COOKIES_FILE;
+    ytdlpStreamProcess = ytdlp.exec(targetUrl, fallbackOpts);
     if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
   } catch (err) {
     console.warn(`[yt-dlp fallback pipe error for ${targetUrl}]:`, err.message);
