@@ -6,21 +6,20 @@ import {
   Play,
   Flame,
   Plus,
-  Music,
   Heart,
   Clock,
   Disc3,
   ListPlus,
-  History,
-  ChevronRight,
-  User,
-  Calendar,
+  ListMusic,
   Sparkles,
-  Music2
+  Globe,
+  SlidersHorizontal
 } from 'lucide-react';
 import { API_BASE } from '../config';
+import FavoritesModal from './FavoritesModal';
+import PlaylistDetailModal from './PlaylistDetailModal';
 
-// Helper nhận diện nhanh URL & Playlist
+// Helper nhận diện URL & Playlist
 function detectUrlType(text) {
   if (!text || typeof text !== 'string') return null;
   const trimmed = text.trim();
@@ -53,56 +52,51 @@ function getPlaylistPreviewImage(url) {
   return null;
 }
 
-// Helper lấy ảnh bìa YouTube / Track chuẩn xác
+function getSourceLabel(track) {
+  if (!track) return 'YouTube Music';
+  const u = (track.url || '').toLowerCase();
+  const s = (track.source || '').toLowerCase();
+  if (s === 'soundcloud' || u.includes('soundcloud.com')) return 'SoundCloud';
+  if (s === 'spotify' || u.includes('spotify.com')) return 'Spotify';
+  if (s === 'youtube' || u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube Music';
+  return track.artist || 'YouTube Music';
+}
+
 function getTrackThumb(track) {
+
+  if (track?.thumbnail && !track.thumbnail.includes('yt3.ggpht.com') && !track.thumbnail.includes('default_user')) {
+    return track.thumbnail;
+  }
   if (track?.url) {
     const match = track.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
     if (match && match[1]) {
       return `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
     }
   }
-  if (track?.thumbnail && !track.thumbnail.includes('yt3.ggpht.com') && !track.thumbnail.includes('default_user')) {
-    return track.thumbnail;
-  }
   return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=120';
 }
 
-function formatRelativeTime(dateString) {
-  if (!dateString) return 'Gần đây';
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return 'Gần đây';
-
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSeconds = Math.floor(diffMs / 1000);
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  const diffHours = Math.floor(diffMinutes / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffSeconds < 60) return 'Vừa xong';
-  if (diffMinutes < 60) return `${diffMinutes} phút trước`;
-  if (diffHours < 24) return `${diffHours} giờ trước`;
-  if (diffDays === 1) return 'Hôm qua';
-  if (diffDays < 7) return `${diffDays} ngày trước`;
-
-  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
-}
-
-export default function LiveSearch({ onOrderSong, player }) {
+export default function LiveSearch({ onOrderSong, player, guildId, token }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [historyFilter, setHistoryFilter] = useState('');
-  const [historyTimeFilter, setHistoryTimeFilter] = useState('all'); // 'all', 'today', 'yesterday', 'older'
+  const [searchMode, setSearchMode] = useState(() => localStorage.getItem('anna_search_mode') || 'official');
+  const [isFavoritesModalOpen, setIsFavoritesModalOpen] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
   const debounceRef = useRef(null);
 
   const detected = useMemo(() => detectUrlType(query), [query]);
 
-  // Live Search Effect với Debounce 250ms
+  const handleModeChange = (mode) => {
+    setSearchMode(mode);
+    localStorage.setItem('anna_search_mode', mode);
+  };
+
+  // Live Search Effect - lấy 20 kết quả theo mode với AbortController và debounce an toàn
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
+    if (!trimmed || trimmed.length < 2) {
       setResults([]);
       setLoading(false);
       return;
@@ -117,9 +111,14 @@ export default function LiveSearch({ onOrderSong, player }) {
     setLoading(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
+    const abortController = new AbortController();
+
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(trimmed)}&limit=8`);
+        const res = await fetch(
+          `${API_BASE}/api/search?q=${encodeURIComponent(trimmed)}&limit=20&mode=${searchMode}`,
+          { signal: abortController.signal }
+        );
         const data = await res.json();
         setLoading(false);
         if (data.success && data.results) {
@@ -128,19 +127,33 @@ export default function LiveSearch({ onOrderSong, player }) {
           setResults([]);
         }
       } catch (err) {
-        setLoading(false);
+        if (err.name !== 'AbortError') {
+          setLoading(false);
+        }
       }
-    }, 250);
+    }, 450);
 
-    return () => clearTimeout(debounceRef.current);
-  }, [query, detected?.isPlaylist]);
+    return () => {
+      clearTimeout(debounceRef.current);
+      abortController.abort();
+    };
+  }, [query, searchMode, detected?.isPlaylist]);
 
   const handleOrderTrack = (track) => {
     onOrderSong(track);
   };
 
-  const handleAddPlaylistUrl = (url) => {
-    onOrderSong({ url: url || query.trim(), isPlaylist: true });
+  const handleAddPlaylistUrl = (pl) => {
+    if (typeof pl === 'string') {
+      onOrderSong({ url: pl, title: 'Danh Sách Phát', isPlaylist: true });
+    } else if (pl && typeof pl === 'object') {
+      onOrderSong({
+        url: pl.url || query.trim(),
+        title: pl.title || pl.name || 'Danh Sách Phát',
+        itemCount: pl.itemCount || pl.trackCount || pl.tracksCount,
+        isPlaylist: true
+      });
+    }
     setQuery('');
   };
 
@@ -157,110 +170,97 @@ export default function LiveSearch({ onOrderSong, player }) {
     }
   };
 
-  // Dữ liệu thực tế từ Player State
   const favorites = player?.favorites || [];
   const history = player?.history || [];
   const topTracks = player?.topTracks || [];
   const recentPlaylists = player?.recentPlaylists || [];
 
-  const hasAnyData = favorites.length > 0 || history.length > 0 || topTracks.length > 0 || recentPlaylists.length > 0;
-
-  // Lọc lịch sử theo Text & Thời gian
-  const filteredHistory = useMemo(() => {
-    let list = history;
-
-    // Lọc theo khoảng thời gian
-    if (historyTimeFilter !== 'all') {
-      const now = new Date();
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const startOfYesterday = startOfToday - 86400000;
-
-      list = list.filter((t) => {
-        if (!t.playedAt) return false;
-        const time = new Date(t.playedAt).getTime();
-        if (isNaN(time)) return false;
-
-        if (historyTimeFilter === 'today') {
-          return time >= startOfToday;
-        }
-        if (historyTimeFilter === 'yesterday') {
-          return time >= startOfYesterday && time < startOfToday;
-        }
-        if (historyTimeFilter === 'older') {
-          return time < startOfYesterday;
-        }
-        return true;
-      });
-    }
-
-    // Lọc theo Text
-    if (historyFilter.trim()) {
-      const q = historyFilter.toLowerCase().trim();
-      list = list.filter(
-        (t) =>
-          (t.title && t.title.toLowerCase().includes(q)) ||
-          (t.artist && t.artist.toLowerCase().includes(q)) ||
-          (t.requesterName && t.requesterName.toLowerCase().includes(q))
-      );
-    }
-
-    return list;
-  }, [history, historyFilter, historyTimeFilter]);
-
   return (
-    <div className="flex flex-col gap-4 animate-in fade-in">
-      {/* Search Bar */}
-      <div className="relative flex items-center">
-        <Search className="w-5 h-5 absolute left-4 text-anna-muted pointer-events-none" />
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {/* ── Search Input Box ──────────────────────────────── */}
+      <div className="search-box">
+        <Search size={16} style={{ color: 'var(--muted)', flexShrink: 0 }} />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Tìm bài hát, ca sĩ, dán link YouTube / Spotify / Playlist..."
-          className="w-full bg-anna-surface border border-anna-border focus:border-anna-accent rounded-2xl pl-12 pr-12 py-3.5 text-sm text-white placeholder-anna-muted focus:outline-none focus:ring-2 focus:ring-anna-accent/30 transition shadow-inner"
+          autoFocus
         />
-        {query && (
+
+        {/* Nút Nâng Cao Lồng Trong Ô Nhập */}
+        <button
+          onClick={() => handleModeChange(searchMode === 'all' ? 'official' : 'all')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 9px',
+            borderRadius: 7,
+            border: searchMode === 'all' ? '1px solid rgba(232,201,119,0.5)' : '1px solid var(--border)',
+            background: searchMode === 'all' ? 'rgba(232,201,119,0.15)' : 'var(--soft)',
+            color: searchMode === 'all' ? 'var(--yellow)' : 'var(--muted)',
+            boxShadow: searchMode === 'all' ? '0 0 10px rgba(232,201,119,0.18)' : 'none',
+            fontSize: 9.5,
+            fontWeight: searchMode === 'all' ? 700 : 500,
+            fontFamily: '"DM Mono", monospace',
+            letterSpacing: '0.04em',
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'all .2s cubic-bezier(0.4, 0, 0.2, 1)',
+            marginRight: 4
+          }}
+          title={searchMode === 'all' ? 'Đang bật tìm kiếm nâng cao (Mở rộng Remix, Cover, Live...) — Nhấn để tắt' : 'Bật tìm kiếm nâng cao (Mở rộng Remix, Cover, Live...)'}
+        >
+          <SlidersHorizontal size={12} style={{ color: searchMode === 'all' ? 'var(--yellow)' : 'var(--muted)' }} />
+          <span>NÂNG CAO</span>
+        </button>
+
+        {query ? (
           <button
             onClick={() => setQuery('')}
-            aria-label="Xóa nội dung tìm kiếm"
-            className="absolute right-4 text-anna-muted hover:text-white focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none rounded-lg p-1 transition"
+            style={{ border: 0, background: 'transparent', color: 'var(--muted)', cursor: 'pointer', padding: 2 }}
+            aria-label="Xóa tìm kiếm"
           >
-            <X className="w-4 h-4" />
+            <X size={15} />
           </button>
+        ) : (
+          <span className="search-kbd">ENTER</span>
         )}
       </div>
 
-      {/* Instant Playlist Detection Banner */}
+      {/* ── Playlist Detection Banner ─────────────────────── */}
       {detected?.isPlaylist && (
-        <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-anna-accent/25 via-purple-600/20 to-pink-500/20 border border-anna-accent/40 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
-          <div className="flex items-center gap-3.5 min-w-0">
-            {/* Playlist Artwork Thumbnail */}
-            <div className="w-12 h-12 rounded-xl overflow-hidden relative flex-shrink-0 bg-anna-card border border-white/10 shadow-lg group">
+        <div style={{
+          margin: '-10px 0 18px',
+          padding: '12px 16px',
+          borderRadius: 14,
+          background: 'rgba(232,201,119,0.06)',
+          border: '1px solid rgba(232,201,119,0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 10, overflow: 'hidden', flexShrink: 0,
+              background: '#1c1e22', border: '1px solid var(--border)', display: 'grid', placeItems: 'center'
+            }}>
               {getPlaylistPreviewImage(query) ? (
-                <img
-                  src={getPlaylistPreviewImage(query)}
-                  alt="Ảnh Playlist"
-                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                />
+                <img src={getPlaylistPreviewImage(query)} alt="Playlist" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <div className="w-full h-full bg-gradient-to-tr from-anna-accent to-purple-600 flex items-center justify-center text-white">
-                  <Disc3 className="w-6 h-6 animate-spin" style={{ animationDuration: '8s' }} />
-                </div>
+                <Disc3 size={20} style={{ color: 'var(--yellow)', animation: 'spin 8s linear infinite' }} />
               )}
-              <div className="absolute inset-0 bg-black/20 ring-1 ring-inset ring-white/10 rounded-xl pointer-events-none"></div>
             </div>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  {detected.label}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-anna-green/20 border border-anna-green/30 text-anna-green font-bold">
-                  Sẵn sàng thêm
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontFamily: '"DM Mono", monospace', fontSize: 10, fontWeight: 700, color: 'var(--yellow)', letterSpacing: '0.1em' }}>
+                  {detected.label.toUpperCase()}
                 </span>
               </div>
-              <p className="text-xs text-anna-muted truncate mt-0.5 max-w-md font-mono">
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {query}
               </p>
             </div>
@@ -268,441 +268,384 @@ export default function LiveSearch({ onOrderSong, player }) {
 
           <button
             onClick={() => handleAddPlaylistUrl(query.trim())}
-            className="px-4 py-2.5 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition flex items-center gap-2 flex-shrink-0 shadow-lg shadow-anna-accent/30 active:scale-95"
+            style={{
+              height: 36, borderRadius: 9, padding: '0 14px',
+              background: 'var(--yellow)', color: '#1c1e21',
+              fontWeight: 700, fontSize: 12, border: 0,
+              display: 'flex', alignItems: 'center', gap: 6,
+              cursor: 'pointer', flexShrink: 0
+            }}
           >
-            <ListPlus className="w-4 h-4" />
-            <span>Thêm Cả Playlist</span>
+            <ListPlus size={15} />
+            <span>Thêm Playlist</span>
           </button>
         </div>
       )}
 
-      {/* Main Content Container */}
-      <div className="bg-anna-surface border border-anna-border/80 rounded-3xl p-5 sm:p-6 pb-8 flex flex-col gap-6 relative">
+      {/* ── Main Scroll Area ──────────────────────────────── */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingRight: 2 }}>
         
-        {/* Loading Overlay */}
+        {/* Loading */}
         {loading && (
-          <div
-            className="absolute inset-0 bg-anna-surface/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-2 rounded-3xl animate-in fade-in"
-            role="status"
-            aria-live="polite"
-          >
-            <Loader2 className="w-8 h-8 text-anna-accent animate-spin" />
-            <span className="text-xs font-semibold text-white">Đang tìm kiếm bài hát...</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 10, color: 'var(--muted)' }}>
+            <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--yellow)' }} />
+            <span style={{ fontFamily: '"DM Mono", monospace', fontSize: 10, letterSpacing: '0.14em' }}>ĐANG TÌM KIẾM...</span>
           </div>
         )}
 
-        {/* 1. Live Search Results */}
-        {query.trim() && !detected?.isPlaylist ? (
+        {/* 1. Results List when Query is Typed */}
+        {query.trim() && !detected?.isPlaylist && !loading && (
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-anna-muted flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-anna-accent" />
-                <span>Kết Quả Tìm Kiếm ({results.length})</span>
-              </h3>
+            <div className="section-label">
+              <span>KẾT QUẢ TÌM KIẾM ({results.length})</span>
+              <span style={{ fontSize: 9 }}>NHẤN ĐỂ PHÁT</span>
             </div>
 
-            {results.length === 0 && !loading ? (
-              <div className="p-8 text-center text-anna-muted">
-                <p className="text-sm font-semibold text-white">Không tìm thấy bài hát</p>
-                <p className="text-xs text-anna-muted mt-1">
-                  Hãy thử gõ tên bài hát khác hoặc dán trực tiếp đường link YouTube/Spotify vào ô tìm kiếm nhé!
-                </p>
+            {results.length === 0 ? (
+              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--muted)' }}>
+                <p style={{ fontWeight: 500, color: 'var(--ink)', fontSize: 14, margin: '0 0 6px' }}>Không tìm thấy bài hát</p>
+                <p style={{ fontSize: 12, margin: 0, lineHeight: 1.6 }}>Hãy thử tìm bằng từ khóa khác hoặc dán trực tiếp đường dẫn YouTube / Spotify nhé!</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {results.map((song) => (
-                  <div
-                    key={song.id || song.url}
-                    onClick={() => handleOrderTrack(song)}
-                    className="group flex items-center justify-between p-2.5 rounded-2xl bg-anna-card/60 hover:bg-anna-card border border-anna-border/40 hover:border-anna-accent/50 transition cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                      <div className="w-11 h-11 rounded-xl overflow-hidden relative flex-shrink-0 bg-anna-surface border border-anna-border/60">
-                        <img
-                          src={song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=120'}
-                          alt={song.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        />
-                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition flex items-center justify-center">
-                          <Play className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition fill-white" />
-                        </div>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-xs font-bold text-white truncate group-hover:text-anna-accent transition">
-                          {song.title}
-                        </h4>
-                        <p className="text-[11px] text-anna-muted truncate mt-0.5">
-                          {song.artist && song.artist !== 'Unknown' ? song.artist : 'YouTube Music'}
-                          {song.duration ? ` • ${song.duration}` : ''}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOrderTrack(song);
-                      }}
-                      className="w-8 h-8 rounded-xl bg-anna-accent/10 hover:bg-anna-accent text-anna-accent hover:text-white border border-anna-accent/30 hover:border-transparent flex items-center justify-center transition active:scale-95 flex-shrink-0"
-                      title="Thêm vào hàng chờ"
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {results.map((song, i) => {
+                  const isPlaylist = song.isPlaylist || song.type === 'playlist';
+                  return (
+                    <div
+                      key={song.id || song.url || i}
+                      onClick={() => handleOrderTrack(song)}
+                      className="song-row"
+                      style={{ borderRadius: 10 }}
                     >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+                      <div className="song-thumb">
+                        <img src={getTrackThumb(song)} alt="" />
+                      </div>
+                      <div className="song-info">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span className="song-name" title={song.title}>{song.title}</span>
+                          {isPlaylist && (
+                            <span style={{
+                              fontFamily: '"DM Mono", monospace', fontSize: 9, padding: '1px 6px', borderRadius: 4,
+                              background: 'rgba(232,201,119,0.15)', color: 'var(--yellow)', border: '1px solid rgba(232,201,119,0.3)', flexShrink: 0
+                            }}>
+                              PLAYLIST
+                            </span>
+                          )}
+                        </div>
+                        <span className="song-sub" title={song.artist}>
+                          {song.artist && song.artist !== 'Unknown' ? song.artist : getSourceLabel(song)}
+                          {song.itemCount ? ` • ${song.itemCount} bài` : ''}
+                        </span>
+                      </div>
+                      <span className="song-dur">{song.duration || ''}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleOrderTrack(song); }}
+                        style={{
+                          width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)',
+                          background: 'var(--soft)', color: 'var(--ink)', display: 'grid', placeItems: 'center',
+                          marginLeft: 6, flexShrink: 0, cursor: 'pointer'
+                        }}
+                        title="Thêm vào hàng chờ"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        ) : (
-          /* Hub Landing Sections khi không gõ tìm kiếm */
-          <div className="flex flex-col gap-6">
+        )}
+
+        {/* 2. Default Discover Landing when Query is Empty */}
+        {!query.trim() && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             
-            {/* 2. Recently Played Horizontal Carousel */}
+            {/* Recently Played */}
             {history.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-anna-muted flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-anna-cyan" />
-                    <span>Nghe Gần Đây</span>
-                  </h3>
-                  
-                  {/* Nút Xem Tất Cả Lịch Sử */}
-                  <button
-                    onClick={() => setShowHistoryModal(true)}
-                    className="text-xs font-bold text-anna-accent hover:text-white transition flex items-center gap-1 group py-1 px-2 rounded-lg hover:bg-anna-card"
-                  >
-                    <span>Lịch sử phòng nhạc</span>
-                    <ChevronRight className="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition" />
-                  </button>
+                <div className="section-label">
+                  <span>NGHE GẦN ĐÂY</span>
                 </div>
-
-                <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x scrollbar-thin">
-                  {history.slice(0, 10).map((item, idx) => (
+                <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, paddingTop: 4 }}>
+                  {history.slice(0, 8).map((item, idx) => (
                     <div
                       key={idx}
                       onClick={() => handleOrderTrack(item)}
-                      className="group flex-shrink-0 w-32 sm:w-36 flex flex-col gap-2 p-2 rounded-2xl bg-anna-card/50 hover:bg-anna-card border border-anna-border/40 hover:border-anna-accent/50 transition cursor-pointer snap-start"
+                      style={{
+                        width: 140, flexShrink: 0, cursor: 'pointer', padding: 10,
+                        borderRadius: 14, background: 'var(--paper)', border: '1px solid var(--border)',
+                        transition: 'border-color .18s, transform .15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--yellow)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'none'; }}
                     >
-                      <div className="w-full aspect-square rounded-xl overflow-hidden relative bg-anna-surface border border-anna-border/60">
-                        <img
-                          src={getTrackThumb(item)}
-                          alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        />
-                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition"></div>
-                        <div className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-anna-accent text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-lg translate-y-1 group-hover:translate-y-0">
-                          <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                        </div>
+                      <div style={{ width: '100%', aspectRatio: '1', borderRadius: 10, overflow: 'hidden', background: '#202328', position: 'relative', marginBottom: 8 }}>
+                        <img src={getTrackThumb(item)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
-
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-white truncate group-hover:text-anna-accent transition">
-                          {item.title}
-                        </h4>
-                        <p className="text-[11px] text-anna-muted truncate mt-0.5">
-                          {item.artist || 'YouTube Music'}
-                        </p>
-                      </div>
+                      <p title={item.title} style={{ margin: '0 0 3px', fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.title}
+                      </p>
+                      <p title={item.artist} style={{ margin: 0, fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.artist && item.artist !== 'Unknown' ? item.artist : getSourceLabel(item)}
+                      </p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* 3. Recent Playlists Horizontal Carousel */}
+
+
+            {/* Playlists Gần Đây (Shows first track's thumbnail!) */}
             {recentPlaylists.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-anna-muted flex items-center gap-1.5">
-                    <Disc3 className="w-3.5 h-3.5 text-anna-pink" />
-                    <span>Playlist Đã Thêm Gần Đây</span>
-                  </h3>
-                  <span className="text-[10px] text-anna-muted">Lưu tự động</span>
+                <div className="section-label">
+                  <span>PLAYLIST ĐÃ THÊM GẦN ĐÂY</span>
+                  <span style={{ fontSize: 9 }}>NHẤN ĐỂ XEM CHI TIẾT & PHÁT</span>
                 </div>
-
-                <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x scrollbar-thin">
-                  {recentPlaylists.slice(0, 8).map((pl, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => handleAddPlaylistUrl(pl.url)}
-                      className="group flex-shrink-0 w-32 sm:w-36 flex flex-col gap-2 p-2 rounded-2xl bg-anna-card/50 hover:bg-anna-card border border-anna-border/40 hover:border-anna-pink/50 transition cursor-pointer snap-start"
-                    >
-                      <div className="w-full aspect-square rounded-xl overflow-hidden relative bg-gradient-to-tr from-anna-accent/40 via-purple-600/40 to-pink-500/40 border border-white/10 flex items-center justify-center">
-                        {pl.thumbnail ? (
-                          <img
-                            src={pl.thumbnail}
-                            alt={pl.title || 'Playlist'}
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                          />
-                        ) : (
-                          <Disc3 className="w-8 h-8 text-white/80 group-hover:rotate-45 transition duration-300" />
-                        )}
-                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition"></div>
-                        <div className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-anna-pink text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-lg translate-y-1 group-hover:translate-y-0">
-                          <ListPlus className="w-3.5 h-3.5" />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+                  {recentPlaylists.slice(0, 6).map((pl, idx) => {
+                    const thumb = pl.thumbnail || getPlaylistPreviewImage(pl.url) || pl.firstTrackThumb;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          setSelectedPlaylist(pl);
+                          setIsPlaylistModalOpen(true);
+                        }}
+                        className="playlist-hover-card"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12,
+                          background: 'var(--paper)', border: '1px solid var(--border)', cursor: 'pointer',
+                          transition: 'border-color .18s, background .18s, transform .15s',
+                          position: 'relative', overflow: 'hidden',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'rgba(232,201,119,0.6)';
+                          e.currentTarget.style.background = 'rgba(232,201,119,0.06)';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                          e.currentTarget.querySelector('.pl-play-icon')?.style && (e.currentTarget.querySelector('.pl-play-icon').style.opacity = '1');
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                          e.currentTarget.style.background = 'var(--paper)';
+                          e.currentTarget.style.transform = 'none';
+                          e.currentTarget.querySelector('.pl-play-icon')?.style && (e.currentTarget.querySelector('.pl-play-icon').style.opacity = '0');
+                        }}
+                        title="Xem toàn bộ bài hát trong playlist này"
+                      >
+                        <div style={{ width: 44, height: 44, borderRadius: 9, overflow: 'hidden', background: '#202328', display: 'grid', placeItems: 'center', flexShrink: 0, border: '1px solid var(--border)', position: 'relative' }}>
+                          {thumb ? (
+                            <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <ListMusic size={20} style={{ color: 'var(--yellow)' }} />
+                          )}
+                          <div
+                            className="pl-play-icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddPlaylistUrl(pl);
+                            }}
+                            title="Phát toàn bộ ngay lập tức"
+                            style={{
+                              position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.65)',
+                              display: 'grid', placeItems: 'center', opacity: 0,
+                              transition: 'opacity .18s',
+                            }}
+                          >
+                            <Play size={16} fill="var(--yellow)" style={{ color: 'var(--yellow)' }} />
+                          </div>
                         </div>
-                      </div>
-
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-white truncate group-hover:text-anna-pink transition">
-                          {pl.title || 'Danh sách phát'}
-                        </h4>
-                        <p className="text-[11px] text-anna-muted truncate mt-0.5">
-                          {pl.itemCount ? `${pl.itemCount} bài hát` : 'Playlist'}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 4. Top Most Played Songs */}
-            {topTracks.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-anna-muted flex items-center gap-1.5">
-                    <Flame className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Top Bài Hát Nghe Nhiều Nhất</span>
-                  </h3>
-                  <span className="text-[10px] text-anna-muted">Thống kê máy chủ</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {topTracks.slice(0, 6).map((track, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => handleOrderTrack(track)}
-                      className="group flex items-center justify-between p-2.5 rounded-2xl bg-anna-card/50 hover:bg-anna-card border border-anna-border/40 hover:border-amber-400/50 transition cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                        <span className="w-5 text-center text-xs font-mono font-bold text-amber-400 flex-shrink-0">
-                          #{idx + 1}
-                        </span>
-                        <div className="w-10 h-10 rounded-xl overflow-hidden relative flex-shrink-0 bg-anna-surface border border-anna-border/60">
-                          <img
-                            src={getTrackThumb(track)}
-                            alt={track.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className="text-xs font-bold text-white truncate group-hover:text-amber-300 transition">
-                            {track.title}
-                          </h4>
-                          <p className="text-[11px] text-anna-muted truncate mt-0.5">
-                            {track.artist || 'YouTube Music'}
-                            {track.playCount ? ` • ${track.playCount} lượt nghe` : ''}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <p title={pl.title || pl.name} style={{ margin: 0, fontSize: 12, fontWeight: 500, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {pl.title || pl.name || 'Danh Sách Phát'}
+                          </p>
+                          <p style={{ margin: '2px 0 0', fontFamily: '"DM Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>
+                            {pl.trackCount || pl.itemCount ? `${pl.trackCount || pl.itemCount} BÀI` : 'PLAYLIST'}
                           </p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddPlaylistUrl(pl);
+                          }}
+                          title="Phát toàn bộ ngay lập tức"
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            padding: 4,
+                            cursor: 'pointer',
+                            display: 'grid',
+                            placeItems: 'center',
+                            flexShrink: 0,
+                            color: 'var(--yellow)',
+                            opacity: 0.75,
+                            transition: 'opacity 0.15s, transform 0.15s'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'scale(1.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.75'; e.currentTarget.style.transform = 'none'; }}
+                        >
+                          <Play size={14} fill="var(--yellow)" />
+                        </button>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOrderTrack(track);
-                        }}
-                        className="w-8 h-8 rounded-xl bg-amber-400/10 hover:bg-amber-400 text-amber-400 hover:text-black border border-amber-400/30 hover:border-transparent flex items-center justify-center transition active:scale-95 flex-shrink-0"
-                        title="Phát bài này"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                      </button>
-                    </div>
+            {/* Favorites */}
+            {favorites.length > 0 && (
+              <div>
+                <div className="section-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>BÀI HÁT YÊU THÍCH ({favorites.length})</span>
+                    <Heart size={12} style={{ color: 'var(--coral)' }} />
+                  </div>
+                  <button
+                    onClick={() => setIsFavoritesModalOpen(true)}
+                    style={{
+                      border: 0,
+                      background: 'transparent',
+                      color: 'var(--yellow)',
+                      fontSize: 10,
+                      fontFamily: '"DM Mono", monospace',
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                    title="Mở toàn bộ danh sách yêu thích"
+                  >
+                    <span>XEM TẤT CẢ</span>
+                    <span>↗</span>
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {favorites.slice(0, 4).map((fav, idx) => (
+                    <button
+                      key={idx}
+                      className="song-row"
+                      onClick={() => handleOrderTrack(fav)}
+                      title={`Phát ${fav.title}`}
+                    >
+                      <div className="song-thumb">
+                        <img src={getTrackThumb(fav)} alt="" />
+                      </div>
+                      <div className="song-info">
+                        <span className="song-name" title={fav.title}>{fav.title}</span>
+                        <span className="song-sub" title={fav.artist}>{fav.artist || 'YouTube'}</span>
+                      </div>
+                      <span className="song-dur">{fav.duration || ''}</span>
+                    </button>
                   ))}
                 </div>
-              </div>
-            )}
 
-            {/* Empty State khi mới cài bot chưa có dữ liệu */}
-            {!hasAnyData && (
-              <div className="py-16 flex flex-col items-center justify-center text-center p-6 text-anna-muted">
-                <div className="w-16 h-16 rounded-3xl bg-anna-card border border-anna-border flex items-center justify-center mb-4 shadow-inner">
-                  <Music className="w-8 h-8 text-anna-accent" />
-                </div>
-                <h3 className="text-sm font-bold text-white mb-1">Bắt đầu khám phá âm nhạc</h3>
-                <p className="text-xs text-anna-muted max-w-sm">
-                  Gõ tên bài hát hoặc dán link YouTube/Spotify ở thanh trên để thêm vào hàng chờ nhé!
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 5. Spotify-grade History Modal (Lịch Sử Phòng Nhạc) */}
-      {showHistoryModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl bg-[#131418] border border-white/10 rounded-3xl p-5 sm:p-7 shadow-2xl flex flex-col gap-4 max-h-[85vh] overflow-hidden animate-in zoom-in-95 duration-200 relative">
-            
-            {/* Ambient Violet Glow */}
-            <div className="absolute -top-20 -left-20 w-48 h-48 bg-anna-accent/20 rounded-full blur-3xl pointer-events-none"></div>
-
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-white/10 z-10 flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-anna-accent/15 border border-anna-accent/30 text-anna-accent flex items-center justify-center shadow-inner flex-shrink-0">
-                  <History className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm sm:text-base font-bold text-white">Lịch Sử Phòng Nhạc</h3>
-                    <span className="text-[10px] font-bold text-anna-accent bg-anna-accent/10 border border-anna-accent/20 px-2.5 py-0.5 rounded-full">
-                      {history.length} bài đã phát
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-anna-muted mt-0.5">
-                    Các bài hát đã được phát gần đây trong phòng thoại của máy chủ
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowHistoryModal(false)}
-                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-anna-muted hover:text-white border border-white/10 transition flex items-center justify-center active:scale-95"
-                title="Đóng cửa sổ"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Search & Filter Toolbar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 z-10 flex-shrink-0">
-              <div className="relative flex-1 flex items-center">
-                <Search className="w-4 h-4 absolute left-3.5 text-anna-muted pointer-events-none" />
-                <input
-                  type="text"
-                  value={historyFilter}
-                  onChange={(e) => setHistoryFilter(e.target.value)}
-                  placeholder="Lọc theo tên bài hát, nghệ sĩ..."
-                  className="w-full bg-[#1c1e24] border border-white/10 text-white placeholder-anna-muted text-xs rounded-xl pl-9 pr-8 py-2.5 focus:outline-none focus:border-anna-accent transition"
-                />
-                {historyFilter && (
+                {favorites.length > 4 && (
                   <button
-                    onClick={() => setHistoryFilter('')}
-                    className="absolute right-3 text-anna-muted hover:text-white p-0.5"
+                    onClick={() => setIsFavoritesModalOpen(true)}
+                    style={{
+                      marginTop: 8,
+                      width: '100%',
+                      padding: '8px 0',
+                      borderRadius: 10,
+                      border: '1px solid var(--border)',
+                      background: 'var(--soft)',
+                      color: 'var(--yellow)',
+                      fontSize: 11,
+                      fontFamily: '"DM Mono", monospace',
+                      letterSpacing: '0.06em',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      transition: 'border-color .15s, background .15s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--yellow)';
+                      e.currentTarget.style.background = 'rgba(232,201,119,0.08)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border)';
+                      e.currentTarget.style.background = 'var(--soft)';
+                    }}
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <span>XEM TOÀN BỘ DANH SÁCH YÊU THÍCH ({favorites.length} BÀI)</span>
+                    <span>↗</span>
                   </button>
                 )}
               </div>
+            )}
 
-              {/* Time Filter Pills */}
-              <div className="flex items-center gap-1 bg-[#1c1e24] p-1 rounded-xl border border-white/10 flex-shrink-0">
-                {[
-                  { key: 'all', label: 'Tất cả' },
-                  { key: 'today', label: 'Hôm nay' },
-                  { key: 'yesterday', label: 'Hôm qua' },
-                  { key: 'older', label: 'Cũ hơn' }
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setHistoryTimeFilter(tab.key)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition active:scale-95 ${
-                      historyTimeFilter === tab.key
-                        ? 'bg-anna-accent text-white shadow-sm'
-                        : 'text-anna-muted hover:text-white'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* History Track List */}
-            <div className="flex-1 overflow-y-auto max-h-[50vh] flex flex-col gap-1.5 pr-1 z-10 scrollbar-thin">
-              {filteredHistory.length === 0 ? (
-                <div className="py-14 flex flex-col items-center justify-center text-center text-anna-muted">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3">
-                    <Music2 className="w-6 h-6 text-anna-muted" />
-                  </div>
-                  <p className="text-xs font-bold text-white">
-                    {historyFilter ? 'Không tìm thấy bài hát phù hợp' : 'Chưa có bài hát trong khoảng thời gian này'}
-                  </p>
-                  <p className="text-[11px] text-anna-muted mt-1 max-w-xs">
-                    {historyFilter ? 'Hãy thử tìm bằng từ khóa khác hoặc xóa bộ lọc.' : 'Các bài hát phát trong voice chat sẽ tự động lưu vào đây.'}
-                  </p>
+            {/* Top Tracks */}
+            {topTracks.length > 0 && (
+              <div>
+                <div className="section-label">
+                  <span>PHỔ BIẾN TRONG MÁY CHỦ</span>
+                  <Flame size={12} style={{ color: 'var(--yellow)' }} />
                 </div>
-              ) : (
-                filteredHistory.map((track, idx) => (
-                  <div
-                    key={idx}
-                    className="group flex items-center justify-between p-2.5 rounded-2xl bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.04] hover:border-anna-accent/40 transition duration-150"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                      {/* Track Number / Play Icon on Hover */}
-                      <div className="w-7 text-center flex-shrink-0 flex items-center justify-center">
-                        <span className="text-xs font-mono font-bold text-anna-muted/70 group-hover:hidden">
-                          {idx + 1}
-                        </span>
-                        <button
-                          onClick={() => {
-                            handleOrderTrack(track);
-                            setShowHistoryModal(false);
-                          }}
-                          className="w-6 h-6 rounded-full bg-anna-accent text-white hidden group-hover:flex items-center justify-center shadow-md shadow-anna-accent/30 transform hover:scale-110 active:scale-95 transition"
-                          title="Phát bài này"
-                        >
-                          <Play className="w-3 h-3 fill-current ml-0.5" />
-                        </button>
-                      </div>
-
-                      {/* Thumbnail */}
-                      <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-anna-card border border-white/10 relative">
-                        <img
-                          src={getTrackThumb(track)}
-                          alt={track.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        />
-                      </div>
-
-                      {/* Title & Artist & Timestamp */}
-                      <div className="min-w-0 flex-1">
-                        <h4
-                          onClick={() => {
-                            handleOrderTrack(track);
-                            setShowHistoryModal(false);
-                          }}
-                          className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-anna-accent cursor-pointer transition"
-                        >
-                          {track.title}
-                        </h4>
-                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-anna-muted">
-                          <span className="truncate max-w-[120px] sm:max-w-[200px]">
-                            {track.artist && track.artist !== 'Unknown' ? track.artist : 'YouTube Music'}
-                          </span>
-                          <span>•</span>
-                          <span className="text-[10px] text-anna-muted/80">
-                            {formatRelativeTime(track.playedAt)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Quick Play Button */}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {topTracks.slice(0, 8).map((top, idx) => (
                     <button
-                      onClick={() => {
-                        handleOrderTrack(track);
-                        setShowHistoryModal(false);
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition flex items-center gap-1.5 active:scale-95 shadow-md shadow-anna-accent/25 flex-shrink-0"
+                      key={idx}
+                      className="song-row"
+                      onClick={() => handleOrderTrack(top)}
+                      title={`Phát ${top.title}`}
                     >
-                      <Play className="w-3 h-3 fill-current ml-0.5" />
-                      <span>Phát Lại</span>
+                      <div className="song-thumb" style={{ position: 'relative', overflow: 'hidden' }}>
+                        <img src={getTrackThumb(top)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        {idx < 3 && (
+                          <span style={{
+                            position: 'absolute', bottom: 2, right: 3,
+                            fontFamily: '"DM Mono", monospace', fontWeight: 800,
+                            fontSize: 10, color: 'var(--yellow)',
+                            textShadow: '0 1px 4px rgba(0,0,0,0.9)',
+                            lineHeight: 1
+                          }}>#{idx + 1}</span>
+                        )}
+                      </div>
+                      <div className="song-info">
+                        <span className="song-name" title={top.title}>{top.title}</span>
+                        <span className="song-sub" title={top.artist}>{top.playCount ? `Đã phát ${top.playCount} lần` : (top.artist || '')}</span>
+                      </div>
+                      <span className="song-dur">{top.duration || ''}</span>
                     </button>
-                  </div>
-                ))
-              )}
-            </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            {/* Modal Footer Note */}
-            <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[11px] text-anna-muted/70 z-10 flex-shrink-0">
-              <span>Tự động lưu 100 bài hát phát gần nhất</span>
-              <span>Bấm phát lại để nối tiếp vào hàng chờ</span>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+
+      </div>
+
+      {/* ── Modal Danh Sách Yêu Thích ───────────────────── */}
+      <FavoritesModal
+        isOpen={isFavoritesModalOpen}
+        onClose={() => setIsFavoritesModalOpen(false)}
+        favorites={favorites}
+        onOrderSong={handleOrderTrack}
+      />
+
+      {/* ── Modal Chi Tiết Playlist ─────────────────────── */}
+      <PlaylistDetailModal
+        isOpen={isPlaylistModalOpen}
+        onClose={() => {
+          setIsPlaylistModalOpen(false);
+          setSelectedPlaylist(null);
+        }}
+        playlist={selectedPlaylist}
+        guildId={guildId || player?.guildId}
+        token={token}
+        onOrderSong={handleOrderTrack}
+      />
     </div>
   );
 }

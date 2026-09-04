@@ -1,538 +1,365 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Play,
-  Pause,
-  SkipForward,
-  SkipBack,
-  Shuffle,
-  Repeat,
-  Volume2,
-  VolumeX,
-  Radio,
-  Infinity,
-  Mic,
-  Music,
-  Lock,
-  Minimize2,
-  Heart
-} from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, Radio, Lock, Heart } from 'lucide-react';
 
-export default function HeroPlayer({ player, onAction, user, onRequireAdmin, onToggleMinimize }) {
+function formatTime(ms) {
+  if (!ms || isNaN(ms) || ms < 0) return '0:00';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return `${m}:${(s % 60).toString().padStart(2, '0')}`;
+}
+
+function parseDurationToMs(str) {
+  if (!str || str.toLowerCase().includes('live')) return 0;
+  const parts = str.split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
+  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+  return parts[0] * 1000;
+}
+
+function getSourceLabel(track) {
+  if (!track) return 'YOUTUBE MUSIC';
+  const u = (track.url || '').toLowerCase();
+  const s = (track.source || '').toLowerCase();
+  if (s === 'soundcloud' || u.includes('soundcloud.com')) return 'SOUNDCLOUD';
+  if (s === 'spotify' || u.includes('spotify.com')) return 'SPOTIFY';
+  if (s === 'youtube' || u.includes('youtube.com') || u.includes('youtu.be')) return 'YOUTUBE';
+  if (track.album && track.album !== 'Unknown' && !track.album.toLowerCase().includes('unknown')) {
+    return track.album.toUpperCase();
+  }
+  return 'YOUTUBE MUSIC';
+}
+
+export default function HeroPlayer({ player, onAction, user, onRequireAdmin }) {
+
   const isPlaying = player?.isPlaying && !player?.isPaused;
-  const current = player?.current;
-  const isFav = player?.favorites?.some(f => f.title === current?.title || f.url === current?.url);
+  const current   = player?.current;
+  const isFav     = player?.favorites?.some(f => f.title === current?.title || f.url === current?.url);
 
-  // Local progress interpolation for smooth 1-second ticks
-  const [progressMs, setProgressMs] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragMs, setDragMs] = useState(0);
-  const [hoverInfo, setHoverInfo] = useState(null); // { percent, timeStr, x }
-  const [previousVolume, setPreviousVolume] = useState(100);
+  const [progressMs, setProgressMs]   = useState(0);
+  const [isDragging, setIsDragging]   = useState(false);
+  const [dragMs, setDragMs]           = useState(0);
+  const [hoverInfo, setHoverInfo]     = useState(null);
   const [localVolume, setLocalVolume] = useState(player?.volume ?? 80);
+  const [previousVolume, setPreviousVolume] = useState(100);
+  const [heartPopping, setHeartPopping] = useState(false);
+
+  const progressBarRef   = useRef(null);
   const volumeDebounceRef = useRef(null);
 
-  // Sync local volume with server value (when not dragging)
+  const totalMs = parseDurationToMs(current?.duration);
+
+  // Sync volume from server
   useEffect(() => {
-    if (volumeDebounceRef.current) return; // user is actively dragging
+    if (volumeDebounceRef.current) return;
     if (player?.volume !== undefined) setLocalVolume(player.volume);
   }, [player?.volume]);
 
-  const progressBarRef = useRef(null);
-  const totalMs = parseDurationToMs(current?.duration);
-
-
-  // Sync with server startTime when not actively dragging
+  // Sync progress from server
   useEffect(() => {
     if (isDragging) return;
-    if (current?.startTime) {
-      setProgressMs(Math.max(0, Date.now() - current.startTime));
-    } else {
-      setProgressMs(0);
-    }
-  }, [current?.title, current?.startTime, isDragging]);
+    if (current?.playbackDurationMs !== undefined) setProgressMs(current.playbackDurationMs);
+    else if (current?.startTime) setProgressMs(Math.max(0, Date.now() - current.startTime));
+    else setProgressMs(0);
+  }, [current?.title, current?.startTime, current?.playbackDurationMs, isDragging]);
 
-  // Local 1-second interval timer
+  // Local 1s tick
   useEffect(() => {
     if (!isPlaying || totalMs <= 0 || isDragging) return;
-    const timer = setInterval(() => {
-      setProgressMs(prev => (prev < totalMs ? prev + 1000 : prev));
-    }, 1000);
-    return () => clearInterval(timer);
+    const t = setInterval(() => setProgressMs(p => p < totalMs ? p + 1000 : p), 1000);
+    return () => clearInterval(t);
   }, [isPlaying, totalMs, isDragging]);
 
-  // Helper to calculate time from mouse/touch event
   const calculateTimeFromEvent = useCallback((clientX) => {
     if (!progressBarRef.current || totalMs <= 0) return 0;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const offsetX = Math.max(0, Math.min(clientX - rect.left, rect.width));
-    const ratio = offsetX / rect.width;
-    return Math.floor(ratio * totalMs);
+    const r = progressBarRef.current.getBoundingClientRect();
+    return Math.floor((Math.max(0, Math.min(clientX - r.left, r.width)) / r.width) * totalMs);
   }, [totalMs]);
 
-  // Handle Seek Interaction
-  const handleSeekCommit = useCallback((targetMs) => {
-    const targetSeconds = Math.max(0, Math.min(Math.floor(totalMs / 1000), Math.floor(targetMs / 1000)));
-    setProgressMs(targetMs);
-    setIsDragging(false);
-    onAction('seek', targetSeconds);
+  const handleSeekCommit = useCallback((ms) => {
+    const s = Math.max(0, Math.min(Math.floor(totalMs / 1000), Math.floor(ms / 1000)));
+    setProgressMs(ms); setIsDragging(false);
+    onAction('seek', s);
   }, [totalMs, onAction]);
 
-  // Pointer Down
   const handlePointerDown = (e) => {
     if (!current || totalMs <= 0) return;
-    const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
-    if (clientX === undefined) return;
-
-    const clickedMs = calculateTimeFromEvent(clientX);
-    setIsDragging(true);
-    setDragMs(clickedMs);
+    const x = e.clientX ?? e.touches?.[0]?.clientX;
+    if (x === undefined) return;
+    setIsDragging(true); setDragMs(calculateTimeFromEvent(x));
   };
 
-  // Pointer Move (Window level while dragging)
   useEffect(() => {
     if (!isDragging) return;
-
-    const handlePointerMove = (e) => {
-      const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
-      if (clientX === undefined) return;
-      const moveMs = calculateTimeFromEvent(clientX);
-      setDragMs(moveMs);
-    };
-
-    const handlePointerUp = (e) => {
-      const clientX = e.clientX || (e.changedTouches && e.changedTouches[0]?.clientX);
-      if (clientX !== undefined) {
-        const finalMs = calculateTimeFromEvent(clientX);
-        handleSeekCommit(finalMs);
-      } else {
-        handleSeekCommit(dragMs);
-      }
-    };
-
-    window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseup', handlePointerUp);
-    window.addEventListener('touchmove', handlePointerMove);
-    window.addEventListener('touchend', handlePointerUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', handlePointerUp);
-      window.removeEventListener('touchmove', handlePointerMove);
-      window.removeEventListener('touchend', handlePointerUp);
-    };
+    const move = (e) => { const x = e.clientX ?? e.touches?.[0]?.clientX; if (x !== undefined) setDragMs(calculateTimeFromEvent(x)); };
+    const up   = (e) => { const x = e.clientX ?? e.changedTouches?.[0]?.clientX; handleSeekCommit(x !== undefined ? calculateTimeFromEvent(x) : dragMs); };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    window.addEventListener('touchmove', move); window.addEventListener('touchend', up);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('touchmove', move); window.removeEventListener('touchend', up); };
   }, [isDragging, dragMs, calculateTimeFromEvent, handleSeekCommit]);
 
-  // Hover Tooltip over Progress Bar
-  const handleProgressBarMouseMove = (e) => {
-    if (!progressBarRef.current || totalMs <= 0) return;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const ratio = offsetX / rect.width;
-    const timeAtHover = Math.floor(ratio * totalMs);
-
-    setHoverInfo({
-      percent: ratio * 100,
-      timeStr: formatTime(timeAtHover),
-      x: offsetX
-    });
-  };
-
-  const handleProgressBarMouseLeave = () => {
-    setHoverInfo(null);
-  };
-
-  // Global Keyboard Shortcuts (Space, M, Arrows)
+  // Keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        onAction(isPlaying ? 'pause' : 'resume');
-      } else if (e.code === 'KeyM') {
-        e.preventDefault();
-        toggleMute();
-      } else if (e.code === 'ArrowLeft' || e.code === 'KeyJ') {
-        // Tua lùi 5s
-        e.preventDefault();
-        if (current && totalMs > 0) {
-          const newTimeMs = Math.max(0, (isDragging ? dragMs : progressMs) - 5000);
-          handleSeekCommit(newTimeMs);
-        }
-      } else if (e.code === 'ArrowRight' || e.code === 'KeyL') {
-        // Tua tiến 5s
-        e.preventDefault();
-        if (current && totalMs > 0) {
-          const newTimeMs = Math.min(totalMs, (isDragging ? dragMs : progressMs) + 5000);
-          handleSeekCommit(newTimeMs);
-        }
-      }
+    const kd = (e) => {
+      if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.code === 'Space') { e.preventDefault(); onAction(isPlaying ? 'pause' : 'resume'); }
+      else if (e.code === 'KeyM') { e.preventDefault(); toggleMute(); }
+      else if (e.code === 'ArrowLeft') { e.preventDefault(); if (current && totalMs > 0) handleSeekCommit(Math.max(0, (isDragging ? dragMs : progressMs) - 5000)); }
+      else if (e.code === 'ArrowRight') { e.preventDefault(); if (current && totalMs > 0) handleSeekCommit(Math.min(totalMs, (isDragging ? dragMs : progressMs) + 5000)); }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, player?.volume, current, totalMs, isDragging, dragMs, progressMs, handleSeekCommit]);
+    window.addEventListener('keydown', kd);
+    return () => window.removeEventListener('keydown', kd);
+  }, [isPlaying, current, totalMs, isDragging, dragMs, progressMs, handleSeekCommit]);
 
   const toggleMute = () => {
     if ((player?.volume || 0) > 0) {
       setPreviousVolume(player?.volume || 100);
+      setLocalVolume(0);
       onAction('volume', 0);
     } else {
-      onAction('volume', previousVolume || 100);
+      const restored = previousVolume || 100;
+      setLocalVolume(restored);
+      onAction('volume', restored);
     }
   };
 
-  // 24/7 Action with Admin check
-  const handleToggle247 = () => {
-    if (!user?.isAdmin) {
-      onRequireAdmin?.();
-    } else {
-      onAction('toggle247');
-    }
+  const handleFavoriteClick = (e) => {
+    e.stopPropagation();
+    if (!current) return;
+    setHeartPopping(true);
+    setTimeout(() => setHeartPopping(false), 550);
+    onAction('toggleFavorite', current);
   };
 
   const currentDisplayMs = isDragging ? dragMs : progressMs;
   const percent = totalMs > 0 ? Math.min(100, Math.max(0, (currentDisplayMs / totalMs) * 100)) : 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Player Card (Nhấp vào bất kỳ đâu trên khung để thu nhỏ) */}
-      <div
-        onClick={onToggleMinimize}
-        title="Nhấp vào khung để thu nhỏ thanh phát nhạc"
-        className="bg-gradient-to-b from-anna-surface to-anna-card border border-anna-border/80 hover:border-anna-accent/50 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center relative overflow-hidden cursor-pointer transition-all duration-300 group"
-      >
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 0 }}>
+
+      {/* ── Top Upper Section: Vinyl Record + Track Meta ─────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
         
-        {/* Glowing Ambient Backdrop */}
-        <div className="absolute -top-24 -left-24 w-64 h-64 bg-anna-accent/20 rounded-full blur-3xl pointer-events-none transition-all duration-700"></div>
-        <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-anna-pink/15 rounded-full blur-3xl pointer-events-none"></div>
-
-        {/* Status Header */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="w-full flex items-center justify-between mb-3 z-10"
-        >
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-anna-bg/60 border border-anna-border/60 text-xs font-semibold text-anna-text">
-            {isPlaying ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-anna-green animate-ping" aria-hidden="true"></span>
-                <span>Đang phát</span>
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-anna-yellow" aria-hidden="true"></span>
-                <span>Tạm dừng</span>
-              </>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {player?.mode247 && (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-anna-pink/10 border border-anna-pink/30 text-xs font-bold text-anna-pink">
-                <Infinity className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>24/7 Lofi</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Vinyl Disc / Thumbnail */}
-        <div className="relative my-3">
+        {/* Vinyl Player Deck */}
+        <div className="vinyl-deck">
+          {/* Tonearm (Needle) */}
           <div
-            className={`w-44 h-44 sm:w-52 sm:h-52 rounded-full bg-[#0a0a0a] border-4 border-[#222] shadow-2xl flex items-center justify-center p-3 relative transition-transform duration-500 group-hover:border-anna-accent/60 ${
-              isPlaying ? 'vinyl-spinning' : 'vinyl-paused'
-            }`}
+            className={`tonearm-assembly ${isPlaying ? 'on-record' : ''}`}
+            title={isPlaying ? 'Kim đĩa than đang quét bài hát' : 'Kim đĩa than đang dừng'}
+            aria-hidden="true"
           >
-            <div className="absolute inset-2 rounded-full border border-white/5 pointer-events-none"></div>
-            <div className="absolute inset-6 rounded-full border border-white/5 pointer-events-none"></div>
-            <div className="absolute inset-10 rounded-full border border-white/5 pointer-events-none"></div>
-            
-            <img
-              src={current?.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500'}
-              alt={current?.title ? `Ảnh bìa ${current.title}` : 'Ảnh bìa bài hát'}
-              className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover shadow-inner ring-4 ring-[#111]"
-            />
-            <div className="absolute w-6 h-6 rounded-full bg-anna-surface border-2 border-anna-border shadow-inner"></div>
+            <div className="tonearm-base" />
+            <div className="tonearm-pivot" />
+            <div className="tonearm-rod" />
+            <div className="tonearm-cartridge" />
           </div>
-        </div>
 
-        {/* Track Info */}
-        <div className="w-full mt-2 z-10">
-          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight line-clamp-1 hover:line-clamp-none transition-all">
-            {current?.title || 'Chưa có bài hát đang phát'}
-          </h2>
-          <p className="text-xs sm:text-sm font-medium text-anna-muted mt-1 flex items-center justify-center gap-1.5">
-            <Music className="w-3.5 h-3.5 text-anna-accent" aria-hidden="true" />
-            <span>{current?.artist && current.artist !== 'Unknown' ? current.artist : 'YouTube Music'}</span>
-          </p>
-
-          {/* Requester Badge & Favorite Button */}
-          <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
-            <div className="inline-flex items-center gap-2 bg-anna-bg/80 border border-anna-border/60 px-3 py-1 rounded-full text-xs text-anna-muted">
-              {current?.requestedByAvatar && (
-                <img
-                  src={current.requestedByAvatar}
-                  alt=""
-                  className="w-4 h-4 rounded-full object-cover"
-                  aria-hidden="true"
-                />
+          {/* Vinyl Disc */}
+          <div
+            className={`vinyl-wrap ${isPlaying ? 'spinning' : current ? 'spinning-paused' : ''}`}
+            aria-label={current?.title ? `Đĩa nhạc: ${current.title}` : 'Chưa có bài hát'}
+          >
+            <div className="vinyl-grooves" />
+            <div className="vinyl-art">
+              {current?.thumbnail ? (
+                <img src={current.thumbnail} alt={`Bìa album: ${current.title}`} />
+              ) : (
+                <div className="vinyl-art-fallback">
+                  <span>{current?.title?.[0] || '♪'}</span>
+                </div>
               )}
-              <span>Yêu cầu bởi: <b className="text-white">{current?.requestedBy || 'Tự động phát 🎵'}</b></span>
             </div>
-
-            {current && (
-              <button
-                onClick={() => onAction('toggleFavorite', current)}
-                title={isFav ? "Xóa khỏi danh sách Yêu thích" : "Thêm vào bài hát Yêu thích ❤️"}
-                className={`px-3 py-1 rounded-full border transition flex items-center gap-1.5 text-xs font-semibold active:scale-95 ${
-                  isFav
-                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 shadow-sm'
-                    : 'bg-anna-bg/80 hover:bg-anna-hover text-anna-muted hover:text-white border-anna-border/60'
-                }`}
-              >
-                <Heart className={`w-3.5 h-3.5 ${isFav ? 'fill-rose-500 text-rose-500' : ''}`} />
-                <span>{isFav ? 'Đã thích' : 'Yêu thích'}</span>
-              </button>
-            )}
+            {/* Center Spindle Hole */}
+            <div className="vinyl-spindle-hole">
+              <div className="spindle-dot" />
+            </div>
           </div>
         </div>
 
-        {/* Audio Visualizer */}
-        <div
-          className={`w-full flex items-center justify-center gap-1 my-5 h-8 px-4 ${
-            isPlaying ? 'animating' : ''
-          }`}
-          aria-hidden="true"
-        >
-          <span className="v-bar h-2 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-5 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-7 w-1 rounded-full bg-anna-pink"></span>
-          <span className="v-bar h-4 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-6 w-1 rounded-full bg-anna-pink"></span>
-          <span className="v-bar h-8 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-3 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-6 w-1 rounded-full bg-anna-pink"></span>
-          <span className="v-bar h-7 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-4 w-1 rounded-full bg-anna-accent"></span>
-          <span className="v-bar h-2 w-1 rounded-full bg-anna-pink"></span>
+        {/* Track Meta */}
+        <div className="track-meta" style={{ marginTop: 8 }}>
+          <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+            <p className="track-eyebrow">
+              {player?.mode247 ? '24/7 · LIÊN TỤC' : getSourceLabel(current)}
+            </p>
+            <h1 className="track-title" title={current?.title}>
+              {current?.title || 'Chưa có bài hát'}
+            </h1>
+            <p className="track-artist" title={current?.artist}>
+              {current?.artist && current.artist !== 'Unknown' ? current.artist : 'Anna Music'}
+            </p>
+          </div>
+
+          {current && (
+            <button
+              className={`fav-btn${isFav ? ' liked' : ''}${heartPopping ? ' heart-pop-anim' : ''}`}
+              onClick={handleFavoriteClick}
+              aria-label={isFav ? 'Bỏ thích' : 'Thích bài hát'}
+              title={isFav ? 'Bỏ thích' : 'Thêm vào yêu thích'}
+            >
+              <Heart size={21} fill={isFav ? 'currentColor' : 'none'} />
+            </button>
+          )}
         </div>
 
-        {/* Interactive Seek Bar */}
-        <div className="w-full z-10 space-y-2">
+      </div>
+
+      {/* ── Bottom Section: Progress + Controls + Volume + Voice ── */}
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto', paddingTop: 10 }}>
+
+        {/* Progress Bar */}
+        <div className="progress-wrap" style={{ marginTop: 6 }}>
           <div
             ref={progressBarRef}
+            className="progress-track"
             onMouseDown={handlePointerDown}
             onTouchStart={handlePointerDown}
-            onMouseMove={handleProgressBarMouseMove}
-            onMouseLeave={handleProgressBarMouseLeave}
-            className={`group relative w-full bg-anna-border/60 rounded-full cursor-pointer transition-all duration-150 py-1.5 flex items-center select-none ${
-              totalMs > 0 ? 'hover:scale-[1.01]' : 'pointer-events-none opacity-60'
-            }`}
+            onMouseMove={(e) => {
+              if (!progressBarRef.current || totalMs <= 0) return;
+              const r = progressBarRef.current.getBoundingClientRect();
+              const x = Math.max(0, Math.min(e.clientX - r.left, r.width));
+              setHoverInfo({ percent: x / r.width * 100, timeStr: formatTime(Math.floor(x / r.width * totalMs)), x });
+            }}
+            onMouseLeave={() => setHoverInfo(null)}
             role="slider"
-            aria-valuemin="0"
+            aria-valuemin={0}
             aria-valuemax={Math.floor(totalMs / 1000)}
             aria-valuenow={Math.floor(currentDisplayMs / 1000)}
             aria-label="Tua bài hát"
+            style={{ cursor: totalMs > 0 ? 'pointer' : 'default' }}
           >
-            {/* Progress Track Background */}
-            <div className="relative w-full h-2 rounded-full overflow-hidden bg-anna-border/80 group-hover:h-2.5 transition-all">
-              {/* Active Progress Fill */}
-              <div
-                className="h-full bg-gradient-to-r from-anna-accent via-anna-pink to-pink-500 rounded-full transition-[width] duration-75"
-                style={{ width: `${percent}%` }}
-              ></div>
-            </div>
-
-            {/* Glowing Scrubber Thumb */}
-            <div
-              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white shadow-md shadow-black/50 border-2 border-anna-accent transition-transform duration-75 ${
-                isDragging ? 'scale-125 ring-4 ring-anna-accent/40' : 'scale-0 group-hover:scale-100'
-              }`}
-              style={{ left: `${percent}%` }}
-            ></div>
-
-            {/* Hover Timestamp Preview Tooltip */}
+            <div className="progress-fill" style={{ width: `${percent}%` }} />
             {hoverInfo && totalMs > 0 && !isDragging && (
-              <div
-                className="absolute -top-7 -translate-x-1/2 px-2 py-0.5 rounded-lg bg-[#0b0c10] border border-anna-border text-[10px] font-mono font-bold text-white shadow-xl pointer-events-none z-20"
-                style={{ left: `${hoverInfo.percent}%` }}
-              >
+              <div style={{
+                position: 'absolute', top: -28, left: `${hoverInfo.percent}%`,
+                transform: 'translateX(-50%)',
+                background: '#0d0f11', border: '1px solid var(--border)',
+                borderRadius: 6, padding: '2px 7px',
+                fontFamily: '"DM Mono", monospace', fontSize: 10, color: 'var(--ink)',
+                pointerEvents: 'none', whiteSpace: 'nowrap',
+              }}>
                 {hoverInfo.timeStr}
               </div>
             )}
           </div>
-
-          {/* Time Labels */}
-          <div className="flex items-center justify-between text-[11px] font-mono text-anna-muted px-0.5 select-none">
-            <span className={isDragging ? 'text-anna-accent font-bold' : ''}>
-              {formatTime(currentDisplayMs)}
-            </span>
+          <div className="time-row">
+            <span style={{ color: isDragging ? 'var(--yellow)' : undefined }}>{formatTime(currentDisplayMs)}</span>
             <span>{current?.duration || '0:00'}</span>
           </div>
         </div>
 
         {/* Controls Deck */}
-        <div className="w-full flex items-center justify-center gap-3 sm:gap-4 mt-4 z-10">
+        <div className="player-controls" style={{ marginTop: 14 }}>
           <button
+            className={`ctrl-btn${player?.shuffle ? ' active' : ''}`}
             onClick={() => onAction('shuffle')}
-            aria-label="Xáo trộn hàng chờ bài hát"
+            aria-label="Xáo trộn"
             title="Xáo trộn hàng chờ"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
           >
-            <Shuffle className="w-4 h-4" />
+            <Shuffle size={17} />
           </button>
-          
-          <button
-            onClick={() => onAction('previous')}
-            aria-label="Quay lại bài trước đó (tối đa 5 bài)"
-            title="Quay lại bài trước đó (Lưu 5 bài)"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
-          >
-            <SkipBack className="w-5 h-5 fill-current" />
+          <button className="ctrl-btn" onClick={() => onAction('previous')} aria-label="Bài trước">
+            <SkipBack size={21} fill="currentColor" />
           </button>
-
           <button
+            className="ctrl-btn ctrl-play"
             onClick={() => onAction(isPlaying ? 'pause' : 'resume')}
-            aria-label={isPlaying ? 'Tạm dừng bài hát (Space)' : 'Tiếp tục phát bài hát (Space)'}
-            title={isPlaying ? 'Tạm dừng (Phím cách)' : 'Phát tiếp (Phím cách)'}
-            className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-anna-accent to-anna-pink hover:opacity-90 text-white flex items-center justify-center shadow-lg shadow-anna-accent/30 transition active:scale-95 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+            aria-label={isPlaying ? 'Tạm dừng' : 'Phát'}
           >
-            {isPlaying ? (
-              <Pause className="w-7 h-7 fill-current" />
-            ) : (
-              <Play className="w-7 h-7 fill-current ml-0.5" />
-            )}
+            {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" style={{ marginLeft: 2 }} />}
           </button>
-
-          <button
-            onClick={() => onAction('skip')}
-            aria-label="Chuyển sang bài hát tiếp theo"
-            title="Chuyển bài tiếp theo"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
-          >
-            <SkipForward className="w-5 h-5" />
+          <button className="ctrl-btn" onClick={() => onAction('skip')} aria-label="Bài tiếp">
+            <SkipForward size={21} />
           </button>
-
           <button
+            className={`ctrl-btn${player?.loop ? ' active' : ''}`}
             onClick={() => onAction('loop')}
-            aria-label="Thay đổi chế độ lặp lại"
-            title="Chế độ lặp lại"
-            className="p-2.5 rounded-xl hover:bg-anna-hover text-anna-muted hover:text-white transition active:scale-95 relative focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
+            aria-label="Lặp lại"
+            title="Lặp lại"
+            style={{ position: 'relative' }}
           >
-            <Repeat className="w-4 h-4" />
+            <Repeat size={17} />
             {player?.loop === 'song' && (
-              <span className="absolute -top-1 -right-1 text-[9px] font-black bg-anna-accent text-white rounded-full w-4 h-4 flex items-center justify-center">
-                1
-              </span>
+              <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 8, fontWeight: 700, background: 'var(--yellow)', color: '#1c1e21', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
             )}
             {player?.loop === 'queue' && (
-              <span className="absolute -top-1 -right-1 text-[9px] font-black bg-anna-pink text-white rounded-full w-4 h-4 flex items-center justify-center">
-                ∞
-              </span>
+              <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 8, fontWeight: 700, background: 'var(--coral)', color: '#ffffff', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>∞</span>
             )}
           </button>
         </div>
 
-        {/* Volume & 24/7 Controls */}
-        <div className="w-full flex items-center justify-between gap-4 mt-6 pt-4 border-t border-anna-border/50 text-xs z-10">
-          <div className="flex items-center gap-2 flex-1">
+        {/* Footer: Volume + 24/7 */}
+        <div className="now-footer" style={{ marginTop: 16 }}>
+          <div className="volume-row">
             <button
               onClick={toggleMute}
-              aria-label={(player?.volume || 0) === 0 ? "Bật âm thanh (Phím M)" : "Tắt tiếng (Phím M)"}
-              title={(player?.volume || 0) === 0 ? "Bật âm thanh (M)" : "Tắt tiếng (M)"}
-              className="text-anna-muted hover:text-white transition p-1 rounded-lg focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
+              style={{ border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--muted)', flexShrink: 0 }}
+              aria-label={(player?.volume || 0) === 0 ? 'Bật tiếng' : 'Tắt tiếng'}
+              title="Tắt/Bật tiếng (M)"
             >
-              {(player?.volume || 0) === 0 ? (
-                <VolumeX className="w-4 h-4 text-anna-red" />
-              ) : (
-                <Volume2 className="w-4 h-4" />
-              )}
+              {(player?.volume || 0) === 0
+                ? <VolumeX size={15} style={{ color: 'var(--coral)' }} />
+                : <Volume2 size={15} />}
             </button>
             <input
-              type="range"
-              min="0"
-              max="150"
-              value={localVolume}
+              type="range" min={0} max={100} value={localVolume}
               onChange={(e) => {
-                const vol = Number(e.target.value);
-                setLocalVolume(vol);
-                // Debounce: chỉ gửi lệnh lên bot sau 400ms không kéo nữa
+                const v = Number(e.target.value);
+                setLocalVolume(v);
                 if (volumeDebounceRef.current) clearTimeout(volumeDebounceRef.current);
-                volumeDebounceRef.current = setTimeout(() => {
-                  volumeDebounceRef.current = null;
-                  onAction('volume', vol);
-                }, 400);
+                volumeDebounceRef.current = setTimeout(() => { volumeDebounceRef.current = null; onAction('volume', v); }, 400);
               }}
-              aria-label="Điều chỉnh âm lượng bot nhạc"
-              className="w-full accent-anna-accent h-1.5 bg-anna-border rounded-lg cursor-pointer focus-visible:ring-2 focus-visible:ring-anna-accent focus-visible:outline-none"
+              aria-label="Âm lượng"
+              style={{ flex: 1, accentColor: 'var(--yellow)', height: 3, cursor: 'pointer' }}
             />
-            <span className="text-xs font-mono text-anna-muted w-8 text-right">
-              {localVolume}%
-            </span>
+            <span style={{ fontFamily: '"DM Mono", monospace', fontSize: 9, color: 'var(--muted)', minWidth: 24 }}>{localVolume}%</span>
           </div>
 
           <button
-            onClick={handleToggle247}
-            aria-label="Bật hoặc tắt chế độ treo 24/7 Lofi"
-            title={user?.isAdmin ? "Bật/Tắt chế độ 24/7" : "Yêu cầu quyền Admin"}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition font-medium text-xs focus-visible:ring-2 focus-visible:ring-anna-pink focus-visible:outline-none ${
-              player?.mode247
-                ? 'bg-anna-pink/10 border-anna-pink/40 text-anna-pink'
-                : 'bg-anna-bg hover:bg-anna-hover border-anna-border text-anna-text'
-            }`}
+            onClick={() => { if (!user?.isAdmin) { onRequireAdmin?.(); } else onAction('toggle247'); }}
+            title={user?.isAdmin ? 'Bật/Tắt chế độ 24/7' : 'Yêu cầu quyền Admin'}
+            style={{
+              border: `1px solid ${player?.mode247 ? 'var(--coral)' : 'var(--border)'}`,
+              background: player?.mode247 ? 'rgba(239,120,100,.08)' : 'transparent',
+              color: player?.mode247 ? 'var(--coral)' : 'var(--muted)',
+              borderRadius: 9, padding: '5px 11px',
+              display: 'flex', alignItems: 'center', gap: 5,
+              fontFamily: '"DM Mono", monospace', fontSize: 9, letterSpacing: '0.1em',
+              cursor: 'pointer', transition: 'all .18s',
+            }}
           >
-            {!user?.isAdmin && <Lock className="w-3 h-3 text-amber-400" />}
-            <Radio className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Treo 24/7</span>
+            {!user?.isAdmin && <Lock size={9} style={{ color: '#b5894a' }} />}
+            <Radio size={11} />
+            <span>24/7</span>
           </button>
         </div>
 
-      </div>
-
-      {/* Voice Channel State Card */}
-      <div className="bg-anna-surface border border-anna-border/80 rounded-2xl p-4 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-anna-green/10 text-anna-green border border-anna-green/20 flex items-center justify-center">
-            <Mic className="w-4 h-4" aria-hidden="true" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-white flex items-center gap-2">
-              <span>{player?.voiceChannel?.name || 'Chưa vào kênh Voice'}</span>
+        {/* Voice channel info */}
+        {player?.voiceChannel?.name && (
+          <div style={{
+            marginTop: 12, padding: '8px 12px',
+            border: '1px solid var(--border)', borderRadius: 10,
+            background: 'var(--paper)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--ink)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {player.voiceChannel.name}
+              </p>
+              <p style={{ margin: '2px 0 0', fontFamily: '"DM Mono", monospace', fontSize: 8.5, letterSpacing: '0.1em', color: 'var(--muted)' }}>
+                {player.voiceChannel.memberCount || 0} THÀNH VIÊN
+              </p>
             </div>
-            <p className="text-[11px] text-anna-muted font-medium">
-              {player?.voiceChannel?.memberCount || 0} thành viên đang nghe
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: -6, flexShrink: 0 }}>
+              {player.voiceChannel.members?.slice(0, 4).map((m, i) => (
+                <img key={i} src={m.avatar} alt={m.name} title={m.name}
+                  style={{ width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--paper)', objectFit: 'cover', marginLeft: i > 0 ? -6 : 0 }} />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex items-center -space-x-2">
-          {player?.voiceChannel?.members?.slice(0, 4).map((m, idx) => (
-            <img
-              key={idx}
-              src={m.avatar}
-              alt={m.name}
-              title={m.name}
-              className="w-6 h-6 rounded-full border-2 border-anna-surface object-cover"
-            />
-          ))}
-        </div>
       </div>
     </div>
   );
-}
-
-function formatTime(ms) {
-  if (!ms || isNaN(ms) || ms < 0) return '0:00';
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-}
-
-function parseDurationToMs(str) {
-  if (!str || str.includes('Live')) return 0;
-  const parts = str.split(':').map(Number);
-  if (parts.some(isNaN)) return 0;
-  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
-  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
-  return parts[0] * 1000;
 }

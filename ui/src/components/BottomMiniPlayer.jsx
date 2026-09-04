@@ -58,15 +58,17 @@ export default function BottomMiniPlayer({
     if (player?.volume !== undefined) setLocalVolume(player.volume);
   }, [player?.volume]);
 
-  // Sync startTime
+  // Sync startTime / playbackDurationMs
   useEffect(() => {
     if (isDragging) return;
-    if (current?.startTime) {
+    if (current?.playbackDurationMs !== undefined) {
+      setProgressMs(current.playbackDurationMs);
+    } else if (current?.startTime) {
       setProgressMs(Math.max(0, Date.now() - current.startTime));
     } else {
       setProgressMs(0);
     }
-  }, [current?.title, current?.startTime, isDragging]);
+  }, [current?.title, current?.startTime, current?.playbackDurationMs, isDragging]);
 
   // 1s ticker
   useEffect(() => {
@@ -334,7 +336,7 @@ export default function BottomMiniPlayer({
             <input
               type="range"
               min="0"
-              max="150"
+              max="100"
               value={localVolume}
               onChange={handleVolumeChange}
               className="w-16 h-1 bg-white/10 rounded-lg accent-anna-accent cursor-pointer"

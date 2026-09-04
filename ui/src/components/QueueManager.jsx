@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
+
 import {
   ListOrdered,
   Trash2,
@@ -12,20 +14,42 @@ import {
   GripVertical,
   ArrowUpToLine,
   ArrowUpDown,
+  MoreHorizontal,
   X,
   Sparkles
 } from 'lucide-react';
 
+function getSourceLabel(track) {
+  if (!track) return 'YouTube Music';
+  const u = (track.url || '').toLowerCase();
+  const s = (track.source || '').toLowerCase();
+  if (s === 'soundcloud' || u.includes('soundcloud.com')) return 'SoundCloud';
+  if (s === 'spotify' || u.includes('spotify.com')) return 'Spotify';
+  if (s === 'youtube' || u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube Music';
+  return track.artist || 'YouTube Music';
+}
+
 export default function QueueManager({ queue, onAction }) {
+
   const songs = queue || [];
   const [selectedIndices, setSelectedIndices] = useState(new Set());
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [jumpModalData, setJumpModalData] = useState(null); // { song, index }
   const [targetPosition, setTargetPosition] = useState('1');
+  const [activeMenuIdx, setActiveMenuIdx] = useState(null);
+  const [menuPlacement, setMenuPlacement] = useState('bottom'); // 'bottom' or 'top'
 
+  const lastClickedIndexRef = useRef(null);
   const listContainerRef = useRef(null);
   const autoScrollRafRef = useRef(null);
+
+  // Close active dropdown when clicking outside
+  useEffect(() => {
+    const close = () => setActiveMenuIdx(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, []);
 
   // Auto-scroll logic during drag
   const stopAutoScroll = () => {
@@ -59,21 +83,20 @@ export default function QueueManager({ queue, onAction }) {
   const handleDragOver = (e, index) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverIndex !== index) {
-      setDragOverIndex(index);
-    }
+    if (draggedIndex === null || draggedIndex === index) return;
 
-    // Proximity auto-scrolling
-    const threshold = 120;
-    const viewportHeight = window.innerHeight;
-    const clientY = e.clientY;
+    setDragOverIndex(index);
+
+    const threshold = 100;
+    const { clientY } = e;
+    const windowHeight = window.innerHeight;
 
     if (clientY < threshold) {
-      const intensity = Math.max(2, Math.min(20, (threshold - clientY) / 4));
-      startAutoScroll(-1, intensity);
-    } else if (clientY > viewportHeight - threshold) {
-      const intensity = Math.max(2, Math.min(20, (clientY - (viewportHeight - threshold)) / 4));
-      startAutoScroll(1, intensity);
+      const speed = Math.max(2, Math.floor((threshold - clientY) / 10));
+      startAutoScroll(-1, speed);
+    } else if (clientY > windowHeight - threshold) {
+      const speed = Math.max(2, Math.floor((clientY - (windowHeight - threshold)) / 10));
+      startAutoScroll(1, speed);
     } else {
       stopAutoScroll();
     }
@@ -82,9 +105,13 @@ export default function QueueManager({ queue, onAction }) {
   const handleDrop = (e, targetIndex) => {
     e.preventDefault();
     stopAutoScroll();
-    if (draggedIndex !== null && draggedIndex !== targetIndex) {
-      onAction('move', { from: draggedIndex, to: targetIndex });
+    if (draggedIndex === null || draggedIndex === targetIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
     }
+
+    onAction('move', { from: draggedIndex, to: targetIndex });
     setDraggedIndex(null);
     setDragOverIndex(null);
   };
@@ -95,47 +122,80 @@ export default function QueueManager({ queue, onAction }) {
     setDragOverIndex(null);
   };
 
-  useEffect(() => {
-    return () => stopAutoScroll();
-  }, []);
-
-  // Quick action: Move to Top (Play Next)
-  const handleMoveToTop = (idx) => {
-    if (idx <= 0) return;
-    onAction('move', { from: idx, to: 0 });
+  // Quick Move to Top (Play next)
+  const handleMoveToTop = (index) => {
+    if (index === 0) return;
+    onAction('move', { from: index, to: 0 });
+    setActiveMenuIdx(null);
   };
 
-  // Open Jump Modal
+  // Open Jump Position Modal
   const openJumpModal = (song, index) => {
     setJumpModalData({ song, index });
-    setTargetPosition(String(index === 0 ? 2 : 1));
+    setTargetPosition(String(index + 1));
+    setActiveMenuIdx(null);
   };
 
   const handleConfirmJump = (e) => {
-    if (e) e.preventDefault();
+    e.preventDefault();
     if (!jumpModalData) return;
     const targetIdx = parseInt(targetPosition, 10) - 1;
-    if (!isNaN(targetIdx) && targetIdx >= 0 && targetIdx < songs.length && targetIdx !== jumpModalData.index) {
+    if (isNaN(targetIdx) || targetIdx < 0 || targetIdx >= songs.length) return;
+
+    if (targetIdx !== jumpModalData.index) {
       onAction('move', { from: jumpModalData.index, to: targetIdx });
     }
     setJumpModalData(null);
   };
 
-  // Toggle selection for a single track
-  const toggleSelect = (idx) => {
-    setSelectedIndices(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
+  // Toggle menu thông minh (tự động mở lên trên nếu gần cuối màn hình)
+  const handleToggleMenu = (e, index) => {
+    e.stopPropagation();
+    if (activeMenuIdx === index) {
+      setActiveMenuIdx(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // Menu cao ~175px, nếu khoảng trống phía dưới < 185px thì bung lên trên (dropup)
+    if (spaceBelow < 185) {
+      setMenuPlacement('top');
+    } else {
+      setMenuPlacement('bottom');
+    }
+    setActiveMenuIdx(index);
   };
 
-  // Select / Deselect All
+  // Multi-select helpers (Hỗ trợ Shift + Click chọn dải nhiều bài cùng lúc)
+  const toggleSelect = (index, event) => {
+    const isShift = Boolean(event && event.shiftKey);
+    const newSet = new Set(selectedIndices);
+
+    if (isShift && lastClickedIndexRef.current !== null && lastClickedIndexRef.current !== index) {
+      // Bỏ bôi đen văn bản vô tình do giữ phím Shift
+      window.getSelection()?.removeAllRanges();
+
+      const start = Math.min(lastClickedIndexRef.current, index);
+      const end = Math.max(lastClickedIndexRef.current, index);
+
+      // Thêm toàn bộ các bài trong khoảng từ start đến end vào danh sách chọn
+      for (let i = start; i <= end; i++) {
+        newSet.add(i);
+      }
+    } else {
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      lastClickedIndexRef.current = index;
+    }
+
+    setSelectedIndices(newSet);
+  };
+
   const toggleSelectAll = () => {
+    lastClickedIndexRef.current = null;
     if (selectedIndices.size === songs.length) {
       setSelectedIndices(new Set());
     } else {
@@ -146,7 +206,6 @@ export default function QueueManager({ queue, onAction }) {
   const [showClearModal, setShowClearModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
 
-  // Delete selected tracks
   const handleDeleteSelected = () => {
     if (selectedIndices.size === 0) return;
     setShowBatchModal(true);
@@ -155,12 +214,14 @@ export default function QueueManager({ queue, onAction }) {
   const confirmBatchDelete = () => {
     onAction('removeBatch', Array.from(selectedIndices));
     setSelectedIndices(new Set());
+    lastClickedIndexRef.current = null;
     setShowBatchModal(false);
   };
 
   const confirmClearAll = () => {
     onAction('clear');
     setSelectedIndices(new Set());
+    lastClickedIndexRef.current = null;
     setShowClearModal(false);
   };
 
@@ -184,271 +245,163 @@ export default function QueueManager({ queue, onAction }) {
   const isAllSelected = songs.length > 0 && selectedIndices.size === songs.length;
 
   return (
-    <div ref={listContainerRef} className="flex flex-col gap-4 relative animate-in fade-in">
-      {/* Custom Modal Xác Nhận Xóa Hết */}
-      {showClearModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm rounded-2xl bg-anna-surface border border-anna-border p-5 shadow-2xl flex flex-col gap-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-white">Xóa Hàng Chờ</h4>
-                <p className="text-xs text-anna-muted mt-0.5">Xác nhận dọn sạch danh sách</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-anna-text leading-relaxed">
-              Bạn có chắc chắn muốn xóa toàn bộ <b className="text-white">{songs.length}</b> bài hát trong hàng chờ?
+    <div ref={listContainerRef} style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      {/* ── Portaled Modals (render at document root to bypass overflow clipping) ── */}
+      {showClearModal && ReactDOM.createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowClearModal(false); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
+        >
+          <div style={{ width: '100%', maxWidth: 360, borderRadius: 16, background: 'var(--paper)', border: '1px solid var(--border)', padding: 22, boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
+            <h4 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap' }}>Xóa toàn bộ hàng chờ?</h4>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Bạn có chắc chắn muốn xóa tất cả <b style={{ color: 'var(--ink)' }}>{songs.length} bài hát</b> trong hàng chờ không?
             </p>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-anna-border/50">
-              <button
-                onClick={() => setShowClearModal(false)}
-                className="px-4 py-2 rounded-xl bg-anna-card hover:bg-anna-hover border border-anna-border text-xs font-semibold text-anna-muted hover:text-white transition"
-              >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => setShowClearModal(false)} className="ghost-button" style={{ height: 38, padding: '0 18px', borderRadius: 8, fontSize: 12.5, whiteSpace: 'nowrap', width: 'auto' }}>
                 Hủy
               </button>
-              <button
-                onClick={confirmClearAll}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-lg shadow-rose-600/30 active:scale-95"
-              >
+              <button onClick={confirmClearAll} style={{ height: 38, padding: '0 18px', borderRadius: 8, fontSize: 12.5, background: 'var(--coral)', color: '#fff', border: 0, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                Xóa Hết
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showBatchModal && ReactDOM.createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowBatchModal(false); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
+        >
+          <div style={{ width: '100%', maxWidth: 360, borderRadius: 16, background: 'var(--paper)', border: '1px solid var(--border)', padding: 22, boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
+            <h4 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap' }}>Xóa {selectedIndices.size} bài đã chọn?</h4>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Các bài hát được đánh dấu sẽ bị xóa khỏi hàng chờ.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => setShowBatchModal(false)} className="ghost-button" style={{ height: 38, padding: '0 18px', borderRadius: 8, fontSize: 12.5, whiteSpace: 'nowrap', width: 'auto' }}>
+                Hủy
+              </button>
+              <button onClick={confirmBatchDelete} style={{ height: 38, padding: '0 18px', borderRadius: 8, fontSize: 12.5, background: 'var(--coral)', color: '#fff', border: 0, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 Xác Nhận Xóa
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Custom Modal Xác Nhận Xóa Bài Đã Chọn */}
-      {showBatchModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm rounded-2xl bg-anna-surface border border-anna-border p-5 shadow-2xl flex flex-col gap-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
+      {jumpModalData && ReactDOM.createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setJumpModalData(null); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
+        >
+          <div style={{ width: '100%', maxWidth: 380, borderRadius: 16, background: 'var(--paper)', border: '1px solid var(--border)', padding: 22, boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div>
-                <h4 className="text-sm font-bold text-white">Xóa Bài Hát Đã Chọn</h4>
-                <p className="text-xs text-anna-muted mt-0.5">Xác nhận xóa {selectedIndices.size} bài</p>
+                <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Chuyển Vị Trí Bài Hát</h4>
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)' }}>Hiện tại: <b style={{ color: 'var(--yellow)' }}>#{jumpModalData.index + 1}</b></p>
+              </div>
+              <button onClick={() => setJumpModalData(null)} style={{ border: 0, background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 10, background: 'var(--soft)', marginBottom: 16 }}>
+              <img src={jumpModalData.song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{jumpModalData.song.title}</p>
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{jumpModalData.song.artist || 'YouTube'}</p>
               </div>
             </div>
 
-            <p className="text-xs text-anna-text leading-relaxed">
-              Bạn có chắc chắn muốn xóa <b className="text-white">{selectedIndices.size}</b> bài hát đã chọn khỏi hàng chờ?
-            </p>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-anna-border/50">
-              <button
-                onClick={() => setShowBatchModal(false)}
-                className="px-4 py-2 rounded-xl bg-anna-card hover:bg-anna-hover border border-anna-border text-xs font-semibold text-anna-muted hover:text-white transition"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={confirmBatchDelete}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-lg shadow-rose-600/30 active:scale-95"
-              >
-                Xóa {selectedIndices.size} bài
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Chuyển Vị Trí Nhanh (Jump to Position) */}
-      {jumpModalData && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm rounded-2xl bg-anna-surface border border-anna-border p-5 shadow-2xl flex flex-col gap-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-anna-accent/15 border border-anna-accent/30 text-anna-accent flex items-center justify-center flex-shrink-0">
-                  <ArrowUpDown className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="text-sm font-bold text-white truncate">Chuyển Vị Trí Bài Hát</h4>
-                  <p className="text-xs text-anna-muted">Đang ở vị trí <b className="text-anna-accent">#{jumpModalData.index + 1}</b></p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setJumpModalData(null)}
-                className="p-1 rounded-lg text-anna-muted hover:text-white hover:bg-white/10 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-anna-card/70 border border-anna-border/70 flex items-center gap-2.5">
-              <img
-                src={jumpModalData.song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}
-                alt=""
-                className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+            <form onSubmit={handleConfirmJump}>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                Nhập số thứ tự muốn chuyển đến (1 - {songs.length}):
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={songs.length}
+                value={targetPosition}
+                onChange={(e) => setTargetPosition(e.target.value)}
+                className="no-spin-button"
+                style={{ width: '100%', height: 42, borderRadius: 10, border: '1px solid var(--border)', background: '#141619', color: '#fff', textAlign: 'center', fontSize: 16, fontFamily: '"DM Mono", monospace', fontWeight: 700, outline: 'none', marginBottom: 12 }}
+                autoFocus
               />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-white truncate">{jumpModalData.song.title}</p>
-                <p className="text-[11px] text-anna-muted truncate mt-0.5">{jumpModalData.song.artist || 'YouTube'}</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleConfirmJump} className="flex flex-col gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-anna-muted mb-1.5">
-                  Nhập số thứ tự muốn chuyển đến (1 - {songs.length}):
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={songs.length}
-                  value={targetPosition}
-                  onChange={(e) => setTargetPosition(e.target.value)}
-                  className="w-full bg-anna-bg border border-anna-border focus:border-anna-accent rounded-xl px-3.5 py-2 text-sm text-white font-bold focus:outline-none text-center font-mono"
-                  autoFocus
-                />
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+                <button type="button" onClick={() => setTargetPosition('1')} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--soft)', color: 'var(--yellow)', fontSize: 11, cursor: 'pointer' }}>#1 (Kế tiếp)</button>
+                {songs.length >= 2 && <button type="button" onClick={() => setTargetPosition('2')} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--soft)', color: 'var(--ink)', fontSize: 11, cursor: 'pointer' }}>#2</button>}
+                {songs.length >= 5 && <button type="button" onClick={() => setTargetPosition('5')} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--soft)', color: 'var(--ink)', fontSize: 11, cursor: 'pointer' }}>#5</button>}
+                <button type="button" onClick={() => setTargetPosition(String(songs.length))} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--soft)', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>Cuối (#{songs.length})</button>
               </div>
 
-              {/* Quick Preset Chips */}
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setTargetPosition('1')}
-                  className="px-2.5 py-1 rounded-lg bg-anna-accent/15 hover:bg-anna-accent/25 text-[11px] font-bold text-anna-accent border border-anna-accent/30 transition flex items-center gap-1"
-                >
-                  <ArrowUpToLine className="w-3 h-3" />
-                  <span>Đầu hàng chờ (#1)</span>
-                </button>
-                {songs.length >= 2 && (
-                  <button
-                    type="button"
-                    onClick={() => setTargetPosition('2')}
-                    className="px-2.5 py-1 rounded-lg bg-anna-card hover:bg-anna-hover text-[11px] font-semibold text-white/80 border border-anna-border transition"
-                  >
-                    Vị trí #2
-                  </button>
-                )}
-                {songs.length >= 5 && (
-                  <button
-                    type="button"
-                    onClick={() => setTargetPosition('5')}
-                    className="px-2.5 py-1 rounded-lg bg-anna-card hover:bg-anna-hover text-[11px] font-semibold text-white/80 border border-anna-border transition"
-                  >
-                    Vị trí #5
-                  </button>
-                )}
-                {songs.length >= 10 && (
-                  <button
-                    type="button"
-                    onClick={() => setTargetPosition('10')}
-                    className="px-2.5 py-1 rounded-lg bg-anna-card hover:bg-anna-hover text-[11px] font-semibold text-white/80 border border-anna-border transition"
-                  >
-                    Vị trí #10
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setTargetPosition(String(songs.length))}
-                  className="px-2.5 py-1 rounded-lg bg-anna-card hover:bg-anna-hover text-[11px] font-semibold text-anna-muted border border-anna-border transition"
-                >
-                  Cuối cùng (#{songs.length})
-                </button>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-anna-border/50 mt-1">
-                <button
-                  type="button"
-                  onClick={() => setJumpModalData(null)}
-                  className="px-4 py-2 rounded-xl bg-anna-card hover:bg-anna-hover border border-anna-border text-xs font-semibold text-anna-muted hover:text-white transition"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-anna-accent hover:bg-anna-accentHover text-white text-xs font-bold transition shadow-lg shadow-anna-accent/25 active:scale-95"
-                >
-                  Xác Nhận Chuyển
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button type="button" onClick={() => setJumpModalData(null)} className="ghost-button" style={{ height: 38, padding: '0 16px', borderRadius: 8, fontSize: 12, width: 'auto', whiteSpace: 'nowrap' }}>Hủy</button>
+                <button type="submit" className="primary-button" style={{ height: 38, padding: '0 16px', borderRadius: 8, fontSize: 12, width: 'auto', whiteSpace: 'nowrap' }}>Xác Nhận</button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Header Bar */}
-      <div className="flex items-center justify-between bg-anna-surface px-4 py-2.5 rounded-xl border border-anna-border">
-        <div className="flex items-center gap-3">
+
+      {/* ── Top Header Bar ──────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 12, background: 'var(--paper)', border: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {songs.length > 0 && (
             <button
               onClick={toggleSelectAll}
-              title={isAllSelected ? "Bỏ chọn tất cả" : "Chọn tất cả"}
-              className="p-1 text-anna-muted hover:text-white transition flex items-center gap-1.5 focus-visible:outline-none"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, border: 0, background: 'transparent', color: 'var(--muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}
             >
-              {isAllSelected ? (
-                <CheckSquare className="w-4 h-4 text-anna-accent" />
-              ) : selectedIndices.size > 0 ? (
-                <CheckSquare className="w-4 h-4 text-anna-accent/70" />
-              ) : (
-                <Square className="w-4 h-4 text-anna-muted" />
-              )}
+              {isAllSelected ? <CheckSquare size={16} style={{ color: 'var(--yellow)' }} /> : <Square size={16} />}
+              <span>{isAllSelected ? 'Bỏ chọn' : 'Chọn tất cả'}</span>
             </button>
           )}
-
-          <div className="flex items-center gap-1.5">
-            <ListOrdered className="w-4 h-4 text-anna-accent" aria-hidden="true" />
-            <span className="text-xs font-bold text-white">
-              Hàng Chờ ({songs.length}/100 bài)
-            </span>
-          </div>
-
-          {songs.length > 0 && totalSeconds > 0 && (
-            <span className="hidden sm:flex items-center gap-1 text-[11px] text-anna-muted font-mono bg-anna-card px-2 py-0.5 rounded-full border border-anna-border/50">
-              <Clock className="w-3 h-3 text-anna-accent" aria-hidden="true" />
-              <span>{formatTotalTime(totalSeconds)}</span>
-            </span>
-          )}
+          <span style={{ fontFamily: '"DM Mono", monospace', fontSize: 11, color: 'var(--muted)' }}>
+            {songs.length} bài {totalSeconds > 0 ? `• ${formatTotalTime(totalSeconds)}` : ''}
+          </span>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div>
           {selectedIndices.size > 0 ? (
             <button
               onClick={handleDeleteSelected}
-              className="text-xs bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white border border-rose-500/40 font-bold flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition shadow-sm active:scale-95 animate-in fade-in"
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6, background: 'rgba(239,120,100,0.15)', color: 'var(--coral)', border: '1px solid rgba(239,120,100,0.3)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
             >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+              <Trash2 size={13} />
               <span>Xóa ({selectedIndices.size})</span>
             </button>
           ) : songs.length > 0 ? (
             <button
               onClick={() => setShowClearModal(true)}
-              aria-label="Xóa toàn bộ bài hát trong hàng chờ"
-              className="text-xs text-anna-red hover:underline font-semibold flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-anna-red focus-visible:outline-none rounded-lg px-2 py-1 transition"
+              style={{ display: 'flex', alignItems: 'center', gap: 5, border: 0, background: 'transparent', color: 'var(--coral)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
             >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+              <Trash2 size={13} />
               <span>Xóa Hết</span>
             </button>
           ) : null}
         </div>
       </div>
 
-      {/* Queue List */}
-      <div className="bg-anna-surface border border-anna-border/80 rounded-3xl p-4 sm:p-5 pb-6 flex flex-col gap-2">
+      {/* ── Queue Song List ─────────────────────────────── */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingRight: 2 }}>
         {songs.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-anna-muted">
-            <div className="w-12 h-12 rounded-2xl bg-anna-card border border-anna-border flex items-center justify-center mb-3 shadow-inner">
-              <Music2 className="w-6 h-6 text-anna-muted" aria-hidden="true" />
-            </div>
-            <p className="text-sm font-semibold text-white">Hàng chờ đang trống</p>
-            <p className="text-xs text-anna-muted mt-1">
-              Hãy chuyển qua tab <b>Live Search</b> để thêm bài hát vào hàng chờ nhé!
-            </p>
+          <div style={{ padding: '80px 20px', textAlign: 'center', color: 'var(--muted)' }}>
+            <Music2 size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+            <p style={{ fontWeight: 500, color: 'var(--ink)', fontSize: 15, margin: '0 0 4px' }}>Hàng chờ đang trống</p>
+            <p style={{ fontSize: 12, margin: 0 }}>Chuyển sang tab <b>Khám Phá</b> để thêm bài hát vào hàng chờ nhé!</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {songs.map((song, idx) => {
               const isSelected = selectedIndices.has(idx);
               const isDragging = draggedIndex === idx;
               const isDragOver = dragOverIndex === idx;
+              const isMenuOpen = activeMenuIdx === idx;
 
               return (
                 <div
@@ -458,160 +411,183 @@ export default function QueueManager({ queue, onAction }) {
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDrop={(e) => handleDrop(e, idx)}
                   onDragEnd={handleDragEnd}
-                  onClick={() => toggleSelect(idx)}
-                  className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition group cursor-pointer select-none ${
-                    isDragging
-                      ? 'opacity-40 scale-[0.98] border-dashed border-anna-accent bg-anna-accent/10'
-                      : isDragOver
-                      ? 'border-t-2 border-t-anna-accent bg-anna-accent/20 shadow-md scale-[1.01]'
-                      : isSelected
-                      ? 'bg-anna-accent/15 border-anna-accent/50 shadow-sm'
-                      : 'bg-anna-card hover:bg-anna-hover border-anna-border/60'
-                  }`}
+                  onClick={(e) => toggleSelect(idx, e)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                    borderRadius: 10, background: isSelected ? 'rgba(232,201,119,0.08)' : 'var(--paper)',
+                    border: `1px solid ${isSelected ? 'rgba(232,201,119,0.3)' : isDragOver ? 'var(--yellow)' : 'var(--border)'}`,
+                    opacity: isDragging ? 0.4 : 1,
+                    cursor: 'pointer', transition: 'border-color .15s, background .15s',
+                    position: 'relative',
+                    userSelect: 'none'
+                  }}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    {/* Drag Handle */}
-                    <div
-                      className="cursor-grab active:cursor-grabbing text-anna-muted group-hover:text-white p-0.5"
-                      title="Kéo thả để đổi thứ tự bài hát (tự động cuộn trang khi kéo sát mép)"
-                    >
-                      <GripVertical className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />
-                    </div>
-
-                    {/* Checkbox */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleSelect(idx);
-                      }}
-                      className="text-anna-muted hover:text-white p-0.5"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-anna-accent" />
-                      ) : (
-                        <Square className="w-4 h-4 text-anna-muted group-hover:text-anna-text" />
-                      )}
-                    </button>
-
-                    {/* Rank Badge with Quick Jump click */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openJumpModal(song, idx);
-                      }}
-                      title="Bấm để nhảy đến vị trí khác nhanh"
-                      className="w-5 h-5 rounded-md bg-white/5 hover:bg-anna-accent hover:text-white flex items-center justify-center text-[11px] font-mono font-bold text-anna-muted transition"
-                    >
-                      {idx + 1}
-                    </button>
-
-                    <img
-                      src={song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}
-                      alt={`Ảnh bìa ${song.title}`}
-                      className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-white truncate">{song.title}</p>
-                      <p className="text-[11px] text-anna-muted flex items-center gap-1.5 mt-0.5">
-                        <span>{song.artist || 'YouTube'}</span>
-                        <span>•</span>
-                        <span className="font-mono">{song.duration}</span>
-                        <span>•</span>
-                        <span className="text-[10px] text-anna-accent truncate">
-                          👤 {song.requestedBy || 'User'}
-                        </span>
-                      </p>
-                    </div>
+                  {/* Drag Grip */}
+                  <div style={{ color: 'var(--muted)', cursor: 'grab', display: 'flex', alignItems: 'center' }} title="Kéo thả đổi vị trí">
+                    <GripVertical size={14} />
                   </div>
 
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* Play Now Button */}
+                  {/* Checkbox */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(idx, e); }}
+                    style={{ border: 0, background: 'transparent', color: isSelected ? 'var(--yellow)' : 'var(--muted)', cursor: 'pointer', padding: 0 }}
+                  >
+                    {isSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                  </button>
+
+                  {/* Index badge */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openJumpModal(song, idx); }}
+                    title="Nhấn để đổi vị trí"
+                    style={{
+                      width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)',
+                      background: 'var(--soft)', color: 'var(--muted)', fontSize: 10, fontFamily: '"DM Mono", monospace',
+                      fontWeight: 700, display: 'grid', placeItems: 'center', cursor: 'pointer', flexShrink: 0
+                    }}
+                  >
+                    {idx + 1}
+                  </button>
+
+                  {/* Thumbnail */}
+                  <img
+                    src={song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}
+                    alt=""
+                    style={{ width: 38, height: 38, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
+                  />
+
+                  {/* Song Title & Artist (Spans full remaining space with clean tooltip) */}
+                  <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                    <p
+                      title={song.title}
+                      style={{
+                        margin: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--ink)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {song.title}
+                    </p>
+                    <p
+                      title={`${song.artist || getSourceLabel(song)} • ${song.duration || ''} • Yêu cầu bởi: ${song.requestedBy || 'User'}`}
+                      style={{
+                        margin: '2px 0 0', fontSize: 11, color: 'var(--muted)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <span>{song.artist && song.artist !== 'Unknown' ? song.artist : getSourceLabel(song)}</span>
+                      {song.duration ? ` • ${song.duration}` : ''}
+                      {song.requestedBy ? ` • 👤 ${song.requestedBy}` : ''}
+                    </p>
+
+                  </div>
+
+                  {/* Right Actions: Quick Play + Dropdown More Menu */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                    {/* Quick Play */}
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAction('playNow', idx);
+                      onClick={() => onAction('playNow', idx)}
+                      style={{
+                        width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)',
+                        background: 'var(--soft)', color: 'var(--ink)', display: 'grid', placeItems: 'center',
+                        cursor: 'pointer'
                       }}
-                      aria-label={`Phát ngay bài ${song.title}`}
-                      className="p-1.5 rounded-lg text-anna-muted hover:text-white hover:bg-anna-accent/40 transition opacity-80 sm:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      title="Phát ngay bài này (Bỏ qua bài hiện tại)"
+                      title="Phát ngay bài này"
                     >
-                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <Play size={13} fill="currentColor" style={{ marginLeft: 1 }} />
                     </button>
 
-                    {/* Move to Top (Play Next) Button */}
-                    {idx > 0 && (
+                    {/* More Menu Dropdown Toggle */}
+                    <div style={{ position: 'relative' }}>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMoveToTop(idx);
+                        onClick={(e) => handleToggleMenu(e, idx)}
+                        style={{
+                          width: 30, height: 30, borderRadius: 8,
+                          border: `1px solid ${isMenuOpen ? 'var(--yellow)' : 'var(--border)'}`,
+                          background: isMenuOpen ? 'var(--soft)' : 'transparent',
+                          color: isMenuOpen ? 'var(--yellow)' : 'var(--muted)',
+                          display: 'grid', placeItems: 'center', cursor: 'pointer'
                         }}
-                        className="p-1.5 rounded-lg text-anna-muted hover:text-anna-accent hover:bg-anna-accent/20 transition opacity-80 sm:opacity-0 group-hover:opacity-100"
-                        title="Đưa lên đầu hàng chờ (Phát kế tiếp)"
+                        title="Tùy chọn khác..."
                       >
-                        <ArrowUpToLine className="w-3.5 h-3.5" />
+                        <MoreHorizontal size={15} />
                       </button>
-                    )}
 
-                    {/* Jump to Position Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openJumpModal(song, idx);
-                      }}
-                      className="p-1.5 rounded-lg text-anna-muted hover:text-purple-300 hover:bg-purple-500/20 transition opacity-80 sm:opacity-0 group-hover:opacity-100"
-                      title="Chuyển đến vị trí bất kỳ (Ví dụ: nhảy từ #50 lên #2)"
-                    >
-                      <ArrowUpDown className="w-3.5 h-3.5" />
-                    </button>
+                      {/* Dropdown / Dropup Popover (Tự động bung lên trên khi gần đáy màn hình) */}
+                      {isMenuOpen && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            ...(menuPlacement === 'top'
+                              ? { bottom: 36, top: 'auto' }
+                              : { top: 36, bottom: 'auto' }
+                            ),
+                            zIndex: 50,
+                            width: 170,
+                            borderRadius: 12,
+                            background: '#1c1e22',
+                            border: '1px solid var(--border)',
+                            boxShadow: '0 12px 30px rgba(0,0,0,0.6)',
+                            padding: '6px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            animation: 'tabFadeIn 0.15s ease'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => { onAction('playNow', idx); setActiveMenuIdx(null); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, border: 0, background: 'transparent', color: 'var(--ink)', fontSize: 11.5, cursor: 'pointer', textAlign: 'left', width: '100%' }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--soft)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <Play size={12} fill="currentColor" />
+                            <span>Phát ngay</span>
+                          </button>
 
-                    {/* Move Up */}
-                    {idx > 0 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAction('move', { from: idx, to: idx - 1 });
-                        }}
-                        className="p-1 rounded-lg text-anna-muted hover:text-white hover:bg-white/10 transition opacity-0 group-hover:opacity-100 hidden sm:block"
-                        title="Đẩy lên 1 nấc"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleMoveToTop(idx)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, border: 0, background: 'transparent', color: 'var(--yellow)', fontSize: 11.5, cursor: 'pointer', textAlign: 'left', width: '100%' }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--soft)'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <ArrowUpToLine size={13} />
+                              <span>Đưa lên đầu (#1)</span>
+                            </button>
+                          )}
 
-                    {/* Move Down */}
-                    {idx < songs.length - 1 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAction('move', { from: idx, to: idx + 1 });
-                        }}
-                        className="p-1 rounded-lg text-anna-muted hover:text-white hover:bg-white/10 transition opacity-0 group-hover:opacity-100 hidden sm:block"
-                        title="Đẩy xuống 1 nấc"
-                      >
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                          <button
+                            type="button"
+                            onClick={() => openJumpModal(song, idx)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, border: 0, background: 'transparent', color: 'var(--ink)', fontSize: 11.5, cursor: 'pointer', textAlign: 'left', width: '100%' }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--soft)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <ArrowUpDown size={13} />
+                            <span>Chuyển vị trí...</span>
+                          </button>
 
-                    {/* Delete Single Track */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAction('remove', idx);
-                      }}
-                      aria-label={`Xóa bài ${song.title} khỏi hàng chờ`}
-                      className="p-1.5 rounded-lg text-anna-muted hover:text-anna-red hover:bg-anna-red/10 transition opacity-80 sm:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-anna-red focus-visible:outline-none"
-                      title="Xóa khỏi hàng chờ"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                          <div style={{ height: 1, background: 'var(--border)', margin: '3px 0' }} />
+
+                          <button
+                            type="button"
+                            onClick={() => { onAction('remove', idx); setActiveMenuIdx(null); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 6, border: 0, background: 'transparent', color: 'var(--coral)', fontSize: 11.5, cursor: 'pointer', textAlign: 'left', width: '100%' }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,120,100,0.1)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <Trash2 size={13} />
+                            <span>Xóa khỏi hàng chờ</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
