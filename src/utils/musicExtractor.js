@@ -771,12 +771,12 @@ async function getDirectStreamUrl(targetUrl) {
 
   const cookiesOpts = YTDLP_COOKIES_FILE ? { cookies: YTDLP_COOKIES_FILE } : {};
 
-  // 1. Thử với cookies + iOS/Android client (phương án mạnh nhất, bypass hoàn toàn bot-check)
+  // 1. Thử với android client (bypass bot-check tốt nhất, không cần iOS)
   try {
     const opts = {
       getUrl: true,
       format: 'bestaudio/best',
-      extractorArgs: 'youtube:player_client=ios,android,tv_embedded',
+      extractorArgs: 'youtube:player_client=android,tv_embedded',
       noPlaylist: true,
       noWarnings: true,
       ...cookiesOpts
@@ -786,10 +786,10 @@ async function getDirectStreamUrl(targetUrl) {
       return directUrl.trim().split('\n')[0].trim();
     }
   } catch (e) {
-    console.warn(`[yt-dlp getUrl ios/android failed for ${targetUrl}]:`, e.message.split('\n').filter(l => l.includes('ERROR:')).join(' ') || e.message.slice(0, 120));
+    console.warn(`[yt-dlp getUrl android failed for ${targetUrl}]:`, e.message.split('\n').filter(l => l.includes('ERROR:')).join(' ') || e.message.slice(0, 120));
   }
 
-  // 2. Thử với cookies + web client mặc định
+  // 2. Thử với web client mặc định + cookies (nếu có)
   try {
     const opts = {
       getUrl: true,
@@ -918,14 +918,14 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     return resource;
   }
 
-  // CHIẾN LƯỢC DỰ PHÒNG: NẾU KHÔNG LẤY ĐƯỢC DIRECT URL -> DÙNG YT-DLP EXEC PIPE QUA FFMPEG VỚI EXTRACTOR-ARGS
-  console.log(`[MusicExtractor Fallback] Chuyển sang chế độ piped stream cho: ${targetUrl}`);
+  // CHIẾN LƯỢC DỰ PHÒNG CUỐI: YT-DLP PIPED STREAM với android client (tránh bị block như web client)
+  console.log(`[MusicExtractor Fallback] Thử yt-dlp piped stream (android client) cho: ${targetUrl}`);
   let ytdlpStreamProcess = null;
   try {
     const fallbackOpts = {
       output: '-',
       format: 'bestaudio/best',
-      extractorArgs: 'youtube:player_client=ios,android,tv_embedded',
+      extractorArgs: 'youtube:player_client=android,tv_embedded',
       ffmpegLocation: ffmpeg,
       noPlaylist: true,
       noWarnings: true,
@@ -939,99 +939,48 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   }
 
   if (!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) {
-    throw new Error(`Không thể khởi tạo luồng âm thanh cho bài hát: ${trackItem?.title || targetUrl}`);
+    throw new Error(`Không thể phát bài hát "${trackItem?.title || targetUrl}" – Cần cấu hình YTDLP_COOKIES_FILE trong .env VPS.`);
   }
 
   const ffmpegArgs = [];
   if (seekSeconds && Number(seekSeconds) > 0) {
     ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
   }
-
-  ffmpegArgs.push(
-    '-i', 'pipe:0',
-    '-vn'
-  );
-
+  ffmpegArgs.push('-i', 'pipe:0', '-vn');
   if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
     const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
     ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
   }
-
-  ffmpegArgs.push(
-    '-c:a', 'libopus',
-    '-b:a', '128k',
-    '-ar', '48000',
-    '-ac', '2',
-    '-f', 'ogg',
-    'pipe:1'
-  );
+  ffmpegArgs.push('-c:a', 'libopus', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-f', 'ogg', 'pipe:1');
 
   const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   registerProcess(ffmpegProcess);
 
   let ffmpegStderr = '';
-  ffmpegProcess.stderr.on('data', (chunk) => {
-    ffmpegStderr += chunk.toString();
-    if (ffmpegStderr.length > 4000) {
-      ffmpegStderr = ffmpegStderr.slice(-2000);
-    }
-  });
-
-  // Drain stderr của yt-dlp để không bao giờ bị nghẽn buffer
+  ffmpegProcess.stderr.on('data', (chunk) => { ffmpegStderr += chunk.toString(); if (ffmpegStderr.length > 4000) ffmpegStderr = ffmpegStderr.slice(-2000); });
   ytdlpStreamProcess.stderr.on('data', () => {});
-
-  ffmpegProcess.stdin.on('error', (err) => {
-    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-      console.warn('[FFmpeg stdin Error]:', err.message);
-    }
-  });
-
-  ytdlpStreamProcess.stdout.on('error', (err) => {
-    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-      console.warn('[yt-dlp stdout Error]:', err.message);
-    }
-  });
-
-  ytdlpStreamProcess.on('error', (err) => {
-    if (err.code !== 'EPIPE') {
-      console.error('[yt-dlp Process Error]:', err.message);
-    }
-  });
-
-  ffmpegProcess.on('error', (err) => {
-    if (err.code !== 'EPIPE') {
-      console.error('[FFmpeg Process Error]:', err.message);
-    }
-  });
+  ffmpegProcess.stdin.on('error', (err) => { if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') console.warn('[FFmpeg stdin Error]:', err.message); });
+  ytdlpStreamProcess.stdout.on('error', (err) => { if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') console.warn('[yt-dlp stdout Error]:', err.message); });
+  ytdlpStreamProcess.on('error', (err) => { if (err.code !== 'EPIPE') console.error('[yt-dlp Process Error]:', err.message); });
+  ffmpegProcess.on('error', (err) => { if (err.code !== 'EPIPE') console.error('[FFmpeg Process Error]:', err.message); });
 
   ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
   ffmpegProcess.on('close', (code) => {
-    if (code !== 0 && code !== null) {
-      const lastErr = ffmpegStderr.slice(-200).trim();
-      if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
-    }
-    try {
-      ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-    } catch (e) {}
+    if (code !== 0 && code !== null) { const lastErr = ffmpegStderr.slice(-200).trim(); if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr); }
+    try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
     killProcess(ffmpegProcess);
     killProcess(ytdlpStreamProcess);
   });
 
-  const resource = createAudioResource(ffmpegProcess.stdout, {
-    inputType: StreamType.OggOpus,
-    inlineVolume: true
-  });
-
+  const resource = createAudioResource(ffmpegProcess.stdout, { inputType: StreamType.OggOpus, inlineVolume: true });
   resource.destroy = () => {
-    try {
-      ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
-    } catch (e) {}
+    try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
     killProcess(ffmpegProcess);
     killProcess(ytdlpStreamProcess);
   };
-
   return resource;
+
 }
 
 /**
