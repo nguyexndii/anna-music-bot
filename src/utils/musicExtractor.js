@@ -865,15 +865,15 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
     const passThroughStream = new PassThrough();
     ffmpegProcess.stdout.pipe(passThroughStream);
 
-    // Timeout bảo vệ: Nếu sau 7 giây không có dữ liệu âm thanh nào, tự hủy để failover
+    // Timeout bảo vệ: Nếu sau 18 giây không có dữ liệu âm thanh nào, tự hủy để failover
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 7s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 18s)'));
       }
-    }, 7000);
+    }, 18000);
 
     // Khi nhận được gói âm thanh đầu tiên: Xác nhận luồng chạy tốt 100%!
     ffmpegProcess.stdout.once('data', () => {
