@@ -44,6 +44,15 @@ function extractArtists(artistStr) {
   return parts.length > 0 ? parts : [clean];
 }
 
+function splitFeat(str) {
+  if (!str) return null;
+  const m = str.match(/^(.+?)\s+(?:x|ft\.?|feat\.?|cùng|với)\s+(.+)$/i);
+  if (m) {
+    return { titlePart: m[1].trim(), artistPart: m[2].trim() };
+  }
+  return null;
+}
+
 function generateSearchVariants(rawTitle, rawArtist = '') {
   if (!rawTitle) return [];
 
@@ -64,6 +73,28 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
     if (meaningfulSegments.length >= 2) {
       const s1 = meaningfulSegments[0];
       const s2 = meaningfulSegments[1];
+
+      // Trường hợp tiêu đề có feat: e.g. "Donald Gold - OBGTLH x Lil Shady"
+      const feat2 = splitFeat(s2);
+      if (feat2) {
+        const exp = [s1, feat2.artistPart];
+        queries.push({ track: feat2.titlePart, artist: s1, expectedTrack: feat2.titlePart, expectedArtist: exp });
+        queries.push({ track: feat2.titlePart, artist: feat2.artistPart, expectedTrack: feat2.titlePart, expectedArtist: exp });
+        queries.push({ q: `${feat2.titlePart} ${s1}`, expectedTrack: feat2.titlePart, expectedArtist: exp });
+        queries.push({ q: `${feat2.titlePart} ${feat2.artistPart}`, expectedTrack: feat2.titlePart, expectedArtist: exp });
+        queries.push({ q: feat2.titlePart, expectedTrack: feat2.titlePart, expectedArtist: exp });
+      }
+
+      // Trường hợp s1 có feat: e.g. "OBGTLH x Lil Shady - Donald Gold"
+      const feat1 = splitFeat(s1);
+      if (feat1) {
+        const exp = [s2, feat1.artistPart];
+        queries.push({ track: feat1.titlePart, artist: s2, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        queries.push({ track: feat1.titlePart, artist: feat1.artistPart, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        queries.push({ q: `${feat1.titlePart} ${s2}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        queries.push({ q: `${feat1.titlePart} ${feat1.artistPart}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        queries.push({ q: feat1.titlePart, expectedTrack: feat1.titlePart, expectedArtist: exp });
+      }
 
       const s1Artists = extractArtists(s1);
       const s2Artists = extractArtists(s2);
@@ -133,12 +164,15 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
   }
 
   if (expectedArtist) {
-    const eArtist = normalizeStr(cleanArtistName(expectedArtist));
-    const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
-    if (artistWords.length > 0) {
-      const artistOk = artistWords.some(w => mArtist.includes(w) || mTrack.includes(w));
-      if (!artistOk) return false;
-    }
+    const artistList = Array.isArray(expectedArtist) ? expectedArtist : [expectedArtist];
+    const artistOk = artistList.some(art => {
+      if (!art) return false;
+      const eArtist = normalizeStr(cleanArtistName(art));
+      const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
+      if (artistWords.length === 0) return true;
+      return artistWords.some(w => mArtist.includes(w) || mTrack.includes(w));
+    });
+    if (!artistOk) return false;
   }
 
   return true;
@@ -291,13 +325,29 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
     const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
     let cleanArt = cleanArtistName(artist);
 
-    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "Bước Qua Nhau / Vũ.")
+    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "Bước Qua Nhau / Vũ." hoặc "Donald Gold - OBGTLH x Lil Shady")
     let cleanTitleOnly = primaryClean;
     const segs = primaryClean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).filter(Boolean);
     if (segs.length >= 2) {
-      cleanTitleOnly = segs[0].trim();
-      if (!cleanArt || cleanArt === 'Unknown') {
-        cleanArt = cleanArtistName(segs[1]);
+      const feat2 = splitFeat(segs[1]);
+      if (feat2) {
+        cleanTitleOnly = feat2.titlePart;
+        if (!cleanArt || cleanArt === 'Unknown') {
+          cleanArt = cleanArtistName(segs[0]);
+        }
+      } else {
+        const feat1 = splitFeat(segs[0]);
+        if (feat1) {
+          cleanTitleOnly = feat1.titlePart;
+          if (!cleanArt || cleanArt === 'Unknown') {
+            cleanArt = cleanArtistName(segs[1]);
+          }
+        } else {
+          cleanTitleOnly = segs[0].trim();
+          if (!cleanArt || cleanArt === 'Unknown') {
+            cleanArt = cleanArtistName(segs[1]);
+          }
+        }
       }
     }
 
