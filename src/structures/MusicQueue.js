@@ -664,7 +664,7 @@ class MusicQueue {
   }
 
   setVolume(vol) {
-    this.volume = Math.max(1, Math.min(100, vol));
+    this.volume = Math.max(0, Math.min(100, vol));
     if (this.currentResource && this.currentResource.volume) {
       this.currentResource.volume.setVolume(this.volume / 100);
     }

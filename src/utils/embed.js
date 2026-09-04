@@ -193,7 +193,7 @@ function createNowPlayingEmbed(song, queue) {
           inline: true
         }
       )
-      .setFooter({ text: `Dùng ${config.prefix}caidat để mở cài đặt • ${config.prefix}h để xem lệnh` })
+      .setFooter({ text: 'Dùng /settings để mở cài đặt • /help để xem danh sách lệnh' })
       .setTimestamp();
   }
 
@@ -270,9 +270,9 @@ function createMusicControls(queue) {
 }
 
 /**
- * Giao diện Xem hàng chờ chi tiết (Đã lọc bỏ bài hát ngầm / tự động)
+ * Giao diện Xem hàng chờ chi tiết có phân trang (10 bài/trang)
  */
-function createQueueEmbed(queue) {
+function createQueueEmbed(queue, page = 1) {
   const embed = new EmbedBuilder()
     .setTitle(`${EMOJI_TAG.list} Hàng Chờ Âm Nhạc — ${queue.guild.name}`)
     .setColor('#5865F2')
@@ -297,25 +297,29 @@ function createQueueEmbed(queue) {
 
   if (userSongs.length === 0) {
     if (is247) {
-      embed.setDescription(`Hàng chờ trống! Đang phát nhạc nền 24/7. Nhấn nút **${EMOJI_TAG.add}** hoặc dùng \`.p <tên_bài>\` để thêm nhạc.`);
+      embed.setDescription(`Hàng chờ trống! Đang phát nhạc nền 24/7. Dùng \`/play <tên_bài>\` hoặc Web Player để thêm nhạc.`);
     } else {
-      embed.setDescription(`Hàng chờ hiện đang trống! Nhấn nút **${EMOJI_TAG.add}** hoặc gõ \`.p <tên_bài>\` để thêm bài hát yêu thích.`);
+      embed.setDescription(`Hàng chờ hiện đang trống! Dùng lệnh \`/play <tên_bài>\` để thêm bài hát yêu thích.`);
     }
     embed.setFooter({ text: 'Anna Music Queue • 0 bài trong hàng chờ' });
   } else {
-    const listSlice = userSongs.slice(0, 15);
-    let desc = `**Danh sách bài hát sắp phát (${userSongs.length} bài):**\n`;
+    const pageSize = 10;
+    const totalPages = Math.max(1, Math.ceil(userSongs.length / pageSize));
+    const currentPage = Math.min(Math.max(1, page), totalPages);
+    const startIndex = (currentPage - 1) * pageSize;
+    const listSlice = userSongs.slice(startIndex, startIndex + pageSize);
+
+    let desc = `**Danh sách bài hát sắp phát (${userSongs.length} bài):**\n\n`;
     listSlice.forEach((s, idx) => {
+      const realIndex = startIndex + idx + 1;
       const req = s.requestedBy ? `• ${s.requestedBy}` : '';
-      desc += `\`${idx + 1}.\` [${s.title.slice(0, 55)}](${s.url}) | \`${s.duration}\` ${req}\n`;
+      desc += `\`${realIndex}.\` [${s.title.slice(0, 52)}](${s.url}) | \`${s.duration}\` ${req}\n`;
     });
 
-    if (userSongs.length > 15) {
-      desc += `\n*...và còn **${userSongs.length - 15} bài hát** khác nữa.*`;
-    }
-
     embed.setDescription(desc);
-    embed.setFooter({ text: `Chọn bài trong Menu Dropdown bên dưới để XÓA KHỎI HÀNG CHỜ • Hoặc gõ .remove <số>` });
+    embed.setFooter({
+      text: `Trang ${currentPage}/${totalPages} • Tổng cộng ${userSongs.length} bài • Dùng /move để đổi vị trí`
+    });
   }
 
   return embed;

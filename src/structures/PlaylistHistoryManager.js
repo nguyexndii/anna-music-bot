@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 class PlaylistHistoryManager {
@@ -59,7 +59,8 @@ class PlaylistHistoryManager {
       trackCount: playlistData.trackCount || (playlistData.tracks ? playlistData.tracks.length : 0),
       thumbnail: playlistData.thumbnail || null,
       addedBy: playlistData.addedBy || 'Web User',
-      addedAt: new Date().toISOString()
+      addedAt: new Date().toISOString(),
+      tracks: Array.isArray(playlistData.tracks) ? playlistData.tracks.slice(0, 100) : []
     };
 
     filtered.unshift(entry);
@@ -75,6 +76,12 @@ class PlaylistHistoryManager {
   getPlaylists(guildId, limit = 8) {
     const list = this.cache.get(guildId) || [];
     return list.slice(0, limit);
+  }
+
+  getPlaylistByUrl(guildId, url) {
+    if (!guildId || !url) return null;
+    const list = this.cache.get(guildId) || [];
+    return list.find(p => p.url === url) || null;
   }
 }
 

@@ -38,7 +38,7 @@ module.exports = {
       }, 7000);
     }
 
-    // 3. Tạo User data và Magic Token (kèm PIN 6 số, hiệu lực 10 phút, session 24h)
+    // 3. Tạo User data và Magic Token (kèm PIN 6 số hiệu lực 3 phút, session 2 giờ)
     const isAdmin = member?.permissions?.has('Administrator') || member?.permissions?.has('ManageGuild') || guild.ownerId === author.id;
     const avatarUrl = author.displayAvatarURL({ dynamic: true, size: 256 });
     const userData = {
@@ -51,7 +51,7 @@ module.exports = {
       isAdmin: Boolean(isAdmin)
     };
 
-    const { token, pin } = generateWebToken(userData, 10, 24);
+    const { token, pin } = generateWebToken(userData, 3, 2);
     const baseUrl = (process.env.WEB_URL || 'https://anna-music-bot-ui.pages.dev').replace(/\/$/, '');
     const webUrl = `${baseUrl}/?token=${token}&guild=${guild.id}`;
 
@@ -65,7 +65,7 @@ module.exports = {
         `🔊 **Kênh Voice:** <#${userVoice.id}>\n` +
         `🔑 **Mã PIN:** \`${pin}\``
       )
-      .setFooter({ text: 'Mã PIN có hiệu lực trong 10 phút' });
+      .setFooter({ text: 'Mã PIN có hiệu lực 3 phút • Tin nhắn tự xóa sau 2 phút' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -77,12 +77,15 @@ module.exports = {
 
     try {
       const replyMsg = await ctx.reply({ embeds: [embed], components: [row], flags: 4096 });
-      // Tự động xóa tin nhắn prefix sau 10 phút khi mã PIN hết hạn (nếu là prefix message)
-      if (replyMsg && !ctx.isInteraction) {
+      // Tự động xóa tin nhắn sau 2 phút để giữ kênh chat luôn sạch sẽ
+      if (ctx.isInteraction && ctx.interaction) {
+        setTimeout(() => {
+          ctx.interaction.deleteReply().catch(() => {});
+        }, 120 * 1000);
+      } else if (replyMsg && typeof replyMsg.delete === 'function') {
         setTimeout(() => {
           replyMsg.delete().catch(() => {});
-          if (ctx.message?.deletable) ctx.message.delete().catch(() => {});
-        }, 10 * 60 * 1000);
+        }, 120 * 1000);
       }
     } catch (err) {
       console.error('[Web Command Error]:', err);

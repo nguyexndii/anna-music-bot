@@ -94,8 +94,8 @@ module.exports = function createApiRouter(client) {
       ? Boolean(userVoice && userVoice.id === guildSettings.lockedVoiceChannelId)
       : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
 
-    // Cấp Session Token 24 tiếng (24h)
-    const sessionToken = createSessionToken(user, 24);
+    // Cấp Session Token 2 tiếng (2h)
+    const sessionToken = createSessionToken(user, 2);
 
     return res.json({
       success: true,
@@ -512,6 +512,59 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  // 4.1 Lấy thông tin chi tiết Playlist (cho phép xem trước và thêm từng bài lẻ)
+  let isExtractingPlaylist = false;
+  router.get('/guilds/:guildId/playlist-info', requireAuth, async (req, res) => {
+    const { guildId } = req.params;
+    const url = req.query.url?.trim();
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'Thiếu đường dẫn playlist' });
+    }
+
+    // 1. Kiểm tra cache trong PlaylistHistoryManager
+    const cached = playlistHistoryManager.getPlaylistByUrl(guildId, url);
+    if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) {
+      return res.json({
+        success: true,
+        playlist: cached
+      });
+    }
+
+    // 2. Khóa an toàn: Tránh chạy đồng thời nhiều tác vụ nặng
+    if (isExtractingPlaylist) {
+      return res.status(429).json({ success: false, error: 'Hệ thống đang phân tích một danh sách phát khác, vui lòng chờ trong giây lát!' });
+    }
+
+    isExtractingPlaylist = true;
+    try {
+      const rawResults = await searchTrack(url);
+      if (!rawResults || rawResults.length === 0) {
+        return res.status(404).json({ success: false, error: 'Không tìm thấy bài hát trong danh sách phát này' });
+      }
+
+      const playlistData = {
+        url,
+        title: rawResults.length > 1 ? `Danh sách phát (${rawResults.length} bài)` : (rawResults[0]?.title || 'Playlist'),
+        trackCount: rawResults.length,
+        thumbnail: rawResults[0]?.thumbnail || null,
+        addedBy: req.user?.displayName || req.user?.username || 'Web User',
+        tracks: rawResults
+      };
+
+      playlistHistoryManager.addPlaylist(guildId, playlistData);
+
+      return res.json({
+        success: true,
+        playlist: playlistData
+      });
+    } catch (err) {
+      console.error('[API Playlist Info Error]:', err);
+      return res.status(500).json({ success: false, error: 'Không thể phân tích danh sách phát' });
+    } finally {
+      isExtractingPlaylist = false;
+    }
+  });
+
   // 5. Thao tác điều khiển Player (Pause, Resume, Skip, Seek, Volume, 24/7...)
   router.post('/guilds/:guildId/action', requireAuth, async (req, res) => {
     const { guildId } = req.params;
@@ -644,7 +697,8 @@ module.exports = function createApiRouter(client) {
           break;
         }
         case 'volume': {
-          const vol = Math.max(0, Math.min(150, parseInt(value, 10) || 100));
+          const parsed = parseInt(value, 10);
+          const vol = isNaN(parsed) ? 100 : Math.max(0, Math.min(100, parsed));
           queue.setVolume(vol);
           resultMessage = `Âm lượng: ${vol}%`;
           break;

@@ -136,6 +136,29 @@ const SLASH_SHORTCUTS = [
       .setName('h')
       .setDescription('Display bot command guide (Shortcut for /help)')
       .setDescriptionLocalizations({ vi: 'Xem danh sách & hướng dẫn lệnh (Lệnh tắt của /help)' })
+  },
+  {
+    target: 'move',
+    builder: () => new SlashCommandBuilder()
+      .setName('mv')
+      .setDescription('Move a song position (Shortcut for /move)')
+      .setDescriptionLocalizations({ vi: 'Di chuyển vị trí bài hát (Lệnh tắt của /move)' })
+      .addIntegerOption(opt =>
+        opt
+          .setName('from')
+          .setDescription('Current position of the song')
+          .setDescriptionLocalizations({ vi: 'Vị trí bài hát hiện tại' })
+          .setMinValue(1)
+          .setRequired(true)
+      )
+      .addIntegerOption(opt =>
+        opt
+          .setName('to')
+          .setDescription('New position (default: 1)')
+          .setDescriptionLocalizations({ vi: 'Vị trí mới (mặc định: 1)' })
+          .setMinValue(1)
+          .setRequired(false)
+      )
   }
 ];
 
