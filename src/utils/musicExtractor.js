@@ -758,8 +758,49 @@ process.on('SIGINT', () => { cleanupAllProcesses(); process.exit(); });
 process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 
 /**
- * Tạo Discord AudioResource với yt-dlp-exec stdout pipe -> FFmpeg libopus
- * (Đảm bảo luồng phát liên tục, không bao giờ bị YouTube ngắt kết nối sau 10-20s)
+ * Lấy URL luồng âm thanh trực tiếp (Direct Audio Stream URL) từ YouTube / Web
+ * Bỏ qua hoàn toàn cơ chế chặn bot / Datacenter IP của YouTube bằng iOS/Android Player Client.
+ */
+async function getDirectStreamUrl(targetUrl) {
+  if (!targetUrl || typeof targetUrl !== 'string') return null;
+
+  // 1. Thử qua yt-dlp với iOS và Android client (Bypass 100% chặn Datacenter IP)
+  try {
+    const directUrl = await ytdlp(targetUrl, {
+      getUrl: true,
+      format: 'bestaudio/best',
+      extractorArgs: 'youtube:player_client=ios,android',
+      noPlaylist: true,
+      noWarnings: true
+    });
+    if (directUrl && typeof directUrl === 'string' && directUrl.trim().startsWith('http')) {
+      return directUrl.trim().split('\n')[0].trim();
+    }
+  } catch (e) {
+    console.warn(`[yt-dlp getUrl ios/android failed for ${targetUrl}]:`, e.message);
+  }
+
+  // 2. Thử qua yt-dlp mặc định
+  try {
+    const directUrl = await ytdlp(targetUrl, {
+      getUrl: true,
+      format: 'bestaudio/best',
+      noPlaylist: true,
+      noWarnings: true
+    });
+    if (directUrl && typeof directUrl === 'string' && directUrl.trim().startsWith('http')) {
+      return directUrl.trim().split('\n')[0].trim();
+    }
+  } catch (e) {
+    console.warn(`[yt-dlp getUrl default failed for ${targetUrl}]:`, e.message);
+  }
+
+  return null;
+}
+
+/**
+ * Tạo Discord AudioResource trực tiếp từ Direct Audio Stream URL qua FFmpeg libopus
+ * (Đảm bảo luồng phát liên tục, không bao giờ ngắt sau 10-20s, hỗ trợ Reconnect tự động)
  */
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
@@ -777,24 +818,11 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   }
 
-  // Khởi chạy yt-dlp stream trực tiếp ra stdout pipe (Pure audio stream)
-  let ytdlpStreamProcess = null;
-  try {
-    ytdlpStreamProcess = ytdlp.exec(targetUrl, {
-      output: '-',
-      format: 'bestaudio/best',
-      ffmpegLocation: ffmpeg,
-      noPlaylist: true,
-      noWarnings: true,
-      preferFreeFormats: true
-    });
-    if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
-  } catch (err) {
-    console.warn(`[yt-dlp stream init error for ${targetUrl}]:`, err.message);
-  }
+  // BƯỚC 1: Lấy URL luồng âm thanh trực tiếp (Direct Stream URL)
+  let streamUrl = await getDirectStreamUrl(targetUrl);
 
-  // Nếu video bị lỗi hoặc chặn: Auto-Recovery tìm bản thay thế
-  if ((!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) && trackItem && (trackItem.title || trackItem.searchQuery)) {
+  // BƯỚC 2: Nếu URL gốc bị lỗi (18+, bản quyền, bị xóa): Auto-Recovery tìm bản thay thế
+  if (!streamUrl && trackItem && (trackItem.title || trackItem.searchQuery)) {
     const searchTitle = trackItem.title || trackItem.searchQuery;
     console.log(`[MusicExtractor Auto-Recovery] Video gốc bị lỗi, tìm bản audio thay thế cho: "${searchTitle}"...`);
     try {
@@ -803,19 +831,98 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
         targetUrl = fbRes[0].url;
         trackItem.url = targetUrl;
         trackItem.title = fbRes[0].title;
-        ytdlpStreamProcess = ytdlp.exec(targetUrl, {
-          output: '-',
-          format: 'bestaudio/best',
-          ffmpegLocation: ffmpeg,
-          noPlaylist: true,
-          noWarnings: true,
-          preferFreeFormats: true
-        });
-        if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
+        streamUrl = await getDirectStreamUrl(targetUrl);
       }
     } catch (fbErr) {
       console.warn('[Auto-Recovery stream failed]:', fbErr.message);
     }
+  }
+
+  // CHIẾN LƯỢC CHÍNH: NẾU ĐÃ CÓ STREAM URL -> PHÁT TRỰC TIẾP QUA FFMPEG (SIÊU NHANH, KHÔNG NGHẼN PIPE, TIẾT KIỆM RAM VPS)
+  if (streamUrl) {
+    const ffmpegArgs = [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    ];
+
+    if (seekSeconds && Number(seekSeconds) > 0) {
+      ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
+    }
+
+    ffmpegArgs.push(
+      '-i', streamUrl,
+      '-vn'
+    );
+
+    if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
+      const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
+      ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
+    }
+
+    ffmpegArgs.push(
+      '-c:a', 'libopus',
+      '-b:a', '128k',
+      '-ar', '48000',
+      '-ac', '2',
+      '-f', 'ogg',
+      'pipe:1'
+    );
+
+    const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    registerProcess(ffmpegProcess);
+
+    let ffmpegStderr = '';
+    ffmpegProcess.stderr.on('data', (chunk) => {
+      ffmpegStderr += chunk.toString();
+      if (ffmpegStderr.length > 4000) {
+        ffmpegStderr = ffmpegStderr.slice(-2000);
+      }
+    });
+
+    ffmpegProcess.on('error', (err) => {
+      if (err.code !== 'EPIPE') {
+        console.error('[FFmpeg Process Error]:', err.message);
+      }
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        const lastErr = ffmpegStderr.slice(-200).trim();
+        if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+      }
+      killProcess(ffmpegProcess);
+    });
+
+    const resource = createAudioResource(ffmpegProcess.stdout, {
+      inputType: StreamType.OggOpus,
+      inlineVolume: true
+    });
+
+    resource.destroy = () => {
+      killProcess(ffmpegProcess);
+    };
+
+    return resource;
+  }
+
+  // CHIẾN LƯỢC DỰ PHÒNG: NẾU KHÔNG LẤY ĐƯỢC DIRECT URL -> DÙNG YT-DLP EXEC PIPE QUA FFMPEG VỚI EXTRACTOR-ARGS
+  console.log(`[MusicExtractor Fallback] Chuyển sang chế độ piped stream cho: ${targetUrl}`);
+  let ytdlpStreamProcess = null;
+  try {
+    ytdlpStreamProcess = ytdlp.exec(targetUrl, {
+      output: '-',
+      format: 'bestaudio/best',
+      extractorArgs: 'youtube:player_client=ios,android',
+      ffmpegLocation: ffmpeg,
+      noPlaylist: true,
+      noWarnings: true,
+      preferFreeFormats: true
+    });
+    if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
+  } catch (err) {
+    console.warn(`[yt-dlp fallback pipe error for ${targetUrl}]:`, err.message);
   }
 
   if (!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) {
@@ -832,7 +939,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     '-vn'
   );
 
-  // Giới hạn thời gian hòa âm vào (Fade-in) tối đa 1.5 giây để bài hát luôn nghe rõ lời ngay lập tức
   if (crossfadeSeconds && Number(crossfadeSeconds) > 0) {
     const fadeSec = Math.min(1.5, Number(crossfadeSeconds));
     ffmpegArgs.push('-af', `afade=t=in:ss=0:d=${fadeSec}`);
@@ -850,7 +956,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
   const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   registerProcess(ffmpegProcess);
 
-  // Giải phóng liên tục (drain) stderr của FFmpeg để TUYỆT ĐỐI KHÔNG BAO GIỜ bị nghẽn buffer 64KB gây ngắt bài sau 15 giây
   let ffmpegStderr = '';
   ffmpegProcess.stderr.on('data', (chunk) => {
     ffmpegStderr += chunk.toString();
@@ -859,7 +964,9 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   });
 
-  // Ngăn chặn lỗi write EPIPE khi một trong hai tiến trình kết thúc trước
+  // Drain stderr của yt-dlp để không bao giờ bị nghẽn buffer
+  ytdlpStreamProcess.stderr.on('data', () => {});
+
   ffmpegProcess.stdin.on('error', (err) => {
     if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
       console.warn('[FFmpeg stdin Error]:', err.message);
@@ -884,10 +991,8 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   });
 
-  // Nối luồng âm thanh qua FFmpeg (pipe tự động xử lý backpressure và đóng stdin khi xong)
   ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
-  // Dọn dẹp tiến trình an toàn khi FFmpeg hoàn tất
   ffmpegProcess.on('close', (code) => {
     if (code !== 0 && code !== null) {
       const lastErr = ffmpegStderr.slice(-200).trim();
@@ -905,7 +1010,6 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     inlineVolume: true
   });
 
-  // Gắn hàm destroy() chủ động để dọn dẹp tiến trình con ngay lập tức khi skip / đổi bài
   resource.destroy = () => {
     try {
       ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin);
