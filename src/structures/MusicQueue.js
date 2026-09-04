@@ -102,6 +102,49 @@ class MusicQueue {
     this.loopMode = guildSettings.loopMode || 'off';
   }
 
+  getVoiceChannel() {
+    return (
+      (this.voiceChannel?.id && this.guild.channels.cache.get(this.voiceChannel.id)) ||
+      this.guild.members.me?.voice?.channel ||
+      this.voiceChannel
+    );
+  }
+
+  getHumanMemberCount() {
+    const channel = this.getVoiceChannel();
+    if (!channel) return 0;
+    const botId = this.guild.client?.user?.id;
+    const channelId = channel.id;
+
+    // 1. Kiểm tra qua guild.voiceStates.cache (luôn chính xác ngay cả khi không có Privileged Intent)
+    const voiceStates = this.guild.voiceStates?.cache;
+    if (voiceStates && voiceStates.size > 0) {
+      let count = 0;
+      for (const state of voiceStates.values()) {
+        if (state.channelId === channelId) {
+          if (state.id === botId) continue;
+          if (state.member?.user?.bot) continue;
+          const user = this.guild.client.users?.cache?.get(state.id);
+          if (user?.bot) continue;
+
+          // Chủ động nạp member vào cache nếu chưa có
+          if (!state.member) {
+            this.guild.members.fetch(state.id).catch(() => {});
+          }
+          count++;
+        }
+      }
+      return count;
+    }
+
+    // 2. Fallback qua channel.members
+    if (channel.members) {
+      return channel.members.filter(m => !m.user.bot).size;
+    }
+
+    return 0;
+  }
+
   async connect() {
     const currentGuild = this.voiceChannel?.guild || this.guild;
 
@@ -243,9 +286,11 @@ class MusicQueue {
       return;
     }
 
-    const humanMembers = this.voiceChannel ? this.voiceChannel.members.filter(m => !m.user.bot) : new Map();
+    const activeChannel = this.getVoiceChannel();
+    const humanCount = this.getHumanMemberCount();
     const guildSettings = settingsManager.get(this.guild.id);
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
+    const songToRelate = lastSong || (this.previousSongs.length > 0 ? this.previousSongs[this.previousSongs.length - 1] : null);
 
     // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát
     if (this.prefetchedSong && (this.prefetchedSong.url === lastSong?.url || this.prefetchedSong.title === lastSong?.title)) {
@@ -253,7 +298,7 @@ class MusicQueue {
     }
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
-    if (this.prefetchedSong && humanMembers.size > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
+    if (this.prefetchedSong && humanCount > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
       const nextTrack = this.prefetchedSong;
       this.prefetchedSong = null;
       this.songs.push(nextTrack);
@@ -261,13 +306,30 @@ class MusicQueue {
       return;
     }
 
-    // 1. KHI CÒN NGƯỜI TRONG PHÒNG VOICE (humanMembers.size > 0):
-    if (humanMembers.size > 0) {
+    // 1. KHI CÒN NGƯỜI TRONG PHÒNG VOICE (humanCount > 0):
+    if (humanCount > 0) {
       // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay (DJ AI) gợi ý bài tương tự!
-      if (guildSettings.autoplay !== false && lastSong && !isLofiTrack) {
+      if (guildSettings.autoplay !== false && songToRelate && !isLofiTrack) {
         const useAi = guildSettings.useAiAssistant !== false;
-        console.log(`[Autoplay DJ AI] Phòng có ${humanMembers.size} người nghe, tiếp tục tìm bài tương tự sau "${lastSong.title}"...`);
-        const relatedTrack = await getRelatedTrack(lastSong, this.guild.id, useAi);
+        console.log(`[Autoplay DJ AI] Phòng có ${humanCount} người nghe, tiếp tục tìm bài tương tự sau "${songToRelate.title}"...`);
+        let relatedTrack = await getRelatedTrack(songToRelate, this.guild.id, useAi);
+
+        // Fallback tự động nếu không tìm được: Tìm bài hát hay nhất cùng ca sĩ hoặc cùng thể loại
+        if (!relatedTrack) {
+          try {
+            const cleanTitle = (songToRelate.title || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').trim();
+            const artist = (songToRelate.artist && songToRelate.artist !== 'Unknown') ? songToRelate.artist : cleanTitle.split(/[-–|]/)[0]?.trim();
+            const query = artist ? `${artist} bài hát hay nhất tuyển chọn` : `${cleanTitle} official audio`;
+            console.log(`[Autoplay Fallback Query] Thử tìm bài thay thế: "${query}"`);
+            const fallbackResults = await searchTrack(query);
+            if (fallbackResults && fallbackResults.length > 0) {
+              relatedTrack = fallbackResults.find(t => t.url !== songToRelate.url) || fallbackResults[0];
+            }
+          } catch (fbErr) {
+            console.warn('[Autoplay Fallback Error]:', fbErr.message);
+          }
+        }
+
         if (relatedTrack) {
           relatedTrack.requestedBy = 'Tự động phát 🎵';
           this.songs.push(relatedTrack);
@@ -284,21 +346,21 @@ class MusicQueue {
 
       // C. Nếu hết bài và không bật 24/7
       if (!this.mode247) {
-        clearVoiceChannelStatus(this.voiceChannel);
+        clearVoiceChannelStatus(activeChannel);
         const timeoutSeconds = guildSettings.emptyChannelTimeout || 60;
         this.startDisconnectTimer(timeoutSeconds * 1000);
         return;
       }
     }
 
-    // 2. KHI PHÒNG TRỐNG (humanMembers.size === 0):
+    // 2. KHI PHÒNG TRỐNG (humanCount === 0):
     if (this.mode247) {
       this.prefetchedSong = null;
       this.preloadedResource = null;
-      setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Mode');
+      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
       await this._play247BackgroundLofi();
     } else {
-      clearVoiceChannelStatus(this.voiceChannel);
+      clearVoiceChannelStatus(activeChannel);
       const timeoutSeconds = guildSettings.emptyChannelTimeout || 60;
       this.startDisconnectTimer(timeoutSeconds * 1000);
     }
@@ -359,9 +421,9 @@ class MusicQueue {
       console.log(`[MusicQueue 24/7] Phòng trống tại máy chủ ${this.guild.name}. Đếm 1 phút (60s) trước khi chuyển sang trạng thái Treo Lofi 24/7...`);
       this.idle247Timeout = setTimeout(async () => {
         this.idle247Timeout = null; // HỦY BỘ ĐẾM HOÀN TOÀN NGAY KHI HẾT 1 PHÚT ĐỂ TIẾT KIỆM TÀI NGUYÊN!
-        if (this.mode247 && this.voiceChannel) {
-          const humanMembers = this.voiceChannel.members.filter(m => !m.user.bot);
-          if (humanMembers.size === 0) {
+        if (this.mode247) {
+          const humanCount = this.getHumanMemberCount();
+          if (humanCount === 0) {
             console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, hủy bộ đếm và chuyển sang phát nhạc Lofi 24/7...`);
             this.songs = [];
             this.prefetchedSong = null;
@@ -887,7 +949,7 @@ class MusicQueue {
 
     // Không prefetch nếu bài hiện tại là Lofi 24/7 HOẶC phòng không có ai nghe
     if (this.currentSong.requestedBy === 'Auto (24/7)') return;
-    if (this.voiceChannel && this.voiceChannel.members.filter(m => !m.user.bot).size === 0) return;
+    if (this.getHumanMemberCount() === 0) return;
 
     if (this.songs.length === 0 && !this.prefetchedSong) {
       this._isPrefetching = true;

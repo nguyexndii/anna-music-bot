@@ -281,17 +281,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   }
 
   // 3. Xử lý phòng trống (không còn người nghe)
-  if (queue && queue.voiceChannel) {
-    const botVoiceChannel = guild.channels.cache.get(queue.voiceChannel.id);
-    if (botVoiceChannel) {
-      const humanMembers = botVoiceChannel.members.filter(m => !m.user.bot);
+  if (queue) {
+    const activeVoice = typeof queue.getVoiceChannel === 'function' ? queue.getVoiceChannel() : queue.voiceChannel;
+    if (activeVoice) {
+      const humanCount = typeof queue.getHumanMemberCount === 'function' ? queue.getHumanMemberCount() : 1;
       const guildSettings = settingsManager.get(guild.id);
 
-      if (humanMembers.size === 0) {
+      if (humanCount === 0) {
         logAction('VOICE_STATE_UPDATE', {
           event: 'ROOM_EMPTY',
           guildId: guild.id,
-          channelId: queue.voiceChannel.id,
+          channelId: activeVoice.id,
           userId: newState.id
         });
         queue.startEmptyRoomTimer(guildSettings.emptyChannelTimeout || 60);
@@ -299,8 +299,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         logAction('VOICE_STATE_UPDATE', {
           event: 'ROOM_NOT_EMPTY',
           guildId: guild.id,
-          channelId: queue.voiceChannel.id,
-          humanCount: humanMembers.size,
+          channelId: activeVoice.id,
+          humanCount: humanCount,
           userId: newState.id
         });
         queue.clearEmptyRoomTimer();

@@ -339,7 +339,7 @@ export default function App() {
     const cg = guildId || user?.guildId;
     const ct = token || localStorage.getItem('anna_web_token');
     if (!cg || !ct) return;
-    const adminOnly = ['toggle247','set247','toggleAutoplay','setAutoplay','settings','updateSettings'];
+    const adminOnly = ['toggle247','set247','settings','updateSettings'];
     if (adminOnly.includes(action) && !user?.isAdmin) { setIsPermissionModalOpen(true); return; }
     try {
       const res = await fetch(`${API_BASE}/api/guilds/${cg}/action`, {

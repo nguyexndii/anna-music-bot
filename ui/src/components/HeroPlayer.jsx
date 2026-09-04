@@ -286,6 +286,14 @@ export default function HeroPlayer({ player, onAction, user, onRequireAdmin }) {
               <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 8, fontWeight: 700, background: 'var(--coral)', color: '#ffffff', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>∞</span>
             )}
           </button>
+          <button
+            className={`ctrl-btn${player?.autoplay ? ' active' : ''}`}
+            onClick={() => onAction('toggleAutoplay')}
+            aria-label="Tự động phát"
+            title={player?.autoplay ? 'Tự động phát bài tương tự (Autoplay): ĐANG BẬT' : 'Tự động phát (Autoplay): ĐANG TẮT'}
+          >
+            <Radio size={17} />
+          </button>
         </div>
 
         {/* Footer: Volume + 24/7 */}

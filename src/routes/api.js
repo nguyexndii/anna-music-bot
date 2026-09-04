@@ -219,15 +219,34 @@ module.exports = function createApiRouter(client) {
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
     const guildSettings = settingsManager.get(guildId);
 
-    const voiceChannel = queue?.voiceChannel || guild.members.me?.voice?.channel;
-    const voiceMembers = voiceChannel ? voiceChannel.members.map(m => ({
-      id: m.id,
-      username: m.user.username,
-      displayName: m.displayName,
-      avatar: m.user.displayAvatarURL({ dynamic: true }) || null,
-      isBot: m.user.bot,
-      isSelf: caller?.userId ? m.id === caller.userId : false
-    })) : [];
+    const voiceChannel = queue?.getVoiceChannel ? queue.getVoiceChannel() : (queue?.voiceChannel || guild.members.me?.voice?.channel);
+    let voiceMembers = [];
+    if (voiceChannel && guild.voiceStates?.cache) {
+      for (const state of guild.voiceStates.cache.values()) {
+        if (state.channelId === voiceChannel.id) {
+          const member = state.member || guild.members.cache.get(state.id);
+          const userObj = member?.user || client.users?.cache?.get(state.id);
+          const isBot = Boolean(userObj?.bot || state.id === client.user.id);
+          voiceMembers.push({
+            id: state.id,
+            username: userObj?.username || 'user',
+            displayName: member?.displayName || userObj?.globalName || userObj?.username || 'Thành viên',
+            avatar: userObj?.displayAvatarURL ? userObj.displayAvatarURL({ dynamic: true }) : null,
+            isBot,
+            isSelf: caller?.userId ? state.id === caller.userId : (state.id === client.user.id)
+          });
+        }
+      }
+    } else if (voiceChannel?.members) {
+      voiceMembers = voiceChannel.members.map(m => ({
+        id: m.id,
+        username: m.user.username,
+        displayName: m.displayName,
+        avatar: m.user.displayAvatarURL({ dynamic: true }) || null,
+        isBot: m.user.bot,
+        isSelf: caller?.userId ? m.id === caller.userId : false
+      }));
+    }
 
     const currentTrack = queue?.currentSong;
     const activeWebUsers = getActiveWebUsers(guildId);
@@ -597,8 +616,8 @@ module.exports = function createApiRouter(client) {
       return res.status(400).json({ success: false, error: 'Hiện không có bài hát nào đang phát trong máy chủ này' });
     }
 
-    // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER
-    const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'setLogChannel', 'settings', 'updateSettings'];
+    // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER (24/7, LogChannel, Settings)
+    const serverSettingActions = ['toggle247', 'set247', 'setLogChannel', 'settings', 'updateSettings'];
     if (serverSettingActions.includes(action)) {
       const isAdmin = await checkIsAdmin(guildId, user.userId);
       if (!isAdmin) {
