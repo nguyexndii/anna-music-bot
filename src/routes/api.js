@@ -886,6 +886,72 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  // 6.1 Kiểm tra trạng thái hoạt động của 2 tầng Lyric (Diagnostics / Health Check)
+  router.get('/lyrics/status', async (req, res) => {
+    // 1. Kiểm tra Tầng 1: LRCLIB (Spotify/Apple Music Open DB)
+    let tier1 = {
+      tier: 1,
+      name: 'LRCLIB (Direct Open API)',
+      sources: 'Spotify / Apple Music Community Database',
+      speed: 'Siêu tốc (50ms - 150ms)',
+      status: 'CHECKING',
+      pingMs: 0
+    };
+    const t0 = Date.now();
+    try {
+      const r1 = await fetch('https://lrclib.net/api/get?track_name=test&artist_name=test', {
+        headers: { 'User-Agent': 'AnnaMusicBot/2.0' },
+        signal: AbortSignal.timeout(3500)
+      });
+      tier1.pingMs = Date.now() - t0;
+      tier1.status = (r1.status === 200 || r1.status === 404) ? 'ONLINE (Hoạt động tốt)' : `HTTP_${r1.status}`;
+    } catch (e) {
+      tier1.status = 'OFFLINE (' + e.message + ')';
+    }
+
+    // 2. Kiểm tra Tầng 2: Python Microservice (syncedlyrics)
+    const fallbackBaseUrl = process.env.LYRICS_FALLBACK_URL || 'http://127.0.0.1:8787/lyrics';
+    const healthUrl = fallbackBaseUrl.replace(/\/lyrics\/?$/, '/health');
+    let tier2 = {
+      tier: 2,
+      name: 'Python Fallback Microservice',
+      sources: 'Musixmatch, NetEase Music, Genius',
+      speed: 'Toàn diện (1s - 2.5s)',
+      url: healthUrl,
+      status: 'CHECKING',
+      pingMs: 0
+    };
+    const t1 = Date.now();
+    try {
+      const r2 = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(2000)
+      });
+      tier2.pingMs = Date.now() - t1;
+      if (r2.ok) {
+        const d2 = await r2.json().catch(() => ({}));
+        tier2.status = d2.status === 'ok' ? 'ONLINE (Hoạt động tốt)' : 'ONLINE';
+      } else {
+        tier2.status = `HTTP_${r2.status}`;
+      }
+    } catch (e) {
+      tier2.status = 'OFFLINE (Chưa bật service trên VPS hoặc port 8787 chưa lắng nghe)';
+    }
+
+    return res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      architecture: 'Mô hình Failover Tự Động: Tầng 1 (Siêu tốc, ưu tiên 1) -> Tầng 2 (Dự phòng đa nguồn, ưu tiên 2)',
+      providers: [tier1, tier2],
+      summary: {
+        tier1Online: tier1.status.startsWith('ONLINE'),
+        tier2Online: tier2.status.startsWith('ONLINE'),
+        message: tier2.status.startsWith('ONLINE')
+          ? 'Cả 2 tầng lyric đều đang hoạt động tốt!'
+          : 'Tầng 1 (LRCLIB) đang hoạt động. Tầng 2 (Microservice Python) đang offline - bạn có thể làm theo lyrics-service/README.md nếu muốn kích hoạt thêm Musixmatch & NetEase.'
+      }
+    });
+  });
+
 
   return router;
 };
