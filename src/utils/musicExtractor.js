@@ -777,7 +777,7 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
     };
 
     if (!isSoundCloud) {
-      ytdlpOptions.extractorArgs = 'youtube:player_client=android';
+      ytdlpOptions.extractorArgs = 'youtube:player_client=tv_embedded,android_music,android';
       ytdlpOptions.preferFreeFormats = true;
       if (YTDLP_COOKIES_FILE) {
         ytdlpOptions.cookies = YTDLP_COOKIES_FILE;
