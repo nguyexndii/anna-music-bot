@@ -330,6 +330,25 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
     return fallbackResult;
   }
 
+  // 4. Fallback Tầng 3 qua Gemini AI ("Lyric Đọc" / Plain Lyrics hoàn chỉnh nếu cả LRCLIB & Microservice không có)
+  try {
+    const { getSongLyrics } = require('./geminiHelper');
+    const geminiResult = await getSongLyrics(rawTitle, artist);
+    if (geminiResult && geminiResult.lyrics && geminiResult.lyrics.trim().length > 10) {
+      return {
+        title: geminiResult.title || rawTitle,
+        artist: geminiResult.artist || artist || '',
+        lyrics: geminiResult.lyrics.trim(),
+        syncedLyrics: null,
+        duration: targetDurationSec || null,
+        autoOffsetMs: 0,
+        isAiGenerated: true
+      };
+    }
+  } catch (aiErr) {
+    console.warn('[Gemini AI Lyrics Fallback Error]:', aiErr.message);
+  }
+
   return null;
 }
 
@@ -343,27 +362,35 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
     const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
     let cleanArt = cleanArtistName(artist);
 
-    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "Bước Qua Nhau / Vũ." hoặc "Donald Gold - OBGTLH x Lil Shady")
+    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "DONALD GOLD - ADAMN" hoặc "Bước Qua Nhau / Vũ.")
     let cleanTitleOnly = primaryClean;
     const segs = primaryClean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).filter(Boolean);
     if (segs.length >= 2) {
-      const feat2 = splitFeat(segs[1]);
-      if (feat2) {
-        cleanTitleOnly = feat2.titlePart;
-        if (!cleanArt || cleanArt === 'Unknown') {
-          cleanArt = cleanArtistName(segs[0]);
-        }
+      const s0 = segs[0].trim();
+      const s1 = segs[1].trim();
+      const normArt = cleanArt ? normalizeStr(cleanArt) : '';
+      const s0IsArt = normArt && (normalizeStr(s0).includes(normArt) || normArt.includes(normalizeStr(s0)));
+      const s1IsArt = normArt && (normalizeStr(s1).includes(normArt) || normArt.includes(normalizeStr(s1)));
+
+      if (s0IsArt) {
+        // segs[0] là ca sĩ (vd "DONALD GOLD - ADAMN"), segs[1] là tên bài hát
+        cleanTitleOnly = s1;
+        cleanArt = cleanArtistName(s0);
+      } else if (s1IsArt) {
+        // segs[1] là ca sĩ (vd "ADAMN - DONALD GOLD"), segs[0] là tên bài hát
+        cleanTitleOnly = s0;
+        cleanArt = cleanArtistName(s1);
       } else {
-        const feat1 = splitFeat(segs[0]);
-        if (feat1) {
-          cleanTitleOnly = feat1.titlePart;
+        const feat2 = splitFeat(s1);
+        if (feat2) {
+          cleanTitleOnly = feat2.titlePart;
           if (!cleanArt || cleanArt === 'Unknown') {
-            cleanArt = cleanArtistName(segs[1]);
+            cleanArt = cleanArtistName(s0);
           }
         } else {
-          cleanTitleOnly = segs[0].trim();
+          cleanTitleOnly = s0;
           if (!cleanArt || cleanArt === 'Unknown') {
-            cleanArt = cleanArtistName(segs[1]);
+            cleanArt = cleanArtistName(s1);
           }
         }
       }

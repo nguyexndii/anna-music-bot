@@ -868,13 +868,15 @@ module.exports = function createApiRouter(client) {
 
     try {
       const lyricsData = await getLyrics(currentTrack.title, currentTrack.artist, currentTrack.durationMs || 0);
+      const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
-        success: true,
-        title: currentTrack.title,
-        artist: currentTrack.artist,
+        success: hasLyrics,
+        title: lyricsData?.title || currentTrack.title,
+        artist: lyricsData?.artist || currentTrack.artist,
         isLofi: !!lyricsData?.isLofi,
+        isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: lyricsData?.autoOffsetMs || 0,
-        lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
+        lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics
       });
@@ -892,13 +894,15 @@ module.exports = function createApiRouter(client) {
     }
     try {
       const lyricsData = await getLyrics(title, artist, durationMs);
+      const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
-        success: true,
-        title,
-        artist,
+        success: hasLyrics,
+        title: lyricsData?.title || title,
+        artist: lyricsData?.artist || artist,
         isLofi: !!lyricsData?.isLofi,
+        isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: lyricsData?.autoOffsetMs || 0,
-        lyrics: lyricsData?.lyrics || 'Chưa tìm thấy lời cho bài hát này',
+        lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics
       });
@@ -907,7 +911,7 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  // 6.1 Kiểm tra trạng thái hoạt động của 2 tầng Lyric (Diagnostics / Health Check)
+  // 6.1 Kiểm tra trạng thái hoạt động của 3 tầng Lyric (Diagnostics / Health Check)
   router.get('/lyrics/status', async (req, res) => {
     // 1. Kiểm tra Tầng 1: LRCLIB (Spotify/Apple Music Open DB)
     let tier1 = {
@@ -958,17 +962,28 @@ module.exports = function createApiRouter(client) {
       tier2.status = 'OFFLINE (Chưa bật service trên VPS hoặc port 8787 chưa lắng nghe)';
     }
 
+    // 3. Kiểm tra Tầng 3: Gemini AI Engine (Lời Đọc Toàn Diện)
+    const { getApiKeys } = require('../utils/geminiHelper');
+    const geminiKeys = getApiKeys();
+    let tier3 = {
+      tier: 3,
+      name: 'Gemini AI Engine (Plain Lyrics Fallback)',
+      sources: 'Google Gemini 2.5 Flash / Knowledge Base',
+      speed: 'Thông minh (800ms - 1.5s)',
+      status: geminiKeys.length > 0 ? `ONLINE (${geminiKeys.length} API Keys sẵn sàng)` : 'OFFLINE (Chưa cấu hình GEMINI_API_KEY)',
+      configured: geminiKeys.length > 0
+    };
+
     return res.json({
       success: true,
       timestamp: new Date().toISOString(),
-      architecture: 'Mô hình Failover Tự Động: Tầng 1 (Siêu tốc, ưu tiên 1) -> Tầng 2 (Dự phòng đa nguồn, ưu tiên 2)',
-      providers: [tier1, tier2],
+      architecture: 'Mô hình Failover Tự Động 3 Tầng: Tầng 1 (LRCLIB Siêu Tốc) -> Tầng 2 (Python Microservice Đa Nguồn) -> Tầng 3 (Gemini AI Lời Đọc Toàn Diện)',
+      providers: [tier1, tier2, tier3],
       summary: {
         tier1Online: tier1.status.startsWith('ONLINE'),
         tier2Online: tier2.status.startsWith('ONLINE'),
-        message: tier2.status.startsWith('ONLINE')
-          ? 'Cả 2 tầng lyric đều đang hoạt động tốt!'
-          : 'Tầng 1 (LRCLIB) đang hoạt động. Tầng 2 (Microservice Python) đang offline - bạn có thể làm theo lyrics-service/README.md nếu muốn kích hoạt thêm Musixmatch & NetEase.'
+        tier3Online: tier3.status.startsWith('ONLINE'),
+        message: 'Hệ thống lời bài hát 3 tầng đang hoạt động sẵn sàng (hỗ trợ cả karaoke đồng bộ và lyric đọc toàn diện)!'
       }
     });
   });

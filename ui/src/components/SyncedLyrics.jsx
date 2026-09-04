@@ -127,7 +127,7 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
     fetch(`${API_BASE}/api/lyrics?${params}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        const result = d?.success ? d : null;
+        const result = (d?.success && d?.lyrics) ? d : null;
         if (result) {
           lyricsCache.set(key, result);
           if (savedOffset === null && result.autoOffsetMs) {
@@ -303,10 +303,11 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
 
           {lyricsData?.lyrics && !hasSynced && (
             <span style={{
-              fontFamily: '"DM Mono", monospace', fontSize: 9, color: 'var(--muted)', letterSpacing: '0.08em',
-              border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', background: 'var(--soft)'
+              fontFamily: '"DM Mono", monospace', fontSize: 9.5, color: 'var(--yellow)', letterSpacing: '0.08em',
+              border: '1px solid rgba(232, 201, 119, 0.3)', borderRadius: 6, padding: '4px 8px', background: 'rgba(232, 201, 119, 0.08)',
+              fontWeight: 600
             }}>
-              LỜI THAM KHẢO
+              {lyricsData.isAiGenerated ? 'LỜI ĐỌC (AI)' : 'LỜI ĐỌC (PLAIN)'}
             </span>
           )}
         </div>
@@ -454,13 +455,14 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                 <div style={{
-                  fontFamily: '"DM Mono", monospace', fontSize: 9.5, letterSpacing: '0.12em',
-                  color: 'var(--muted)', background: 'rgba(255,255,255,0.04)', padding: '4px 14px',
-                  borderRadius: 999, border: '1px solid var(--border)', marginBottom: 16
+                  fontFamily: '"DM Mono", monospace', fontSize: 10, letterSpacing: '0.12em',
+                  color: 'var(--yellow)', background: 'rgba(232, 201, 119, 0.08)', padding: '5px 16px',
+                  borderRadius: 999, border: '1px solid rgba(232, 201, 119, 0.25)', marginBottom: 18,
+                  fontWeight: 600
                 }}>
-                  LỜI THAM KHẢO · CÓ THỂ KHÁC VỚI BẢN BẠN ĐANG PHÁT
+                  {lyricsData.isAiGenerated ? 'LỜI BÀI HÁT (BẢN ĐỌC TỔNG HỢP BỞI GEMINI AI)' : 'LỜI BÀI HÁT (BẢN ĐỌC TOÀN DIỆN)'}
                 </div>
-                <div style={{ whiteSpace: 'pre-line', fontSize: 15, lineHeight: 2.2, color: 'var(--ink)', padding: '8px 16px', maxWidth: '90%', textAlign: 'center', opacity: 0.85 }}>
+                <div style={{ whiteSpace: 'pre-line', fontSize: 15.5, lineHeight: 2.2, color: 'var(--ink)', padding: '8px 20px', maxWidth: '92%', textAlign: 'center', opacity: 0.95 }}>
                   {lyricsData.lyrics}
                 </div>
               </div>
