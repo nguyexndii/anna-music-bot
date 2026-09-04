@@ -378,10 +378,23 @@ function extractSoundCloudTitleFromUrl(url) {
 
     // 6. Tìm kiếm YouTube cho từ khóa (Tự động ưu tiên bản Audio / Lyric Video chuẩn nhịp nếu user không ghi rõ 'mv')
     try {
+      const userWantsRemix = /\b(remix|mix|mashup|vinahouse|cover|speed\s*up|slowed|nightcore|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi)\b/i.test(query);
       const isExplicitMv = /\bmv\b|\bvideo\b|\bm\/v\b/i.test(query);
       const r = await yts(query);
       if (r && r.videos && r.videos.length > 0) {
-        const topVideos = r.videos.slice(0, 6);
+        let candidateVideos = r.videos;
+        if (!userWantsRemix) {
+          const cleanFiltered = candidateVideos.filter(v => {
+            const t = (v.title || '').toLowerCase();
+            if (v.seconds > 600) return false;
+            return !/\b(remix|mashup|vinahouse|bass\s*boosted|speed\s*up|slowed|nightcore|cover|parody|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi\s*ver|tiktok)/i.test(t);
+          });
+          if (cleanFiltered.length > 0) {
+            candidateVideos = cleanFiltered;
+          }
+        }
+
+        const topVideos = candidateVideos.slice(0, 6);
         let best = topVideos[0];
         if (!isExplicitMv && topVideos.length > 1) {
           const audioCandidate = topVideos.find(t => {
@@ -930,7 +943,26 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
       }));
 
       let rawVideos = r.videos || [];
-      if (mode === 'official') {
+      const userWantsRemix = /\b(remix|mix|mashup|vinahouse|cover|speed\s*up|slowed|nightcore|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi)\b/i.test(query);
+
+      if (mode === 'official' && !userWantsRemix) {
+        const remixPattern = /\b(remix|mashup|vinahouse|bass\s*boosted|speed\s*up|slowed|nightcore|cover|parody|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi\s*ver|tiktok)/i;
+        const cleanOfficialVideos = rawVideos.filter(v => {
+          const title = (v.title || '').toLowerCase();
+          if (v.seconds > 600) return false; // Loại bỏ video dài > 10 phút (1 hour mix, compilation)
+          if (remixPattern.test(title)) return false; // Lọc sạch remix, cover, vinahouse, v.v.
+          return true;
+        });
+
+        // Nếu có các bản thu chuẩn, chỉ hiển thị bản thu chuẩn
+        if (cleanOfficialVideos.length >= 2) {
+          rawVideos = cleanOfficialVideos;
+        } else if (cleanOfficialVideos.length > 0) {
+          // Đưa các bản thu chuẩn lên đầu danh sách
+          const cleanIds = new Set(cleanOfficialVideos.map(v => v.videoId));
+          rawVideos = [...cleanOfficialVideos, ...rawVideos.filter(v => !cleanIds.has(v.videoId))];
+        }
+
         const qWords = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
         rawVideos = rawVideos.map(v => {
           let score = 0;
@@ -942,32 +974,15 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
           score += (matchedWords.length / Math.max(1, qWords.length)) * 100;
 
           // Điểm cộng kênh chính chủ và bản thu chuẩn
-          if (author.includes('topic') || author.includes('official') || author.includes('records') || author.includes('vevo')) score += 30;
+          if (author.includes('topic') || author.includes('official') || author.includes('records') || author.includes('vevo')) score += 40;
           // Ưu tiên mạnh bản audio
           if (title.includes('official audio') || title.includes('(audio)') || title.includes('audio version')) score += 50;
-          if (title.includes('audio') || title.includes('bản thu')) score += 20;
-          if (title.includes('lyric video') || title.includes('lyrics')) score += 10;
+          if (title.includes('audio') || title.includes('bản thu')) score += 25;
+          if (title.includes('lyric video') || title.includes('lyrics')) score += 15;
 
-          // Phạt MV — lời nhạc thường lệch so với bản thu chuẩn
-          if (title.includes('official music video') || title.includes('official mv') || title.includes('official video') || title.includes('(mv)') || title.includes('[mv]') || title.includes('(m/v)') || title.includes('[m/v]')) {
-            score -= 40;
-          }
-
-          // Giảm điểm video rác/chế không chuẩn nhịp
-          if (title.includes('karaoke') || title.includes('parody') || title.includes('reaction') || title.includes('speed up') || title.includes('slowed') || title.includes('nightcore')) {
-            score -= 60;
-          }
-
-          // Phạt nặng video tổng hợp / compilation / liên khúc / dài lê thê khi tìm kiếm bài hát đơn lẻ
-          if (!isPlaylistQuery) {
-            const compilationRegex = /liên khúc|nonstop|tuyển tập|top\s*\d+|\d+\s*(ca khúc|bài hát|bản hit|hits)|nhạc tổng hợp|album|playlist|gây nghiện|hay nhất/i;
-            if (compilationRegex.test(title)) {
-              score -= 80;
-            }
-            const durationSec = v.seconds || 0;
-            if (durationSec > 480) {
-              score -= 50 + Math.min(50, Math.floor(durationSec / 300) * 10);
-            }
+          // Phạt nhẹ MV nếu đã có bản audio (để bản audio/bản thu chuẩn xếp trên MV)
+          if (title.includes('official music video') || title.includes('official mv') || title.includes('official video') || title.includes('(mv)') || title.includes('[mv]')) {
+            score -= 10;
           }
 
           return { ...v, score };
