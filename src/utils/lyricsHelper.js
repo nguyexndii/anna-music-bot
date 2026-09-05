@@ -49,6 +49,15 @@ function extractArtists(artistStr) {
   return parts.length > 0 ? parts : [clean];
 }
 
+function extractFeatFromRaw(title) {
+  if (!title) return [];
+  const match = title.match(/[\(\[](?:feat\.?|ft\.?)\s*([^()\[\]]+)[\)\]]/i);
+  if (match) {
+    return extractArtists(match[1]);
+  }
+  return [];
+}
+
 function splitFeat(str) {
   if (!str) return null;
   // Không dùng 'x' ở đây vì 'x' là ký hiệu kết hợp giữa các nghệ sĩ (Low G x tlinh), không phải tên bài
@@ -65,7 +74,14 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
   const queries = [];
   const primaryClean = cleanTitle(rawTitle);
   const deepClean = stripParentheses(primaryClean);
-  const cleanArt = cleanArtistName(rawArtist);
+  let cleanArt = cleanArtistName(rawArtist);
+  const rawFeatArtists = extractFeatFromRaw(rawTitle);
+
+  // Nếu artist rỗng nhưng tiêu đề có (feat. ...), dùng feat artists làm ca sĩ
+  if (!cleanArt && rawFeatArtists.length > 0) {
+    cleanArt = rawFeatArtists[0];
+  }
+
   const normCleanArt = cleanArt ? normalizeStr(cleanArt) : '';
 
   const titlesToProcess = [primaryClean];
@@ -100,6 +116,11 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         const artistList = extractArtists(artistSeg);
         if (cleanArt && !artistList.some(a => normalizeStr(a) === normCleanArt)) {
           artistList.push(cleanArt);
+        }
+        for (const fArt of rawFeatArtists) {
+          if (!artistList.some(a => normalizeStr(a) === normalizeStr(fArt))) {
+            artistList.push(fArt);
+          }
         }
 
         const otherSegments = meaningfulSegments.filter((_, idx) => idx !== detectedArtistSegIdx);
@@ -168,6 +189,23 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
           queries.push({ q: `${feat1.titlePart} ${s2}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
         }
       }
+    } else {
+      // Chỉ có 1 segment: tiêu đề bài hát đơn (ví dụ "Khởi", "Bước Qua Nhau")
+      const allKnownArtists = [];
+      if (cleanArt && cleanArt !== 'Unknown' && cleanArt !== 'YouTube Music') {
+        allKnownArtists.push(cleanArt);
+      }
+      for (const fArt of rawFeatArtists) {
+        if (!allKnownArtists.some(a => normalizeStr(a) === normalizeStr(fArt))) {
+          allKnownArtists.push(fArt);
+        }
+      }
+
+      for (const art of allKnownArtists) {
+        queries.push({ track: t, artist: art, expectedTrack: t, expectedArtist: allKnownArtists });
+        queries.push({ q: `${t} ${art}`, expectedTrack: t, expectedArtist: allKnownArtists });
+      }
+      queries.push({ q: t, expectedTrack: t, expectedArtist: allKnownArtists.length > 0 ? allKnownArtists : undefined });
     }
 
     // Cuối cùng: tìm kiếm theo full clean title kết hợp với artist (nếu có)
@@ -175,8 +213,6 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
       queries.push({ track: t, artist: cleanArt, expectedTrack: t, expectedArtist: cleanArt });
       queries.push({ q: `${t} ${cleanArt}`, expectedTrack: t, expectedArtist: cleanArt });
     }
-    // Chỉ fallback q = t nếu không có artist nào
-    queries.push({ q: t, expectedTrack: t, expectedArtist: cleanArt || undefined });
   }
 
   const seen = new Set();
@@ -206,24 +242,34 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
   if (expectedTrack) {
     const eTrack = normalizeStr(cleanTitle(expectedTrack));
     if (eTrack) {
+      const eWords = eTrack.split(' ').filter(w => w.length >= 2);
+      if (eWords.length === 0) return false;
+
       // Kiểm tra xem có candidate nào khớp với expectedTrack không
       const trackMatched = candidateTrackNorms.some(cand => {
         if (!cand) return false;
-        if (cand === eTrack || cand.startsWith(eTrack + ' ') || eTrack.startsWith(cand + ' ')) {
-          return true;
+        if (cand === eTrack) return true;
+
+        const cWords = cand.split(' ').filter(w => w.length >= 2);
+        if (cWords.length === 0) return false;
+
+        if (eWords.length === 1) {
+          // Bắt buộc candidate đúng 1 từ và khớp chính xác (ngăn "xa khơi" cho "khởi", "yêu xa" cho "yêu")
+          return cWords.length === 1 && cWords[0] === eWords[0];
         }
-        const eWords = eTrack.split(' ').filter(w => w.length >= 2);
-        if (eWords.length === 0) return false;
-        if (eWords.length <= 3) {
-          // Tên bài ngắn (1-3 từ): Không được lẫn từ lạ hoặc khác biệt
-          const cCompact = cand.replace(/\s+/g, '');
-          const eCompact = eTrack.replace(/\s+/g, '');
-          return cCompact.includes(eCompact) || eCompact.includes(cCompact);
-        } else {
-          // Tên bài dài: Cần ít nhất 75% số từ khớp
-          const matchWords = eWords.filter(w => cand.includes(w));
-          return matchWords.length >= Math.ceil(eWords.length * 0.75);
+
+        if (eWords.length === 2) {
+          // Bắt buộc candidate đúng 2 từ và khớp chính xác (ngăn "in love" cho "love game")
+          return cWords.length === 2 && cWords[0] === eWords[0] && cWords[1] === eWords[1];
         }
+
+        if (eWords.length === 3) {
+          return cand === eTrack || (cWords.length === 3 && cWords.every((w, i) => w === eWords[i]));
+        }
+
+        // Tên bài dài (>= 4 từ): Cần ít nhất 75% số từ khớp
+        const matchWords = eWords.filter(w => cand.includes(w));
+        return matchWords.length >= Math.ceil(eWords.length * 0.75);
       });
 
       if (!trackMatched) {
