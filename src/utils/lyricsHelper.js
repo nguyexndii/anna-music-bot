@@ -66,6 +66,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
   const primaryClean = cleanTitle(rawTitle);
   const deepClean = stripParentheses(primaryClean);
   const cleanArt = cleanArtistName(rawArtist);
+  const normCleanArt = cleanArt ? normalizeStr(cleanArt) : '';
 
   const titlesToProcess = [primaryClean];
   if (deepClean && deepClean !== primaryClean) {
@@ -77,64 +78,105 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
     const meaningfulSegments = rawSegments.filter(s => s.length >= 2 && !/^(mv|official|audio|video|lyrics)$/i.test(s));
 
     if (meaningfulSegments.length >= 2) {
-      const s1 = meaningfulSegments[0];
-      const s2 = meaningfulSegments[1];
-
-      const s1Artists = extractArtists(s1);
-      const s2Artists = extractArtists(s2);
-
-      const normCleanArt = cleanArt ? normalizeStr(cleanArt) : '';
-      const s1IsArtist = normCleanArt && (s1Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
-      const s2IsArtist = normCleanArt && (s2Artists.some(a => normalizeStr(a).includes(normCleanArt) || normCleanArt.includes(normalizeStr(a))));
-
-      // 1. Combination A: s1 là Tên Bài, s2 là Ca Sĩ
-      for (const art of s2Artists) {
-        queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: art });
-        queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: art });
-      }
-      queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2 });
-      queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2Artists });
-      queries.push({ q: s1, expectedTrack: s1, expectedArtist: s2Artists });
-
-      // 2. Trường hợp s2 có feat rõ ràng (e.g. "Donald Gold - OBGTLH ft. Lil Shady")
-      const feat2 = splitFeat(s2);
-      if (feat2) {
-        const exp = [s1, feat2.artistPart];
-        queries.push({ track: feat2.titlePart, artist: s1, expectedTrack: feat2.titlePart, expectedArtist: exp });
-        queries.push({ track: feat2.titlePart, artist: feat2.artistPart, expectedTrack: feat2.titlePart, expectedArtist: exp });
-        queries.push({ q: `${feat2.titlePart} ${s1}`, expectedTrack: feat2.titlePart, expectedArtist: exp });
-        queries.push({ q: `${feat2.titlePart} ${feat2.artistPart}`, expectedTrack: feat2.titlePart, expectedArtist: exp });
-        queries.push({ q: feat2.titlePart, expectedTrack: feat2.titlePart, expectedArtist: exp });
+      // Tìm xem có segment nào khớp với ca sĩ đã biết (channel name) không
+      let detectedArtistSegIdx = -1;
+      if (normCleanArt) {
+        for (let i = 0; i < meaningfulSegments.length; i++) {
+          const seg = meaningfulSegments[i];
+          const segArtists = extractArtists(seg);
+          if (segArtists.some(a => {
+            const nA = normalizeStr(a);
+            return nA && (nA === normCleanArt || nA.includes(normCleanArt) || normCleanArt.includes(nA));
+          })) {
+            detectedArtistSegIdx = i;
+            break;
+          }
+        }
       }
 
-      // 3. Combination B: s2 là Tên Bài, s1 là Ca Sĩ (e.g. "Lil Wuyn - TOKYO Cypher", "DONALD GOLD - ADAMN")
-      for (const art of s1Artists) {
-        queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: art });
-        queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: art });
-      }
-      queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1 });
-      queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1Artists });
-      queries.push({ q: s2, expectedTrack: s2, expectedArtist: s1Artists });
+      if (detectedArtistSegIdx !== -1) {
+        // ĐÃ XÁC ĐỊNH RÕ: segment này là Ca Sĩ, các segment còn lại là Tên Bài (hoặc Album)
+        const artistSeg = meaningfulSegments[detectedArtistSegIdx];
+        const artistList = extractArtists(artistSeg);
+        if (cleanArt && !artistList.some(a => normalizeStr(a) === normCleanArt)) {
+          artistList.push(cleanArt);
+        }
 
-      // 4. Trường hợp s1 có feat: e.g. "OBGTLH ft. Lil Shady - Donald Gold"
-      const feat1 = splitFeat(s1);
-      if (feat1) {
-        const exp = [s2, feat1.artistPart];
-        queries.push({ track: feat1.titlePart, artist: s2, expectedTrack: feat1.titlePart, expectedArtist: exp });
-        queries.push({ track: feat1.titlePart, artist: feat1.artistPart, expectedTrack: feat1.titlePart, expectedArtist: exp });
-        queries.push({ q: `${feat1.titlePart} ${s2}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
-        queries.push({ q: `${feat1.titlePart} ${feat1.artistPart}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
-        queries.push({ q: feat1.titlePart, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        const otherSegments = meaningfulSegments.filter((_, idx) => idx !== detectedArtistSegIdx);
+        // Lọc bỏ segment rõ ràng là tên Album nếu còn segment khác
+        let candidateTracks = otherSegments.filter(s => !/(?:album|the album|ep|single|vol\.?\s*\d+|ost|soundtrack)/i.test(s));
+        if (candidateTracks.length === 0) candidateTracks = otherSegments;
+
+        for (const trackCand of candidateTracks) {
+          // 1. Direct GET track + artist
+          for (const art of artistList) {
+            queries.push({ track: trackCand, artist: art, expectedTrack: trackCand, expectedArtist: artistList });
+            queries.push({ q: `${trackCand} ${art}`, expectedTrack: trackCand, expectedArtist: artistList });
+          }
+          if (artistList.length > 1) {
+            queries.push({ track: trackCand, artist: artistSeg, expectedTrack: trackCand, expectedArtist: artistList });
+            queries.push({ q: `${trackCand} ${artistSeg}`, expectedTrack: trackCand, expectedArtist: artistList });
+          }
+
+          // Trường hợp trackCand có feat: e.g. "Love Game ft. tlinh"
+          const feat = splitFeat(trackCand);
+          if (feat) {
+            const featArtists = [...artistList, feat.artistPart];
+            queries.push({ track: feat.titlePart, artist: artistSeg, expectedTrack: feat.titlePart, expectedArtist: featArtists });
+            queries.push({ track: feat.titlePart, artist: feat.artistPart, expectedTrack: feat.titlePart, expectedArtist: featArtists });
+            queries.push({ q: `${feat.titlePart} ${artistSeg}`, expectedTrack: feat.titlePart, expectedArtist: featArtists });
+          }
+        }
+      } else {
+        // Chưa biết chắc segment nào là ca sĩ: Thử cả 2 chiều s1-s2 và s2-s1, TUYỆT ĐỐI KHÔNG tìm q = 1 từ bare
+        const s1 = meaningfulSegments[0];
+        const s2 = meaningfulSegments[1];
+        const s1Artists = extractArtists(s1);
+        const s2Artists = extractArtists(s2);
+
+        // Combination A: s1 là Tên Bài, s2 là Ca Sĩ
+        for (const art of s2Artists) {
+          queries.push({ track: s1, artist: art, expectedTrack: s1, expectedArtist: s2Artists });
+          queries.push({ q: `${s1} ${art}`, expectedTrack: s1, expectedArtist: s2Artists });
+        }
+        queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2Artists });
+        queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2Artists });
+
+        // Trường hợp s2 có feat: e.g. "Donald Gold - OBGTLH ft. Lil Shady"
+        const feat2 = splitFeat(s2);
+        if (feat2) {
+          const exp = [s1, feat2.artistPart];
+          queries.push({ track: feat2.titlePart, artist: s1, expectedTrack: feat2.titlePart, expectedArtist: exp });
+          queries.push({ track: feat2.titlePart, artist: feat2.artistPart, expectedTrack: feat2.titlePart, expectedArtist: exp });
+          queries.push({ q: `${feat2.titlePart} ${s1}`, expectedTrack: feat2.titlePart, expectedArtist: exp });
+        }
+
+        // Combination B: s2 là Tên Bài, s1 là Ca Sĩ
+        for (const art of s1Artists) {
+          queries.push({ track: s2, artist: art, expectedTrack: s2, expectedArtist: s1Artists });
+          queries.push({ q: `${s2} ${art}`, expectedTrack: s2, expectedArtist: s1Artists });
+        }
+        queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1Artists });
+        queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1Artists });
+
+        // Trường hợp s1 có feat: e.g. "OBGTLH ft. Lil Shady - Donald Gold"
+        const feat1 = splitFeat(s1);
+        if (feat1) {
+          const exp = [s2, feat1.artistPart];
+          queries.push({ track: feat1.titlePart, artist: s2, expectedTrack: feat1.titlePart, expectedArtist: exp });
+          queries.push({ track: feat1.titlePart, artist: feat1.artistPart, expectedTrack: feat1.titlePart, expectedArtist: exp });
+          queries.push({ q: `${feat1.titlePart} ${s2}`, expectedTrack: feat1.titlePart, expectedArtist: exp });
+        }
       }
     }
 
-    // Full clean title query
-    queries.push({ q: t, expectedTrack: t, expectedArtist: cleanArt || undefined });
-
+    // Cuối cùng: tìm kiếm theo full clean title kết hợp với artist (nếu có)
     if (cleanArt && cleanArt !== 'Unknown' && cleanArt !== 'YouTube Music') {
       queries.push({ track: t, artist: cleanArt, expectedTrack: t, expectedArtist: cleanArt });
       queries.push({ q: `${t} ${cleanArt}`, expectedTrack: t, expectedArtist: cleanArt });
     }
+    // Chỉ fallback q = t nếu không có artist nào
+    queries.push({ q: t, expectedTrack: t, expectedArtist: cleanArt || undefined });
   }
 
   const seen = new Set();
@@ -153,47 +195,77 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
 function isValidMatch(match, expectedTrack, expectedArtist) {
   if (!match || !match.trackName) return false;
 
-  // Xử lý trường hợp LRCLIB lưu nguyên tiêu đề video YouTube vào trackName (vd "DÂU TẰM | Low G x tlinh")
-  let cleanMatchTrack = match.trackName;
-  const trackSegs = cleanMatchTrack.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/);
-  if (trackSegs.length > 1) {
-    cleanMatchTrack = trackSegs[0];
-  }
+  const mRawTrack = match.trackName;
+  const mFullTrack = normalizeStr(cleanTitle(mRawTrack));
+  const mArtist = normalizeStr(cleanArtistName(match.artistName));
 
-  const mTrack = normalizeStr(cleanTitle(cleanMatchTrack));
-  const mFullTrack = normalizeStr(cleanTitle(match.trackName));
-  const mArtist = normalizeStr(match.artistName);
+  // Tách các phân đoạn của trackName trên LRCLIB (phòng khi LRCLIB lưu dạng "Tên Bài - Ca Sĩ" hoặc "Ca Sĩ | Tên Bài | Album")
+  const trackSegs = mRawTrack.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => normalizeStr(cleanTitle(s))).filter(Boolean);
+  const candidateTrackNorms = [mFullTrack, ...trackSegs];
 
   if (expectedTrack) {
     const eTrack = normalizeStr(cleanTitle(expectedTrack));
-    const exactSub = mTrack === eTrack || mTrack.startsWith(eTrack + ' ') || eTrack.startsWith(mTrack + ' ') || mFullTrack === eTrack;
-    if (!exactSub) {
-      const eWords = eTrack.split(' ').filter(w => w.length >= 2);
-      if (eWords.length === 0) return false;
-      if (eWords.length <= 3) {
-        // Tên ngắn (<= 3 từ): Không được chèn từ lạ vào giữa (ví dụ "bước qua nhau" vs "bước qua đời nhau")
-        const mCompact = mTrack.replace(/\s+/g, '');
-        const eCompact = eTrack.replace(/\s+/g, '');
-        if (!mCompact.includes(eCompact) && !eCompact.includes(mCompact)) {
-          return false;
+    if (eTrack) {
+      // Kiểm tra xem có candidate nào khớp với expectedTrack không
+      const trackMatched = candidateTrackNorms.some(cand => {
+        if (!cand) return false;
+        if (cand === eTrack || cand.startsWith(eTrack + ' ') || eTrack.startsWith(cand + ' ')) {
+          return true;
         }
-      } else {
-        const matchWords = eWords.filter(w => mTrack.includes(w));
-        if (matchWords.length < Math.ceil(eWords.length * 0.7)) return false;
+        const eWords = eTrack.split(' ').filter(w => w.length >= 2);
+        if (eWords.length === 0) return false;
+        if (eWords.length <= 3) {
+          // Tên bài ngắn (1-3 từ): Không được lẫn từ lạ hoặc khác biệt
+          const cCompact = cand.replace(/\s+/g, '');
+          const eCompact = eTrack.replace(/\s+/g, '');
+          return cCompact.includes(eCompact) || eCompact.includes(cCompact);
+        } else {
+          // Tên bài dài: Cần ít nhất 75% số từ khớp
+          const matchWords = eWords.filter(w => cand.includes(w));
+          return matchWords.length >= Math.ceil(eWords.length * 0.75);
+        }
+      });
+
+      if (!trackMatched) {
+        return false;
       }
     }
   }
 
   if (expectedArtist) {
     const artistList = Array.isArray(expectedArtist) ? expectedArtist : [expectedArtist];
-    const artistOk = artistList.some(art => {
-      if (!art) return false;
-      const eArtist = normalizeStr(cleanArtistName(art));
-      const artistWords = eArtist.split(' ').filter(w => w.length >= 2);
-      if (artistWords.length === 0) return true;
-      return artistWords.some(w => mArtist.includes(w) || mFullTrack.includes(w));
-    });
-    if (!artistOk) return false;
+    const validExpectedArtists = artistList.map(a => normalizeStr(cleanArtistName(a))).filter(Boolean);
+
+    if (validExpectedArtists.length > 0) {
+      const artistMatched = validExpectedArtists.some(eArt => {
+        // 1. Kiểm tra đối chiếu với match.artistName
+        if (mArtist && mArtist !== 'various artists' && mArtist !== 'unknown') {
+          if (mArtist === eArt || mArtist.includes(eArt) || eArt.includes(mArtist)) {
+            return true;
+          }
+          const eArtWords = eArt.split(' ').filter(w => w.length >= 2);
+          if (eArtWords.length > 0 && eArtWords.every(w => mArtist.includes(w))) {
+            return true;
+          }
+        }
+
+        // 2. Nếu match.artistName không khớp hoặc generic, kiểm tra trong trackName
+        // Nhưng PHẢI khớp toàn bộ cụm từ nghệ sĩ (eArt) hoặc toàn bộ các từ của nghệ sĩ, KHÔNG ĐƯỢC dùng single word .some()
+        if (mFullTrack.includes(eArt)) {
+          return true;
+        }
+        const eArtWords = eArt.split(' ').filter(w => w.length >= 2);
+        if (eArtWords.length >= 2 && eArtWords.every(w => mFullTrack.includes(w))) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (!artistMatched) {
+        return false;
+      }
+    }
   }
 
   return true;
