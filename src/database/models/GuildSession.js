@@ -6,6 +6,8 @@ const guildSessionSchema = new mongoose.Schema({
   textChannelId: { type: String, default: null },
   mode247: { type: Boolean, default: false },
   status: { type: String, enum: ['active', 'idle_247', 'off'], default: 'off' },
+  currentSong: { type: Object, default: null },
+  songs: { type: Array, default: [] },
   updatedAt: { type: Date, default: Date.now }
 });
 

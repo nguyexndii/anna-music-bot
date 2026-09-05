@@ -796,6 +796,7 @@ module.exports = function createApiRouter(client) {
               resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
             }
           }
+          queue._saveSessionState?.();
           break;
         }
         default:
@@ -886,12 +887,16 @@ module.exports = function createApiRouter(client) {
     }
 
     try {
-      const lyricsData = await getLyrics(currentTrack.title, currentTrack.artist, currentTrack.durationMs || 0);
+      let queryArtist = currentTrack.artist || '';
+      if (queryArtist === 'YouTube Music' || queryArtist === 'YouTube' || queryArtist === 'Unknown') {
+        queryArtist = '';
+      }
+      const lyricsData = await getLyrics(currentTrack.title, queryArtist, currentTrack.durationMs || 0, currentTrack.url);
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
         success: hasLyrics,
         title: lyricsData?.title || currentTrack.title,
-        artist: lyricsData?.artist || currentTrack.artist,
+        artist: lyricsData?.artist || (currentTrack.artist && currentTrack.artist !== 'YouTube Music' ? currentTrack.artist : (lyricsData?.artist || '')),
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: lyricsData?.autoOffsetMs || 0,
@@ -908,11 +913,16 @@ module.exports = function createApiRouter(client) {
     const title = req.query.title || req.query.q;
     const artist = req.query.artist || '';
     const durationMs = parseInt(req.query.duration, 10) || 0;
+    const targetUrl = req.query.url || null;
     if (!title) {
       return res.json({ success: false, error: 'Thiếu tham số title' });
     }
     try {
-      const lyricsData = await getLyrics(title, artist, durationMs);
+      let queryArtist = artist || '';
+      if (queryArtist === 'YouTube Music' || queryArtist === 'YouTube' || queryArtist === 'Unknown') {
+        queryArtist = '';
+      }
+      const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl);
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
         success: hasLyrics,

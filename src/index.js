@@ -129,10 +129,10 @@ client.once(Events.ClientReady, async () => {
     console.warn('[Auto-Deploy Slash Commands Error]:', deployErr.message);
   }
 
-  // 🔄 Tự động khôi phục kết nối các phòng Voice 24/7 khi bot khởi động lại / sau khi mất kết nối
+  // 🔄 Tự động khôi phục kết nối các phòng Voice và hàng chờ khi bot khởi động lại / sau khi mất kết nối
   try {
     await sessionManager.syncFromDatabase();
-    const activeSessions = sessionManager.getAllActive247Sessions();
+    const activeSessions = sessionManager.getAllActiveSessions();
     for (const session of activeSessions) {
       try {
         const guild = client.guilds.cache.get(session.guildId);
@@ -141,18 +141,34 @@ client.once(Events.ClientReady, async () => {
         if (!voiceChannel || !voiceChannel.isVoiceBased()) continue;
         const textChannel = session.textChannelId ? guild.channels.cache.get(session.textChannelId) : null;
 
-        console.log(`[24/7 Auto-Recovery] Đang tự động kết nối lại phòng: ${voiceChannel.name} tại máy chủ ${guild.name}...`);
+        console.log(`[Auto-Recovery] Đang tự động kết nối lại phòng: ${voiceChannel.name} tại máy chủ ${guild.name}...`);
         const q = musicManager.getOrCreate(guild, textChannel, voiceChannel);
         await q.connect();
-        logAction('VOICE_STATUS_UPDATE', {
-          source: 'index.js/24x7-recovery',
-          channelId: voiceChannel.id,
-          status: '24/7 Mode'
-        });
-        setVoiceChannelStatus(voiceChannel, '♾️ 24/7 Mode');
-        await q._play247BackgroundLofi();
+
+        if (session.mode247) {
+          logAction('VOICE_STATUS_UPDATE', {
+            source: 'index.js/24x7-recovery',
+            channelId: voiceChannel.id,
+            status: '24/7 Mode'
+          });
+          setVoiceChannelStatus(voiceChannel, '♾️ 24/7 Mode');
+        }
+
+        // Khôi phục bài hát đang nghe dở và danh sách hàng chờ nếu có
+        const savedSongs = Array.isArray(session.songs) ? session.songs.filter(Boolean) : [];
+        const savedCurrent = session.currentSong || null;
+        if (savedCurrent || savedSongs.length > 0) {
+          console.log(`[Auto-Recovery] Khôi phục hàng chờ (${savedSongs.length} bài) cho máy chủ ${guild.name}`);
+          q.songs = [...savedSongs];
+          if (savedCurrent) {
+            q.songs.unshift(savedCurrent);
+          }
+          await q.playNext();
+        } else if (session.mode247) {
+          await q._play247BackgroundLofi();
+        }
       } catch (recErr) {
-        console.warn(`[24/7 Recovery Error for Guild ${session.guildId}]:`, recErr.message);
+        console.warn(`[Auto-Recovery Error for Guild ${session.guildId}]:`, recErr.message);
       }
     }
   } catch (syncErr) {
@@ -562,6 +578,7 @@ client.on('interactionCreate', async (interaction) => {
 
       if (interaction.values[0] === 'remove_all') {
         queue.songs = [];
+        queue._saveSessionState?.();
         const newEmbed = createQueueEmbed(queue);
         return interaction.update({ embeds: [newEmbed], components: [] });
       }
@@ -569,6 +586,7 @@ client.on('interactionCreate', async (interaction) => {
       const idx = parseInt(interaction.values[0].replace('remove_', ''), 10);
       if (!isNaN(idx) && idx >= 0 && idx < queue.songs.length) {
         const removed = queue.songs.splice(idx, 1)[0];
+        queue._saveSessionState?.();
         const newEmbed = createQueueEmbed(queue);
         const newMenu = createQueueDeleteSelectMenu(queue);
         return interaction.update({ embeds: [newEmbed], components: newMenu ? [newMenu] : [] });

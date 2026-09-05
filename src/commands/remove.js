@@ -45,6 +45,7 @@ module.exports = {
     }
 
     const removed = queue.songs.splice(index - 1, 1)[0];
+    queue._saveSessionState?.();
     return ctx.reply(`Đã xóa thành công bài hát số ${index}: **${removed.title}** khỏi hàng chờ.`);
   }
 };

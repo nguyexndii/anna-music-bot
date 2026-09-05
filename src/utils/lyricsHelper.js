@@ -1,4 +1,5 @@
 const fetch = globalThis.fetch || require('node-fetch');
+const ytdlp = require('yt-dlp-exec');
 
 function normalizeStr(str) {
   if (!str) return '';
@@ -34,7 +35,11 @@ function stripParentheses(str) {
 
 function cleanArtistName(str) {
   if (!str) return '';
-  return cleanTitle(str).replace(/(?:official\s*(?:channel)?|channel|topic|vevo|records|entertainment)/gi, '').trim();
+  const cleaned = cleanTitle(str).replace(/(?:official\s*(?:channel)?|channel|topic|vevo|records|entertainment|youtube\s*music|youtube)/gi, '').trim();
+  if (cleaned.toLowerCase() === 'unknown' || cleaned.toLowerCase() === 'youtube' || cleaned.toLowerCase() === 'youtube music') {
+    return '';
+  }
+  return cleaned;
 }
 
 function extractArtists(artistStr) {
@@ -215,9 +220,70 @@ function parseLrc(lrcString) {
 }
 
 /**
+ * Trích xuất phụ đề tiếng Việt (CC Subtitles) trực tiếp từ YouTube Video (Khớp 1000% cho Underground Rap MV)
+ */
+async function fetchYouTubeSubtitles(url) {
+  if (!url || typeof url !== 'string' || (!url.includes('youtube.com') && !url.includes('youtu.be'))) {
+    return null;
+  }
+  try {
+    const info = await ytdlp(url, {
+      dumpSingleJson: true,
+      skipDownload: true,
+      noWarnings: true
+    });
+
+    const subs = info.subtitles || {};
+    const auto = info.automatic_captions || {};
+
+    // Ưu tiên phụ đề tiếng Việt do nghệ sĩ gắn (subs.vi), sau đó auto.vi, sau đó tiếng Anh
+    const viSubList = subs.vi || subs['vi-VN'] || auto.vi || auto['vi-VN'] || subs.en || auto.en;
+    if (!viSubList || !Array.isArray(viSubList) || viSubList.length === 0) {
+      return null;
+    }
+
+    const subTarget = viSubList.find(s => s.ext === 'json3') || viSubList[0];
+    if (!subTarget || !subTarget.url) return null;
+
+    const res = await fetch(subTarget.url);
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const events = data.events || [];
+    const syncedLyrics = [];
+    const plainLines = [];
+
+    for (const ev of events) {
+      const segs = ev.segs || [];
+      const text = segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ').trim();
+      if (!text || text === '[âm nhạc]' || text === '[Âm nhạc]' || text === '[Nhạc]' || text === '♪') continue;
+      syncedLyrics.push({
+        time: ev.tStartMs || 0,
+        text
+      });
+      plainLines.push(text);
+    }
+
+    if (syncedLyrics.length >= 3) {
+      console.log(`[Lyrics CC] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chuẩn từ video YouTube!`);
+      return {
+        title: info.title || 'YouTube Track',
+        artist: info.uploader || info.channel || '',
+        lyrics: plainLines.join('\n'),
+        syncedLyrics,
+        duration: info.duration,
+        autoOffsetMs: 0,
+        source: 'youtube_cc'
+      };
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
  * Lấy lời bài hát chuẩn xác từ LRCLIB (Spotify / Apple Music database)
  */
-async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
+async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null) {
   if (!rawTitle) return null;
 
   // Lofi / Chill / Instrumental check
@@ -320,6 +386,16 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0) {
         }
       }
     } catch (e) {}
+  }
+
+  // 2.5 Fallback Tầng 2: Trích xuất phụ đề YouTube CC trực tiếp (chuẩn nhịp 100% cho MV Rap Việt)
+  if (targetUrl) {
+    try {
+      const ytSubResult = await fetchYouTubeSubtitles(targetUrl);
+      if (ytSubResult && ytSubResult.syncedLyrics && ytSubResult.syncedLyrics.length >= 3) {
+        return ytSubResult;
+      }
+    } catch (ytSubErr) {}
   }
 
   // 3. Fallback qua microservice Python (syncedlyrics đa nguồn) nếu LRCLIB không tìm thấy

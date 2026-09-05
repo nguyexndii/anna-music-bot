@@ -192,12 +192,7 @@ class MusicQueue {
         channelId: this.voiceChannel.id
       });
       console.log(`[VoiceConnection Ready] Đã kết nối thành công vào phòng: ${this.voiceChannel.name}`);
-      sessionManager.saveSession(this.guild.id, {
-        voiceChannelId: this.voiceChannel.id,
-        textChannelId: this.textChannel?.id,
-        mode247: this.mode247,
-        status: 'active'
-      });
+      this._saveSessionState();
     });
 
     this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
@@ -508,6 +503,7 @@ class MusicQueue {
     }
 
     this.songs.push(song);
+    this._saveSessionState();
 
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
@@ -532,6 +528,7 @@ class MusicQueue {
       song.requestedBy = requestUser;
       this.songs.push(song);
     }
+    this._saveSessionState();
 
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
@@ -598,6 +595,7 @@ class MusicQueue {
 
     this.currentSong = this.songs.shift();
     this.paused = false;
+    this._saveSessionState();
 
     try {
       const guildSettings = settingsManager.get(this.guild.id);
@@ -793,6 +791,7 @@ class MusicQueue {
       const j = Math.floor(Math.random() * (i + 1));
       [this.songs[i], this.songs[j]] = [this.songs[j], this.songs[i]];
     }
+    this._saveSessionState();
   }
 
   async addTrack(track) {
@@ -856,6 +855,7 @@ class MusicQueue {
     }
     const [moved] = this.songs.splice(from, 1);
     this.songs.splice(to, 0, moved);
+    this._saveSessionState();
     return true;
   }
 
@@ -871,6 +871,7 @@ class MusicQueue {
     this._cleanupResource(this.currentResource);
     this.currentResource = null;
     this.player.stop(true);
+    this._saveSessionState();
     clearVoiceChannelStatus(this.voiceChannel);
     if (!this.mode247) {
       this.destroy();
@@ -901,12 +902,7 @@ class MusicQueue {
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
       if (this.voiceChannel) {
-        sessionManager.saveSession(this.guild.id, {
-          voiceChannelId: this.voiceChannel.id,
-          textChannelId: this.textChannel?.id,
-          mode247: true,
-          status: 'active'
-        });
+        this._saveSessionState();
       }
     } else {
       this.clear247IdleTimer();
@@ -977,8 +973,20 @@ class MusicQueue {
   /**
    * Giữ lại để tương thích ngược nhưng không spawn tiến trình song song gây mất tiếng
    */
-  async _preloadNextTrackResource() {
-    return;
+  _saveSessionState() {
+    if (!this.guild || !this.voiceChannel) return;
+    try {
+      const isLofiCurrent = this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247;
+      const userSongs = (this.songs || []).filter(s => s && s.requestedBy !== 'Auto (24/7)' && !s.is247);
+      sessionManager.saveSession(this.guild.id, {
+        voiceChannelId: this.voiceChannel.id,
+        textChannelId: this.textChannel?.id,
+        mode247: this.mode247,
+        status: (this.isPlaying && !isLofiCurrent) ? 'active' : 'idle_247',
+        currentSong: (!isLofiCurrent && this.currentSong) ? this.currentSong : null,
+        songs: userSongs
+      });
+    } catch (e) {}
   }
 }
 

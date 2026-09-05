@@ -29,6 +29,7 @@ module.exports = {
     let targetTitle = '';
     let targetArtist = '';
     let targetDurationMs = 0;
+    let targetUrl = null;
 
     const queryInput = ctx.options.getString('query');
     if (queryInput) {
@@ -39,14 +40,19 @@ module.exports = {
       targetTitle = queue.currentSong.title;
       targetArtist = queue.currentSong.author || queue.currentSong.artist || '';
       targetDurationMs = queue.currentSong.durationMs || (queue.currentSong.duration ? parseDurationToMs(queue.currentSong.duration) : 0);
+      targetUrl = queue.currentSong.url || null;
     } else {
       return ctx.reply('Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`');
+    }
+
+    if (targetArtist === 'YouTube Music' || targetArtist === 'YouTube' || targetArtist === 'Unknown') {
+      targetArtist = '';
     }
 
     await ctx.deferReply();
 
     try {
-      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs);
+      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl);
 
       if (!result || !result.lyrics || result.lyrics.trim().length === 0) {
         const notFoundEmbed = createErrorEmbed(`Không tìm thấy lời bài hát cho **${targetTitle}**!\nHãy thử nhập đầy đủ tên bài hát kèm tên ca sĩ (vd: \`/lyrics Có Em Madihu\`).`);
