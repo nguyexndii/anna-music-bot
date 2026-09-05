@@ -300,6 +300,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
 
   const variants = generateSearchVariants(rawTitle, artist);
   const targetDurationSec = durationMs ? durationMs / 1000 : 0;
+  let plainFallback = null;
 
   for (const item of variants) {
     try {
@@ -313,17 +314,26 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
           const match = await res.json();
           if (match && (match.plainLyrics || match.syncedLyrics)) {
             if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-              const lyrics = match.plainLyrics || match.syncedLyrics;
-              const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
-
-              return {
-                title: match.trackName || rawTitle,
-                artist: match.artistName || artist || '',
-                lyrics: cleanLyrics,
-                syncedLyrics: parseLrc(match.syncedLyrics),
-                duration: match.duration,
-                autoOffsetMs: 0
-              };
+              if (match.syncedLyrics && match.syncedLyrics.trim().length > 10) {
+                const cleanLyrics = match.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+                return {
+                  title: match.trackName || rawTitle,
+                  artist: match.artistName || artist || '',
+                  lyrics: cleanLyrics,
+                  syncedLyrics: parseLrc(match.syncedLyrics),
+                  duration: match.duration,
+                  autoOffsetMs: 0
+                };
+              } else if (!plainFallback && match.plainLyrics) {
+                plainFallback = {
+                  title: match.trackName || rawTitle,
+                  artist: match.artistName || artist || '',
+                  lyrics: match.plainLyrics.trim(),
+                  syncedLyrics: null,
+                  duration: match.duration,
+                  autoOffsetMs: 0
+                };
+              }
             }
           }
         }
@@ -366,19 +376,31 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
             }
 
             for (const match of results) {
-              const lyrics = match?.syncedLyrics || match?.plainLyrics;
-              if (lyrics && lyrics.trim().length > 10) {
-                if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-                  const cleanLyrics = lyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+              const hasSynced = Boolean(match?.syncedLyrics && match.syncedLyrics.trim().length > 10);
+              const hasPlain = Boolean(match?.plainLyrics && match.plainLyrics.trim().length > 10);
 
-                  return {
-                    title: match.trackName || rawTitle,
-                    artist: match.artistName || artist || '',
-                    lyrics: cleanLyrics,
-                    syncedLyrics: parseLrc(match.syncedLyrics),
-                    duration: match.duration,
-                    autoOffsetMs: 0
-                  };
+              if (hasSynced || hasPlain) {
+                if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+                  if (hasSynced) {
+                    const cleanLyrics = match.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]\s*/g, '').trim();
+                    return {
+                      title: match.trackName || rawTitle,
+                      artist: match.artistName || artist || '',
+                      lyrics: cleanLyrics,
+                      syncedLyrics: parseLrc(match.syncedLyrics),
+                      duration: match.duration,
+                      autoOffsetMs: 0
+                    };
+                  } else if (!plainFallback && hasPlain) {
+                    plainFallback = {
+                      title: match.trackName || rawTitle,
+                      artist: match.artistName || artist || '',
+                      lyrics: match.plainLyrics.trim(),
+                      syncedLyrics: null,
+                      duration: match.duration,
+                      autoOffsetMs: 0
+                    };
+                  }
                 }
               }
             }
@@ -396,6 +418,11 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
         return ytSubResult;
       }
     } catch (ytSubErr) {}
+  }
+
+  // 2.8 Nếu LRCLIB có bản lyric đọc (plain lyrics) thì dùng trước khi sang microservice/AI
+  if (plainFallback) {
+    return plainFallback;
   }
 
   // 3. Fallback qua microservice Python (syncedlyrics đa nguồn) nếu LRCLIB không tìm thấy
