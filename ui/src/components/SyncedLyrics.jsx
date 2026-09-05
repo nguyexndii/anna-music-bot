@@ -31,9 +31,9 @@ function saveOffset(title, offsetMs) {
   } catch (e) {}
 }
 
-export default function SyncedLyrics({ player, onAction, isActive = true }) {
+export default function SyncedLyrics({ player, onAction, isActive = true, guildId }) {
   const current = player?.current;
-  const songKey = current?.title ? `${current.title}|${current.artist || ''}` : '';
+  const songKey = current?.title ? `${current.title}|${current.artist || ''}|${current.url || ''}` : '';
 
   const isLofiTrack = Boolean(
     (current?.requestedBy === 'Auto (24/7)' && !current?.artist) ||
@@ -103,7 +103,7 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
       return;
     }
 
-    const key = `${current.title}|${current.artist || ''}`;
+    const key = `${current.title}|${current.artist || ''}|${current.url || ''}`;
     const savedOffset = getSavedOffset(current.title);
 
     if (lyricsCache.has(key)) {
@@ -123,8 +123,13 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
     const params = new URLSearchParams({ title: current.title });
     if (current.artist && current.artist !== 'Unknown') params.set('artist', current.artist);
     if (durMs > 0) params.set('duration', durMs);
+    if (current.url) params.set('url', current.url);
 
-    fetch(`${API_BASE}/api/lyrics?${params}`)
+    const fetchUrl = guildId
+      ? `${API_BASE}/api/guilds/${guildId}/lyrics`
+      : `${API_BASE}/api/lyrics?${params}`;
+
+    fetch(fetchUrl)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         const result = (d?.success && d?.lyrics) ? d : null;
@@ -138,10 +143,30 @@ export default function SyncedLyrics({ player, onAction, isActive = true }) {
         setLoading(false);
       })
       .catch(() => {
-        setLyricsData(null);
-        setLoading(false);
+        if (guildId) {
+          fetch(`${API_BASE}/api/lyrics?${params}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+              const result = (d?.success && d?.lyrics) ? d : null;
+              if (result) {
+                lyricsCache.set(key, result);
+                if (savedOffset === null && result.autoOffsetMs) {
+                  setManualOffsetMs(result.autoOffsetMs);
+                }
+              }
+              setLyricsData(result);
+              setLoading(false);
+            })
+            .catch(() => {
+              setLyricsData(null);
+              setLoading(false);
+            });
+        } else {
+          setLyricsData(null);
+          setLoading(false);
+        }
       });
-  }, [current?.title, current?.artist, current?.duration, current?.durationMs, isLofiTrack]);
+  }, [current?.title, current?.artist, current?.duration, current?.durationMs, current?.url, guildId, isLofiTrack]);
 
   // Sync active line — compensates for server poll delay using serverTime
   useEffect(() => {

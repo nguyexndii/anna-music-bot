@@ -550,7 +550,7 @@ export default function App() {
             <QueueManager queue={player?.queue} onAction={handlePlayerAction} />
           </div>
           <div className="tab-enter" style={{ height: '100%', display: activeTab === 'lyrics' ? 'flex' : 'none', flexDirection: 'column' }}>
-            <SyncedLyrics player={player} onAction={handlePlayerAction} isActive={activeTab === 'lyrics'} />
+            <SyncedLyrics player={player} onAction={handlePlayerAction} isActive={activeTab === 'lyrics'} guildId={guildId} />
           </div>
           <div className="tab-enter" style={{ height: '100%', display: activeTab === 'history' ? 'flex' : 'none', flexDirection: 'column' }}>
             <HistoryTab player={player} onOrderSong={handleOrderSong} />
