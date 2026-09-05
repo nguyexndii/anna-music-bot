@@ -69,9 +69,19 @@ class MusicQueue {
     this.crossfadeTimer = null;
     this.nowPlayingMessage = null;
     this._isPrefetching = false;
+    this._isPlayingNext = false;
+    this._isPreviousAction = false;
 
     this._initSettings();
     this._setupPlayerEvents();
+  }
+
+  get isPlaying() {
+    return this.player?.state?.status === AudioPlayerStatus.Playing || (!this.paused && Boolean(this.currentSong));
+  }
+
+  get isPaused() {
+    return this.paused || this.player?.state?.status === AudioPlayerStatus.Paused;
   }
 
   clearPreloadTimer() {
@@ -254,9 +264,11 @@ class MusicQueue {
     if (this.isDestroyed || this.isStopped) return;
     const lastSong = this.currentSong;
     const wasExplicitSkip = Boolean(this._skipRequested);
+    const wasPrevious = Boolean(this._isPreviousAction);
     this._skipRequested = false;
+    this._isPreviousAction = false;
 
-    if (lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
+    if (!wasPrevious && lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
       this.history.push(lastSong.url);
       if (this.history.length > 50) this.history.shift();
       await historyManager.addSong(this.guild.id, lastSong);
@@ -265,10 +277,10 @@ class MusicQueue {
       if (this.previousSongs.length > 5) this.previousSongs.shift();
     }
 
-    // Chỉ lặp lại bài nếu người dùng không bấm nút Skip thủ công
-    if (!wasExplicitSkip && this.loopMode === 'song' && lastSong) {
+    // Chỉ lặp lại bài nếu người dùng không bấm nút Skip hoặc Previous thủ công
+    if (!wasExplicitSkip && !wasPrevious && this.loopMode === 'song' && lastSong) {
       this.songs.unshift(lastSong);
-    } else if (!wasExplicitSkip && this.loopMode === 'queue' && lastSong) {
+    } else if (!wasExplicitSkip && !wasPrevious && this.loopMode === 'queue' && lastSong) {
       this.songs.push(lastSong);
     }
 
@@ -586,18 +598,23 @@ class MusicQueue {
   }
 
   async playNext() {
-    if (this.songs.length === 0) return;
-
-    this.isStopped = false;
-    this.isDestroyed = false;
-    this.clearPreloadTimer();
-    const conn = await this.connect();
-
-    this.currentSong = this.songs.shift();
-    this.paused = false;
-    this._saveSessionState();
+    if (this._isPlayingNext) return;
+    this._isPlayingNext = true;
 
     try {
+      if (this.songs.length === 0) return;
+
+      this.isStopped = false;
+      this.isDestroyed = false;
+      this.clearPreloadTimer();
+      const conn = await this.connect();
+
+      const nextSong = this.songs.shift();
+      if (!nextSong) return;
+      this.currentSong = nextSong;
+      this.paused = false;
+      this._saveSessionState();
+
       const guildSettings = settingsManager.get(this.guild.id);
       const crossfade = guildSettings.crossfadeDuration || 0;
 
@@ -710,7 +727,7 @@ class MusicQueue {
         }
       }
     } catch (error) {
-      console.error(`[Play Error] ${this.currentSong.title}:`, error);
+      console.error(`[Play Error] ${this.currentSong?.title || 'Unknown'}:`, error);
       if (this.textChannel) {
         logAction('MESSAGE_SEND', {
           type: 'PLAY_ERROR',
@@ -720,11 +737,13 @@ class MusicQueue {
           content: `Khong the phat bai: ${(error.message || '').slice(0, 60)}`
         });
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong.title}**: ${error.message}`)],
+          embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong?.title || 'đã chọn'}**: ${error.message}`)],
           flags: 4096
         }).catch(() => {});
       }
       this._handleSongEnd();
+    } finally {
+      this._isPlayingNext = false;
     }
   }
 
@@ -825,12 +844,19 @@ class MusicQueue {
     if (!prevSong) return false;
 
     this.clearPreloadTimer();
+    this.clearCrossfadeTimer();
+    this._cleanupResource(this.preloadedResource);
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
+    this.prefetchedSong = null;
+
     if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
       this.songs.unshift(this.currentSong);
     }
 
-    this.currentSong = null;
     this.songs.unshift(prevSong);
+    this._skipRequested = true;
+    this._isPreviousAction = true;
     this.player.stop();
     return true;
   }
