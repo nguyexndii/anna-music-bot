@@ -862,7 +862,7 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough();
+    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 512 });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
     // Timeout bảo vệ: Nếu sau 18 giây không có dữ liệu âm thanh nào, tự hủy để failover

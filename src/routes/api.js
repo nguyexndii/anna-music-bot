@@ -616,8 +616,8 @@ module.exports = function createApiRouter(client) {
       return res.status(400).json({ success: false, error: 'Hiện không có bài hát nào đang phát trong máy chủ này' });
     }
 
-    // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER (24/7, LogChannel, Settings)
-    const serverSettingActions = ['toggle247', 'set247', 'setLogChannel', 'settings', 'updateSettings'];
+    // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER (24/7, Autoplay, LogChannel, Settings)
+    const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'setLogChannel', 'settings', 'updateSettings'];
     if (serverSettingActions.includes(action)) {
       const isAdmin = await checkIsAdmin(guildId, user.userId);
       if (!isAdmin) {

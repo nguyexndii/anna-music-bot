@@ -261,18 +261,6 @@ export default function BottomMiniPlayer({
             >
               <Repeat className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
-
-            <button
-              onClick={() => onAction('toggleAutoplay')}
-              title={player?.autoplay ? 'Tự động phát bài tương tự (Autoplay): ĐANG BẬT' : 'Tự động phát (Autoplay): ĐANG TẮT'}
-              className={`p-1.5 transition active:scale-95 ${
-                player?.autoplay
-                  ? 'text-anna-accent'
-                  : 'text-anna-muted hover:text-white'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
           </div>
 
           {/* Scrubber Timeline */}

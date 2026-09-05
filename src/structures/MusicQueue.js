@@ -52,7 +52,8 @@ class MusicQueue {
 
     this.player = createAudioPlayer({
       behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play
+        noSubscriber: NoSubscriberBehavior.Play,
+        maxMissedFrames: 250
       }
     });
 
