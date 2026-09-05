@@ -777,7 +777,7 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
     };
 
     if (!isSoundCloud) {
-      ytdlpOptions.extractorArgs = 'youtube:player_client=tv_embedded,android_music,android';
+      ytdlpOptions.extractorArgs = 'youtube:player_client=tv_embedded,android_creator';
       ytdlpOptions.preferFreeFormats = true;
       if (YTDLP_COOKIES_FILE) {
         ytdlpOptions.cookies = YTDLP_COOKIES_FILE;
@@ -916,9 +916,10 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
 }
 
 /**
- * Tạo Discord AudioResource với kiến trúc Failover Tự Động 2 Tầng Siêu Bền Vững:
- * Tầng 1: YouTube (Direct android client)
- * Tầng 2: SoundCloud Fallback (Bypass 100% mọi cơ chế chặn bot / IP Datacenter, phát nhạc 24/7)
+ * Tạo Discord AudioResource với kiến trúc Failover Tự Động 3 Tầng Siêu Bền Vững:
+ * Tầng 1: YouTube Direct (tv_embedded & android_creator clients, bypass bot check)
+ * Tầng 1.5: YouTube Alternate Search (Tự động chuyển sang bản tải lên/MV khác nếu link chính bị YouTube kiểm duyệt)
+ * Tầng 2: SoundCloud Fallback (Lọc nghiêm ngặt thời lượng và từ khóa, chặn tuyệt đối playlist/remix dài)
  */
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
@@ -937,30 +938,72 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     }
   }
 
-  // TẦNG 1: Thử phát từ YouTube
+  // TẦNG 1: Thử phát từ YouTube URL chính
   try {
     return await createSingleStream(targetUrl, crossfadeSeconds, seekSeconds, false);
   } catch (ytErr) {
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
 
-    // TẦNG 2 (FAILOVER TỰ ĐỘNG): Chuyển ngay lập tức sang nguồn SoundCloud
-    // SoundCloud KHÔNG BAO GIỜ chặn IP Datacenter của VPS, không cần cookies, phát ngay lập tức
-    console.log(`[Failover] Đang tự động chuyển sang phát "${trackTitle}" từ SoundCloud dự phòng...`);
-    const cleanSearch = (trackTitle || targetUrl)
+    const cleanTitle = (trackTitle || '')
       .replace(/https?:\/\/\S+/g, ' ')
       .replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ')
       .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?|mv\s*official|official|full\s*hd|4k|1080p)/gi, ' ')
       .replace(/[-|:/\\–—]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const scQuery = `scsearch1:${cleanSearch || 'lofi hip hop'}`;
-    try {
-      return await createSingleStream(scQuery, crossfadeSeconds, seekSeconds, true);
-    } catch (scErr) {
-      console.error(`[SoundCloud Fallback Failed for "${trackTitle}"]:`, scErr.message);
-      throw new Error(`Không thể phát bài hát "${trackTitle}": Cả nguồn YouTube và SoundCloud đều không khả dụng.`);
+
+    // TẦNG 1.5: Thử tìm bản YouTube thay thế (Tránh video ID bị YouTube bật bot-challenge trên IP VPS)
+    if (cleanTitle) {
+      try {
+        console.log(`[YouTube Alternate] Đang tìm bản YouTube thay thế cho "${cleanTitle}"...`);
+        const ytsResults = await yts(cleanTitle);
+        if (ytsResults && ytsResults.videos && ytsResults.videos.length > 0) {
+          const altVideo = ytsResults.videos.find(v => v.url && v.url !== targetUrl && v.seconds > 60 && v.seconds < 600);
+          if (altVideo && altVideo.url) {
+            console.log(`[YouTube Alternate] Thử phát bản thay thế: "${altVideo.title}" (${altVideo.url})`);
+            return await createSingleStream(altVideo.url, crossfadeSeconds, seekSeconds, false);
+          }
+        }
+      } catch (altErr) {
+        console.warn('[YouTube Alternate Error]:', altErr.message);
+      }
     }
+
+    // TẦNG 2 (FAILOVER SOUNDCLOUD CÓ LỌC NGHIÊM NGẶT):
+    // Chỉ chọn bài nhạc đơn chuẩn, tuyệt đối KHÔNG chọn playlist 20 phút / DJ nonstop / bản remix dài
+    console.log(`[Failover] Đang tìm kiếm bản phát chuẩn trên SoundCloud cho "${trackTitle}"...`);
+    try {
+      const scInfo = await ytdlp(`scsearch5:${cleanTitle || 'lofi chill'}`, {
+        dumpSingleJson: true,
+        flatPlaylist: true,
+        noWarnings: true
+      });
+
+      if (scInfo && scInfo.entries && scInfo.entries.length > 0) {
+        const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
+        const validTrack = scInfo.entries.find(e => {
+          if (!e || (!e.url && !e.webpage_url)) return false;
+          // Loại bỏ bài quá ngắn (<45s là preview SoundCloud Go+) hoặc quá dài (>600s là playlist/mashup 20 phút)
+          if (e.duration && (e.duration < 45 || e.duration > 600)) return false;
+          if (!userWantsRemix) {
+            const titleLower = (e.title || '').toLowerCase();
+            if (/\b(playlist|mashup|vinahouse|dj\b|nonstop|liên\s*khúc|tổng\s*hợp)\b/i.test(titleLower)) return false;
+          }
+          return true;
+        });
+
+        if (validTrack) {
+          const streamUrl = validTrack.webpage_url || validTrack.url;
+          console.log(`[SoundCloud] Đã chọn bản chuẩn: "${validTrack.title}" (${validTrack.duration}s)`);
+          return await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true);
+        }
+      }
+    } catch (scSearchErr) {
+      console.warn('[SoundCloud Search Filter Error]:', scSearchErr.message);
+    }
+
+    throw new Error(`Không thể phát bài hát "${trackTitle}": Cả nguồn YouTube và SoundCloud đều không tìm thấy bản thu chuẩn hợp lệ.`);
   }
 }
 
