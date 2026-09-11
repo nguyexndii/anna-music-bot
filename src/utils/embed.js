@@ -134,8 +134,9 @@ const EMOJI_TAG = {
  * Giao diện Banner bài đang phát siêu tinh gọn (Dùng đúng Custom Emoji của bạn)
  */
 function createNowPlayingBanner(song, queue) {
-  const is247Mode = song?.requestedBy === 'Auto (24/7)';
-  const songTitle = is247Mode ? `${EMOJI_TAG.infinity} Nhạc nền Lofi 24/7` : (song?.title || 'Đang phát nhạc');
+  const is247Mode = Boolean(song && (song.requestedBy === 'Auto (24/7)' || song.is247));
+  const curTitle = song?.title || 'Nhạc nền Lofi 24/7';
+  const songTitle = is247Mode ? `${EMOJI_TAG.infinity} ${curTitle}` : (song?.title || 'Đang phát nhạc');
 
   const content = `Now playing: **${songTitle}**`;
 
@@ -164,17 +165,22 @@ function createQueueAddedEmbed(song, position = 1) {
  */
 function createNowPlayingEmbed(song, queue) {
   const botAvatar = queue.guild?.client?.user?.displayAvatarURL({ dynamic: true });
-  const is247Mode = song.requestedBy === 'Auto (24/7)';
+  const is247Mode = Boolean(song?.requestedBy === 'Auto (24/7)' || song?.is247 || (queue.mode247 && (!song || song.is247)));
   const userSongs = queue.songs.filter(s => s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)');
 
   // ♾️ GIAO DIỆN RIÊNG KHI Ở CHẾ ĐỘ 24/7
   if (is247Mode) {
-    const statusLabel = queue.paused ? 'Tạm dừng' : 'Phát nhạc nền';
+    let statusLabel = queue.paused ? 'Tạm dừng' : 'Phát nhạc nền';
+    if (queue._is247Skipping) {
+      statusLabel = 'Đang chuyển bài... ⏳';
+    } else if (queue.isStopped) {
+      statusLabel = 'Đã dừng phát';
+    }
 
     return new EmbedBuilder()
       .setAuthor({ name: 'Anna Music • 24/7 Mode', iconURL: botAvatar })
       .setTitle(`${EMOJI_TAG.infinity} Chế độ 24/7 đang hoạt động`)
-      .setDescription(`Nhấn nút ${EMOJI_TAG.add} bên dưới hoặc dùng lệnh \`.p <tên bài>\` để yêu cầu bài hát bạn muốn nghe!`)
+      .setDescription(`Nhấn nút ${EMOJI_TAG.add} bên dưới hoặc dùng lệnh \`/play <tên bài>\` để yêu cầu bài hát bạn muốn nghe!`)
       .setColor('#5865F2')
       .addFields(
         {
@@ -230,7 +236,9 @@ function createNowPlayingEmbed(song, queue) {
  * Dàn nút bấm điều khiển nhạc (1 hàng 5 nút nguyên khối liền mạch phong cách Rythm / Loa Phường)
  */
 function createMusicControls(queue) {
-  const isLooping = queue.loopMode && queue.loopMode !== 'off';
+  const is247Mode = Boolean(queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247));
+  const isLooping = !is247Mode && queue.loopMode && queue.loopMode !== 'off';
+  const isPausedOrStopped = Boolean(queue.paused || queue.isStopped);
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -239,7 +247,7 @@ function createMusicControls(queue) {
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('btn_pause')
-      .setEmoji(queue.paused ? CUSTOM_EMOJIS.play : CUSTOM_EMOJIS.pause)
+      .setEmoji(isPausedOrStopped ? CUSTOM_EMOJIS.play : CUSTOM_EMOJIS.pause)
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('btn_skip')
@@ -248,7 +256,8 @@ function createMusicControls(queue) {
     new ButtonBuilder()
       .setCustomId('btn_loop')
       .setEmoji(CUSTOM_EMOJIS.loop)
-      .setStyle(isLooping ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setStyle(isLooping ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      .setDisabled(is247Mode),
     new ButtonBuilder()
       .setCustomId('btn_stop')
       .setEmoji(CUSTOM_EMOJIS.close)
@@ -278,13 +287,17 @@ function createQueueEmbed(queue, page = 1) {
     .setColor('#5865F2')
     .setTimestamp();
 
-  const is247 = queue.currentSong?.requestedBy === 'Auto (24/7)';
+  const is247 = Boolean(queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)) || Boolean(queue.mode247 && !queue.currentSong);
   const userSongs = queue.songs.filter(s => s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)');
 
   if (is247) {
+    const curTitle = (queue.currentSong?.title || 'Nhạc nền Lofi 24/7 (Thư giãn)').slice(0, 60);
+    const curLink = (queue.currentSong?.url && queue.currentSong?.url !== 'null')
+      ? `[**${curTitle}**](${queue.currentSong.url})`
+      : `**${curTitle}**`;
     embed.addFields({
       name: `${EMOJI_TAG.play} Đang phát hiện tại:`,
-      value: `\`${EMOJI_TAG.infinity} Nhạc nền Lofi 24/7 (Thư giãn)\``,
+      value: `${EMOJI_TAG.infinity} ${curLink} | \`${queue.currentSong?.duration || 'Lofi 24/7'}\``,
       inline: false
     });
   } else if (queue.currentSong) {

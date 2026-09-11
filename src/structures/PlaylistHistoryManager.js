@@ -63,14 +63,15 @@ class PlaylistHistoryManager {
             trackCount: item.trackCount,
             thumbnail: item.thumbnail,
             addedBy: item.addedBy,
+            addedByAvatar: item.addedByAvatar || null,
             addedAt: item.addedAt ? item.addedAt.toISOString() : new Date().toISOString(),
             tracks: Array.isArray(item.tracks) ? item.tracks : []
           });
         }
       }
-      // Trim each guild cache to 20
+      // Trim each guild cache to 100
       for (const [gid, list] of this.cache.entries()) {
-        if (list.length > 20) list.length = 20;
+        if (list.length > 100) list.length = 100;
       }
     } catch (e) {
       // Mongo might not be connected yet at constructor time, it will load on demand
@@ -104,7 +105,8 @@ class PlaylistHistoryManager {
       title: playlistData.title || `Playlist (${playlistData.trackCount || 0} bài)`,
       trackCount: playlistData.trackCount || (playlistData.tracks ? playlistData.tracks.length : 0),
       thumbnail: playlistData.thumbnail || null,
-      addedBy: playlistData.addedBy || 'Web User',
+      addedBy: playlistData.addedBy || 'Người dùng',
+      addedByAvatar: playlistData.addedByAvatar || null,
       addedAt: new Date().toISOString(),
       tracks: Array.isArray(playlistData.tracks)
         ? playlistData.tracks.slice(0, 100).map(t => ({
@@ -119,8 +121,8 @@ class PlaylistHistoryManager {
 
     filtered.unshift(entry);
 
-    if (filtered.length > 20) {
-      filtered.length = 20;
+    if (filtered.length > 100) {
+      filtered.length = 100;
     }
 
     this.cache.set(guildId, filtered);
@@ -137,17 +139,18 @@ class PlaylistHistoryManager {
               trackCount: entry.trackCount,
               thumbnail: entry.thumbnail,
               addedBy: entry.addedBy,
+              addedByAvatar: entry.addedByAvatar,
               addedAt: new Date(),
               tracks: entry.tracks
             }
           },
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' }
         );
 
-        // Giới hạn 20 playlist gần nhất cho mỗi guild trong Mongo
+        // Giới hạn 100 playlist gần nhất cho mỗi guild trong Mongo
         const excess = await GuildPlaylist.find({ guildId: String(guildId) })
           .sort({ updatedAt: -1 })
-          .skip(20)
+          .skip(100)
           .select('_id')
           .lean();
 
@@ -161,12 +164,12 @@ class PlaylistHistoryManager {
     }
   }
 
-  getPlaylists(guildId, limit = 8) {
+  getPlaylists(guildId, limit = 50) {
     // Tự động load ngầm từ Mongo nếu cache đang rỗng
     if ((!this.cache.has(guildId) || this.cache.get(guildId).length === 0) && GuildPlaylist) {
       GuildPlaylist.find({ guildId: String(guildId) })
         .sort({ updatedAt: -1 })
-        .limit(20)
+        .limit(100)
         .lean()
         .then(items => {
           if (items && items.length > 0) {
@@ -176,6 +179,7 @@ class PlaylistHistoryManager {
               trackCount: item.trackCount,
               thumbnail: item.thumbnail,
               addedBy: item.addedBy,
+              addedByAvatar: item.addedByAvatar || null,
               addedAt: item.addedAt ? item.addedAt.toISOString() : new Date().toISOString(),
               tracks: Array.isArray(item.tracks) ? item.tracks : []
             }));

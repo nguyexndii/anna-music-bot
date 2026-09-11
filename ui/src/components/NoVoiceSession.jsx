@@ -90,7 +90,7 @@ export default function NoVoiceSession({ user, guildName, onRefresh, isRefreshin
 
           <div className="flex items-center gap-1.5 text-[11px] text-anna-muted">
             <HelpCircle className="w-3.5 h-3.5 opacity-70" />
-            <span>Hoặc gõ lệnh <code className="text-anna-accent font-mono font-bold">.web</code> trong Discord để mở lại</span>
+            <span>Hoặc gõ lệnh <code className="text-anna-accent font-mono font-bold">/web</code> trong Discord để mở lại</span>
           </div>
         </div>
       </div>

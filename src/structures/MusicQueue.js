@@ -407,15 +407,17 @@ class MusicQueue {
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
     const songToRelate = lastSong || (this.previousSongs.length > 0 ? this.previousSongs[this.previousSongs.length - 1] : null);
 
-    // 0. Nếu trong hàng chờ vẫn còn bài của người dùng -> Luôn ưu tiên phát bài tiếp theo ngay lập tức!
-    if (this.songs.length > 0) {
-      await this.playNext();
+    // 1. Nếu bài vừa kết thúc là nhạc Lofi 24/7 (hoặc bot đang ở chế độ 24/7 Lofi):
+    // TIẾP TỤC phát bài Lofi nền tiếp theo liên tục!
+    // Hàng chờ của người dùng (this.songs) được giữ nguyên an toàn cho đến khi người dùng chủ động bấm 'TIẾP TỤC PHÁT NHẠC' hoặc order bài mới!
+    if (isLofiTrack && this.mode247) {
+      await this._play247BackgroundLofi();
       return;
     }
 
-    // 1. Nếu bài vừa kết thúc là nhạc Lofi 24/7 và hàng chờ trống -> Tiếp tục phát bài Lofi nền tiếp theo
-    if (isLofiTrack && this.mode247) {
-      await this._play247BackgroundLofi();
+    // 2. Nếu bài vừa kết thúc là bài hát của người dùng và trong hàng chờ còn bài -> Phát bài tiếp theo
+    if (this.songs.length > 0) {
+      await this.playNext();
       return;
     }
 
@@ -515,10 +517,10 @@ class MusicQueue {
           return /\b(khá\s*bảnh|kha\s*banh|mặt\s*lồn|troll|meme|chế|hài|bựa|vinahouse|nhạc\s*chế)\b/i.test(title);
         };
 
-        let cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 25));
+        let cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 30));
         if (!cleanTrack) {
-          // Nếu tất cả đều dính trong 25 bài, thử lọc không dính 10 bài gần nhất
-          cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 10));
+          // Nếu tất cả đều dính trong 30 bài, thử lọc không dính 15 bài gần nhất
+          cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 15));
         }
         if (!cleanTrack) {
           cleanTrack = results.find(t => !isMemeOrVocal(t)) || results[0];
@@ -680,7 +682,7 @@ class MusicQueue {
         this.currentResource = null;
       }
       this.player.stop(true);
-      this.songs.push(song);
+      this.songs.unshift(song);
       this._saveSessionState();
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
@@ -717,7 +719,7 @@ class MusicQueue {
         this.currentResource = null;
       }
       this.player.stop(true);
-      this.songs.push(...songArray);
+      this.songs.unshift(...songArray);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
@@ -919,6 +921,16 @@ class MusicQueue {
           }
         } catch (bannerError) {
           console.warn(`[Banner Send Warning] Không thể gửi banner tới kênh ${this.textChannel.id}:`, bannerError.message);
+        }
+      } else if (is247Lofi && this.nowPlayingMessage) {
+        // Cập nhật lại giao diện 24/7 khi bài Lofi mới bắt đầu (sau khi người dùng bấm Skip / chuyển bài)
+        try {
+          this._is247Skipping = false;
+          const embed = createNowPlayingEmbed(this.currentSong, this);
+          const controls = createMusicControls(this);
+          this.nowPlayingMessage.edit({ embeds: [embed], components: controls }).catch(() => {});
+        } catch (npErr) {
+          console.warn('[24/7 NowPlaying Sync Warning]:', npErr.message);
         }
       }
     } catch (error) {

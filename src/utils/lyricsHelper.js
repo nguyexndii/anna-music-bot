@@ -618,7 +618,8 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
 
     if (candidateLines.length === 0) return 0;
 
-    const maxSearchMs = Math.min(180000, targetDurationSec > 0 ? targetDurationSec * 1000 : 180000);
+    // Chỉ tìm trong 30 giây đầu của video để phát hiện đoạn intro skit/nói chuyện của MV, tránh bắt nhầm điệp khúc lặp lại ở giữa bài
+    const maxSearchMs = Math.min(30000, targetDurationSec > 0 ? targetDurationSec * 1000 : 30000);
     const searchEvents = events.filter(ev => (ev.tStartMs || 0) <= maxSearchMs && ev.segs && ev.segs.length > 0);
 
     const detectedOffsets = [];
@@ -661,7 +662,8 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
     if (detectedOffsets.length > 0) {
       detectedOffsets.sort((a, b) => a - b);
       const medianOffset = detectedOffsets[Math.floor(detectedOffsets.length / 2)];
-      if (Math.abs(medianOffset) >= 600) {
+      // Giới hạn độ lệch intro thực tế: từ -8s đến tối đa +20s (không bao giờ lệch hơn 20s cho 1 bài hát bình thường)
+      if (Math.abs(medianOffset) >= 600 && medianOffset >= -8000 && medianOffset <= 20000) {
         console.log(`[Lyrics Auto-Offset] Phát hiện lệch nhịp intro/outro MV dài ${(medianOffset / 1000).toFixed(2)}s, đã tự động căn nhịp!`);
         return medianOffset;
       }

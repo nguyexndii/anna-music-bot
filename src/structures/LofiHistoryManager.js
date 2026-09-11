@@ -56,15 +56,15 @@ class LofiHistoryManager {
       playedAt: Date.now()
     };
     list.push(item);
-    // Lưu tối đa 60 bài gần nhất (đảm bảo không lặp lại ít nhất 25-30 bài gần nhất)
-    if (list.length > 60) {
+    // Lưu tối đa 80 bài gần nhất (đảm bảo không lặp lại ít nhất 30 bài gần nhất)
+    if (list.length > 80) {
       list.shift();
     }
     this.historyMap.set(guildId, list);
     this._save();
   }
 
-  isRecentlyPlayed(guildId, trackOrTitle, limit = 25) {
+  isRecentlyPlayed(guildId, trackOrTitle, limit = 30) {
     if (!guildId || !trackOrTitle) return false;
     const list = this.historyMap.get(guildId) || [];
     if (list.length === 0) return false;

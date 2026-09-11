@@ -14,17 +14,17 @@ web
 ## Product Purpose
 
 - Cung cấp giao diện Web Player & Live Dashboard thời gian thực hiện đại, cho phép người dùng điều khiển bot nhạc Anna Music trực tiếp từ trình duyệt web mà không cần phải nhớ các câu lệnh bot phức tạp trong Discord.
-- Thành công được định nghĩa bằng: Độ trễ phản hồi tức thì (<100ms), tìm kiếm bài hát theo thời gian thực (Live Search as-you-type), lời bài hát Karaoke đồng bộ mượt mà, và xác thực một chạm qua Magic Token (.web) bảo mật không cần mật khẩu hay OAuth2 rườm rà.
+- Thành công được định nghĩa bằng: Độ trễ phản hồi tức thì (<100ms), tìm kiếm bài hát theo thời gian thực (Live Search as-you-type), lời bài hát Karaoke đồng bộ mượt mà, và xác thực một chạm qua Magic Token (/web) bảo mật không cần mật khẩu hay OAuth2 rườm rà.
 
 ## Positioning
 
-- Khác với các bot âm nhạc Discord truyền thống chỉ tương tác qua chat command hoặc các web dashboard cồng kềnh đòi hỏi cấp quyền Discord OAuth2, Anna Music Web Player sử dụng **Magic Token HMAC SHA-256** được cấp qua lệnh `.web` trong Discord.
+- Khác với các bot âm nhạc Discord truyền thống chỉ tương tác qua chat command hoặc các web dashboard cồng kềnh đòi hỏi cấp quyền Discord OAuth2, Anna Music Web Player sử dụng **Magic Token HMAC SHA-256** được cấp qua lệnh `/web` trong Discord.
 - Cơ chế nhận diện danh tính thông minh: Mọi bài hát thêm từ Web đều hiển thị chính xác tên và Avatar Discord của người gọi bài (`👤 Yêu cầu bởi: @TênUser 🌐`).
 
 ## Operating Context
 
 - Môi trường: Trình duyệt web (Desktop, Tablet, Mobile) kết nối với Express API Backend của Bot Discord đang chạy trên VPS/Docker.
-- Tương tác: Người dùng mở link `.web` từ Discord, tìm bài hát trên Live Search, bấm thêm vào hàng chờ, điều khiển phát/tạm dừng/âm lượng và xem Karaoke lyrics đồng bộ khi đang trò chuyện trong voice chat.
+- Tương tác: Người dùng mở link `/web` từ Discord, tìm bài hát trên Live Search, bấm thêm vào hàng chờ, điều khiển phát/tạm dừng/âm lượng và xem Karaoke lyrics đồng bộ khi đang trò chuyện trong voice chat.
 
 ## Capabilities and Constraints
 

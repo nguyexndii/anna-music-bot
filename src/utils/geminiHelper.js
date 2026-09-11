@@ -128,91 +128,54 @@ Yêu cầu:
 }
 
 const CURATED_LOFI_TRACKS = [
-  // ── Nhạc Việt Chill Không Lời (V-Pop Acoustic Guitar / Piano / Lofi Instrumental) ──
-  { artist: 'V-Pop Lofi', title: 'Đi Để Trở Về (Acoustic Guitar Lofi)', searchQuery: 'đi để trở về acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Em Dạo Này (Lofi Guitar Chill)', searchQuery: 'em dạo này lofi guitar instrumental chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Nàng Thơ (Piano Lofi Instrumental)', searchQuery: 'nàng thơ piano lofi instrumental chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: '3107 (Lofi Chill Beats Không Lời)', searchQuery: '3107 lofi instrumental chill beats không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Có Chàng Trai Viết Lên Cây (Acoustic Chill)', searchQuery: 'có chàng trai viết lên cây acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Bước Qua Mùa Cô Đơn (Piano Lofi)', searchQuery: 'bước qua mùa cô đơn piano lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Sài Gòn Đau Lòng Quá (Acoustic Lofi)', searchQuery: 'sài gòn đau lòng quá acoustic lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Tháng Tư Là Lời Nói Dối Của Em (Piano Chill)', searchQuery: 'tháng tư là lời nói dối của em piano chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Một Triệu Khả Năng (Acoustic Lofi)', searchQuery: 'một triệu khả năng acoustic lofi instrumental chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Ánh Sao Và Bầu Trời (Lofi Beats)', searchQuery: 'ánh sao và bầu trời lofi instrumental chill beats không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Chuyện Đôi Ta (Acoustic Lofi Guitar)', searchQuery: 'chuyện đôi ta acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Cafe Sáng Sài Gòn (Lofi Chill Không Lời)', searchQuery: 'cafe sáng sài gòn lofi acoustic guitar chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Mưa Chiều Hà Nội (Rainy Lofi Beats)', searchQuery: 'mưa chiều hà nội lofi chill instrumental beats không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Bình Yên Nơi Đây (Acoustic Guitar Lofi)', searchQuery: 'bình yên nơi đây acoustic guitar lofi chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Hoàng Hôn Phố Cổ (Vietnam Lofi Beats)', searchQuery: 'hoàng hôn phố cổ lofi chill instrumental beats không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Vết Mưa (Piano Lofi Instrumental)', searchQuery: 'vết mưa piano lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Gió Vẫn Hát (Guitar Chill Beats)', searchQuery: 'gió vẫn hát guitar lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Ngày Chưa Giông Bão (Piano Chill)', searchQuery: 'ngày chưa giông bão piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Hương Mùa Hè (Acoustic Guitar Lofi)', searchQuery: 'hương mùa hè acoustic lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Tách Trà Chiều (Lofi Chill Việt Nam)', searchQuery: 'tách trà chiều lofi acoustic chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Cơn Mưa Ngang Qua (Piano Lofi Chill)', searchQuery: 'cơn mưa ngang qua piano lofi instrumental chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Em Gái Mưa (Piano Lofi Instrumental)', searchQuery: 'em gái mưa piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Chiều Hôm Ấy (Guitar Lofi Instrumental)', searchQuery: 'chiều hôm ấy guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Dấu Mưa (Piano Lofi Instrumental)', searchQuery: 'dấu mưa piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Nơi Này Có Anh (Acoustic Guitar Lofi)', searchQuery: 'nơi này có anh acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Phía Sau Một Cô Gái (Piano Lofi)', searchQuery: 'phía sau một cô gái piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Yêu Một Người Có Lẽ (Piano Lofi Chill)', searchQuery: 'yêu một người có lẽ piano lofi chill không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Lạ Lùng - Vũ (Acoustic Guitar Lofi)', searchQuery: 'lạ lùng vũ acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Đông Kiếm Em (Guitar Lofi Chill)', searchQuery: 'đông kiếm em guitar lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Mùa Hè Của Em (Acoustic Guitar Lofi)', searchQuery: 'mùa hè của em acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Anh Đã Quen Với Cô Đơn (Piano Lofi)', searchQuery: 'anh đã quen với cô đơn piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Tình Nào Không Như Tình Đầu (Piano Chill)', searchQuery: 'tình nào không như tình đầu piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Suýt Nữa Thì (Acoustic Guitar Lofi)', searchQuery: 'suýt nữa thì acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Hẹn Một Mai (Piano Lofi Chill)', searchQuery: 'hẹn một mai piano lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Bông Hoa Đẹp Nhất (Piano Instrumental)', searchQuery: 'bông hoa đẹp nhất piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Có Em Chờ (Acoustic Guitar Lofi)', searchQuery: 'có em chờ acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Mặt Trời Của Em (Acoustic Lofi Chill)', searchQuery: 'mặt trời của em acoustic lofi chill instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Thằng Điên (Acoustic Guitar Lofi)', searchQuery: 'thằng điên acoustic guitar lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: '24H (Piano Lofi Instrumental)', searchQuery: '24h piano lofi instrumental không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Bao Tiền Một Mớ Bình Yên (Acoustic Chill)', searchQuery: 'bao tiền một mớ bình yên acoustic guitar lofi không lời', isVn: true },
-  { artist: 'V-Pop Lofi', title: 'Đi Về Nhà (Acoustic Guitar Lofi)', searchQuery: 'đi về nhà acoustic guitar lofi instrumental không lời', isVn: true },
-
-  // ── Lofi Quốc Tế Kinh Điển (Lofi Girl, Kudasai, Jinsang, Purrple Cat, Ghibli) ──
+  // ── Lofi Quốc Tế Kinh Điển (Lofi Girl, Kudasai, Jinsang, Saib, Kupla, Purrple Cat, Ghibli) ──
   { artist: 'Lofi Girl', title: 'Lofi Girl - 1 A.M Study Session', searchQuery: 'Lofi Girl 1 A.M Study Session beats to relax study to instrumental', isVn: false },
   { artist: 'Lofi Girl', title: 'Lofi Girl - Morning Coffee', searchQuery: 'Lofi Girl Morning Coffee beats to relax study to instrumental', isVn: false },
   { artist: 'Lofi Girl', title: 'Lofi Girl - Sleepy Beats', searchQuery: 'Lofi Girl beats to sleep to instrumental', isVn: false },
+  { artist: 'Lofi Girl', title: 'Lofi Girl - Cozy Winter Beats', searchQuery: 'Lofi Girl cozy winter beats to relax study to instrumental', isVn: false },
   { artist: 'Kudasai', title: 'Kudasai - The Girl I Haven\'t Met', searchQuery: 'Kudasai The Girl I Havent Met lofi instrumental', isVn: false },
-  { artist: 'Kudasai', title: 'Kudasai - A Thousand Doors', searchQuery: 'Kudasai A Thousand Doors lofi', isVn: false },
+  { artist: 'Kudasai', title: 'Kudasai - A Thousand Doors', searchQuery: 'Kudasai A Thousand Doors lofi hip hop instrumental', isVn: false },
+  { artist: 'Kudasai', title: 'Kudasai - Technicolor', searchQuery: 'Kudasai Technicolor lofi chill instrumental', isVn: false },
   { artist: 'Jinsang', title: 'Jinsang - Affection', searchQuery: 'Jinsang Affection lofi hip hop instrumental', isVn: false },
   { artist: 'Jinsang', title: 'Jinsang - Feeling', searchQuery: 'Jinsang Feeling lofi instrumental', isVn: false },
-  { artist: 'Idealism', title: 'Idealism - Both of Us', searchQuery: 'Idealism Both of Us lofi chill', isVn: false },
-  { artist: 'Idealism', title: 'Idealism - Nagashi', searchQuery: 'Idealism Nagashi lofi chill', isVn: false },
+  { artist: 'Jinsang', title: 'Jinsang - Egyptian Pools', searchQuery: 'Jinsang Egyptian Pools lofi beats instrumental', isVn: false },
+  { artist: 'Jinsang', title: 'Jinsang - Summers Day', searchQuery: 'Jinsang Summers Day lofi instrumental', isVn: false },
+  { artist: 'Idealism', title: 'Idealism - Lonely', searchQuery: 'Idealism Lonely lofi chill instrumental beats', isVn: false },
+  { artist: 'Idealism', title: 'Idealism - Both of Us', searchQuery: 'Idealism Both of Us lofi chill beats instrumental', isVn: false },
+  { artist: 'Idealism', title: 'Idealism - Nagashi', searchQuery: 'Idealism Nagashi lofi chill instrumental', isVn: false },
+  { artist: 'Idealism', title: 'Idealism - Phantasm', searchQuery: 'Idealism Phantasm lofi instrumental', isVn: false },
   { artist: 'Kupla', title: 'Kupla - Kingdom in Blue', searchQuery: 'Kupla Kingdom in Blue lofi instrumental', isVn: false },
   { artist: 'Kupla', title: 'Kupla - Memory', searchQuery: 'Kupla Memory lofi instrumental', isVn: false },
-  { artist: 'Saib', title: 'Saib - In Your Arms', searchQuery: 'Saib In Your Arms chillhop', isVn: false },
-  { artist: 'Saib', title: 'Saib - Sakura Trees', searchQuery: 'Saib Sakura Trees lofi chillhop', isVn: false },
-  { artist: 'Purrple Cat', title: 'Purrple Cat - Bedtime Stories', searchQuery: 'Purrple Cat Bedtime Stories lofi chill beats', isVn: false },
-  { artist: 'Purrple Cat', title: 'Purrple Cat - Moon Dance', searchQuery: 'Purrple Cat Moon Dance lofi', isVn: false },
-  { artist: 'Purrple Cat', title: 'Purrple Cat - Distant Worlds', searchQuery: 'Purrple Cat Distant Worlds lofi', isVn: false },
-  { artist: 'Tomppabeats', title: 'Tomppabeats - Far Away', searchQuery: 'Tomppabeats Far Away lofi instrumental', isVn: false },
-  { artist: 'Tomppabeats', title: 'Tomppabeats - Harbor', searchQuery: 'Tomppabeats Harbor lofi instrumental', isVn: false },
-  { artist: 'Ghibli Lofi', title: 'Spirited Away - One Summer\'s Day Lofi', searchQuery: 'Spirited Away One Summers Day lofi piano instrumental', isVn: false },
-  { artist: 'Ghibli Lofi', title: 'Howl\'s Moving Castle - Merry Go Round Lofi', searchQuery: 'Howls Moving Castle Merry Go Round lofi piano instrumental', isVn: false },
-  { artist: 'Ghibli Lofi', title: 'My Neighbor Totoro - Path of the Wind Lofi', searchQuery: 'My Neighbor Totoro Path of the Wind lofi instrumental', isVn: false },
-  { artist: 'Coffee Shop Lofi', title: 'Rainy Cafe Piano Beats', searchQuery: 'coffee shop lofi acoustic piano chill beats instrumental', isVn: false },
-  { artist: 'Coffee Shop Lofi', title: 'Morning Espresso Beats', searchQuery: 'morning espresso lofi beats to study to instrumental', isVn: false },
-  { artist: 'Tokyo Night Lofi', title: 'Shibuya Midnight Rain', searchQuery: 'shibuya midnight rain lofi hip hop instrumental', isVn: false },
-  { artist: 'Tokyo Night Lofi', title: 'Midnight City Beats', searchQuery: 'tokyo midnight lofi hip hop instrumental', isVn: false },
-  { artist: 'Cozy Bedroom Lofi', title: 'Warm Blanket & Rain', searchQuery: 'warm blanket rain lofi beats to sleep relax to instrumental', isVn: false },
-  { artist: 'Sunset Lofi', title: 'Golden Hour Waves', searchQuery: 'golden hour waves chill lofi instrumental beats', isVn: false },
-  { artist: 'Autumn Leaves Lofi', title: 'Cozy Sweater & Tea', searchQuery: 'cozy sweater tea relaxing lofi instrumental', isVn: false }
+  { artist: 'Kupla', title: 'Kupla - Roots', searchQuery: 'Kupla Roots lofi chillhop instrumental', isVn: false },
+  { artist: 'Saib', title: 'Saib - In Your Arms', searchQuery: 'Saib In Your Arms chillhop lofi instrumental', isVn: false },
+  { artist: 'Saib', title: 'Saib - Sakura Trees', searchQuery: 'Saib Sakura Trees lofi chillhop instrumental', isVn: false },
+  { artist: 'Saib', title: 'Saib - Spike Spiegel', searchQuery: 'Saib Spike Spiegel jazzhop lofi instrumental', isVn: false },
+  { artist: 'Purrple Cat', title: 'Purrple Cat - Bedtime Stories', searchQuery: 'Purrple Cat Bedtime Stories lofi chill beats instrumental', isVn: false },
+  { artist: 'Purrple Cat', title: 'Purrple Cat - Moon Dance', searchQuery: 'Purrple Cat Moon Dance lofi chill beats instrumental', isVn: false },
+  { artist: 'Purrple Cat', title: 'Purrple Cat - Distant Worlds', searchQuery: 'Purrple Cat Distant Worlds lofi instrumental', isVn: false },
+  { artist: 'Tomppabeats', title: 'Tomppabeats - Far Away', searchQuery: 'Tomppabeats Far Away lofi hip hop instrumental', isVn: false },
+  { artist: 'Tomppabeats', title: 'Tomppabeats - Harbor', searchQuery: 'Tomppabeats Harbor lofi hip hop instrumental', isVn: false },
+  { artist: 'Ghibli Lofi', title: 'Spirited Away - One Summer\'s Day Lofi', searchQuery: 'Spirited Away One Summers Day lofi chillhop beats instrumental', isVn: false },
+  { artist: 'Ghibli Lofi', title: 'Howl\'s Moving Castle - Merry Go Round Lofi', searchQuery: 'Howls Moving Castle Merry Go Round lofi chill beats instrumental', isVn: false },
+  { artist: 'Ghibli Lofi', title: 'My Neighbor Totoro - Path of the Wind Lofi', searchQuery: 'My Neighbor Totoro Path of the Wind lofi instrumental beats', isVn: false },
+  { artist: 'Coffee Shop Lofi', title: 'Rainy Cafe Piano & Vinyl Beats', searchQuery: 'coffee shop lofi chillhop boom bap beats instrumental', isVn: false },
+  { artist: 'Coffee Shop Lofi', title: 'Morning Espresso Chill Beats', searchQuery: 'morning espresso lofi beats to study to instrumental', isVn: false },
+  { artist: 'Tokyo Night Lofi', title: 'Shibuya Midnight Rain Lofi', searchQuery: 'shibuya midnight rain lofi hip hop beats instrumental', isVn: false },
+  { artist: 'Tokyo Night Lofi', title: 'Tokyo Neon City Chillhop', searchQuery: 'tokyo midnight lofi hip hop chill instrumental', isVn: false },
+  { artist: 'Cozy Bedroom Lofi', title: 'Warm Blanket & Gentle Rain', searchQuery: 'warm blanket rain lofi beats to sleep relax to instrumental', isVn: false },
+  { artist: 'Sunset Lofi', title: 'Golden Hour Waves Chillhop', searchQuery: 'golden hour waves chill lofi instrumental beats', isVn: false },
+  { artist: 'The Deli', title: 'The Deli - 5:32PM', searchQuery: 'The Deli 5:32PM lofi hip hop instrumental', isVn: false },
+  { artist: 'Philanthrope', title: 'Philanthrope - Isolation', searchQuery: 'Philanthrope Isolation lofi beats instrumental', isVn: false }
 ];
 
 /**
- * Nhờ Gemini tìm bản nhạc Lofi KHÔNG LỜI cho Chế độ 24/7
- * Tỉ lệ: ~65% Nhạc Việt không lời (V-Pop Acoustic Guitar/Piano Lofi) và ~35% Lofi Quốc Tế kinh điển
- * Lưu trữ danh sách bài và đảm bảo không bị lặp ít nhất 25 bài gần nhất
+ * Nhờ Gemini tìm bản nhạc Lofi Study / Chillhop Quốc Tế KHÔNG LỜI cho Chế độ 24/7
+ * Đảm bảo 100% không lời, phong phú đề tài, không bị lặp ít nhất 30 bài gần nhất
  */
 async function getGemini247LofiTrack(recentHistory = []) {
-  const isVietnamese = Math.random() < 0.65; // 65% Nhạc Việt không lời, 35% Lofi quốc tế
-
-  // Lọc bài fallback chưa từng phát trong ít nhất 25 bài gần nhất để chống trùng
+  // Lọc bài fallback chưa từng phát trong ít nhất 30 bài gần nhất để chống trùng
   const availableFallbacks = CURATED_LOFI_TRACKS.filter(t => {
-    return !recentHistory.slice(-25).some(h => {
+    return !recentHistory.slice(-30).some(h => {
       const hStr = typeof h === 'string' ? h.toLowerCase() : (h?.title || '').toLowerCase();
       const tTitle = t.title.toLowerCase();
       const cleanH = hStr.replace(/\[.*?\]|\(.*?\)|acoustic|guitar|piano|lofi|instrumental|beats|không lời|chill/gi, '').trim();
@@ -221,53 +184,46 @@ async function getGemini247LofiTrack(recentHistory = []) {
     });
   });
 
-  const preferredPool = availableFallbacks.filter(t => t.isVn === isVietnamese);
-  const pool = preferredPool.length > 0 ? preferredPool : (availableFallbacks.length > 0 ? availableFallbacks : CURATED_LOFI_TRACKS);
+  const pool = availableFallbacks.length > 0 ? availableFallbacks : CURATED_LOFI_TRACKS;
   const fallbackTrack = pool[Math.floor(Math.random() * pool.length)];
 
   try {
-    const vnThemes = [
-      'Nhạc Việt chill không lời V-Pop acoustic guitar lofi thư giãn',
-      'Piano lofi Việt Nam thư giãn êm dịu không lời nhẹ nhàng',
-      'Cafe sáng mưa rơi nhạc Việt chill lofi acoustic guitar instrumental',
-      'Nhạc Trịnh acoustic guitar không lời lofi thư giãn mộc mạc',
-      'V-Pop Lofi acoustic không lời giai điệu êm dịu quán cafe',
-      'Đêm muộn mưa rơi phố cổ nhạc Việt piano lofi chill không lời',
-      'Nhạc không lời V-Pop acoustic guitar nhẹ nhàng thư thái',
-      'Acoustic guitar lofi ballad Việt Nam không lời êm dịu'
+    const internationalThemes = [
+      'Lofi Girl beats to relax and study to (warm hip hop boom-bap chillhop)',
+      'Cozy rainy day coffee shop lofi beats with cassette tape crackle',
+      'Studio Ghibli aesthetic cozy anime lofi chillhop instrumental',
+      'Kudasai / Jinsang / Idealism style nostalgic vinyl lofi hip hop',
+      'Late night Tokyo neon rain lofi jazzhop beats instrumental',
+      'Warm autumn sweater fireplace cozy ambient lofi study beats',
+      'Sleepy midnight bedroom lofi chillhop beats to relax / sleep to',
+      'Spring breeze cherry blossom Japanese chillhop instrumental',
+      'Sunset rooftop city skyline jazz lofi beats with soft rhodes piano',
+      'Starry night astronomy ambient lofi hip hop instrumental',
+      'Old library rainy window reading acoustic rhodes lofi beats',
+      'Vintage cassette tape boom bap chill lofi beats to code / study to'
     ];
 
-    const foreignThemes = [
-      'Lofi Girl beats to relax study to instrumental',
-      'Ghibli anime cozy relaxing piano lofi instrumental',
-      'Kudasai / Idealism chill lofi beats instrumental',
-      'Coffee shop acoustic piano lofi chill beats instrumental',
-      'Rainy night lofi hip hop study relax instrumental beats'
-    ];
+    const theme = internationalThemes[Math.floor(Math.random() * internationalThemes.length)];
 
-    const theme = isVietnamese
-      ? vnThemes[Math.floor(Math.random() * vnThemes.length)]
-      : foreignThemes[Math.floor(Math.random() * foreignThemes.length)];
+    const avoidTitles = recentHistory.slice(-30).map(h => typeof h === 'string' ? h : (h?.title || '')).filter(Boolean);
+    const avoidStr = avoidTitles.length > 0 ? `TUYỆT ĐỐI TRÁNH lặp lại 30 bài vừa phát gần đây: ${avoidTitles.join(', ')}.` : '';
 
-    const avoidTitles = recentHistory.slice(-25).map(h => typeof h === 'string' ? h : (h?.title || '')).filter(Boolean);
-    const avoidStr = avoidTitles.length > 0 ? `TUYỆT ĐỐI TRÁNH lặp lại 25 bài vừa phát gần đây: ${avoidTitles.join(', ')}.` : '';
-
-    const prompt = `Bạn là một DJ AI chuyên về dòng nhạc Lofi Chillhop và Nhạc Việt Chill Không Lời.
-Hãy gợi ý 1 bản nhạc ${isVietnamese ? 'NHẠC VIỆT KHÔNG LỜI (V-Pop Acoustic Guitar / Piano Lofi Instrumental)' : 'Lofi quốc tế không lời kinh điển'} theo chủ đề: "${theme}" để phát nền 24/7 cho phòng Voice Discord.
+    const prompt = `Bạn là một DJ AI quốc tế chuyên sâu về văn hoá âm nhạc Lofi Study Beats, Chillhop và Jazzhop toàn cầu.
+Hãy gợi ý 1 bản nhạc Lofi Quốc Tế KHÔNG LỜI (Instrumental) theo phong cách: "${theme}" để phát nền 24/7 thư giãn và học bài trên phòng Voice Discord.
 ${avoidStr}
 
 Yêu cầu cực kỳ nghiêm ngặt:
-1. BẮT BUỘC 100% LÀ NHẠC KHÔNG LỜI (Instrumental beats, acoustic guitar, piano). TUYỆT ĐỐI KHÔNG CÓ LỜI HÁT.
-2. ${isVietnamese ? 'BẮT BUỘC là các bản nhạc Việt Nam quen thuộc (V-Pop, Indie Việt, Nhạc Trịnh...) được chuyển thể sang Acoustic Guitar, Piano hoặc Lofi KHÔNG LỜI.' : 'BẮT BUỘC là Lofi quốc tế êm dịu không lời (Lofi Girl, Kudasai, Jinsang, Ghibli, Idealism...).'}
-3. TUYỆT ĐỐI KHÔNG chọn nhạc có giọng hát, nhạc remix TikTok, EDM, Vinahouse, hoặc nhạc meme.
+1. BẮT BUỘC 100% LÀ NHẠC KHÔNG LỜI (Instrumental beats, chillhop, jazzhop, vinyl crackle, rhodes, soft hip hop drums). TUYỆT ĐỐI KHÔNG CÓ GIỌNG HÁT.
+2. TUYỆT ĐỐI KHÔNG chọn các bài solo piano cover hay guitar cover nhạc pop (như An Coong hay karaoke cover). Bắt buộc phải có nhịp beat lofi chill/study đặc trưng (Lofi Girl, Kudasai, Jinsang, Idealism, Saib, Kupla, Purrple Cat, Potsu, Tomppabeats, The Deli, SwuM, Closed on Sunday...).
+3. Tạo ra sự đa dạng, mới lạ, phong phú liên tục giữa các nghệ sĩ Lofi quốc tế chất lượng cao.
 4. Trả về đúng định dạng JSON:
 {
-  "artist": "${isVietnamese ? 'V-Pop Lofi' : 'Tên nghệ sĩ Lofi'}",
-  "title": "Tên bản nhạc không lời",
-  "searchQuery": "${isVietnamese ? 'tên bài hát tiếng việt acoustic guitar lofi instrumental không lời' : 'tên bài lofi instrumental chill beats'}"
+  "artist": "Tên nghệ sĩ Lofi (ví dụ: Kudasai, Jinsang, Lofi Girl, Saib...)",
+  "title": "Tên bài hát Lofi",
+  "searchQuery": "cụm từ tìm kiếm chính xác trên YouTube để ra đúng bản nhạc Lofi không lời đó (kèm 'lofi beats' hoặc 'lofi instrumental')"
 }`;
 
-    const res = await callGemini(prompt, 0.4);
+    const res = await callGemini(prompt, 0.8);
     if (res && res.searchQuery && !/khá\s*bảnh|kha\s*banh|meme|troll|chế|hài|bựa|vinahouse/i.test(res.searchQuery + ' ' + (res.title || ''))) {
       return res;
     }

@@ -16,7 +16,8 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     const queue = musicManager.get(ctx.guild.id);
-    if (!queue || !queue.currentSong) {
+    const is247Active = Boolean(queue?.mode247 || (queue?.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)));
+    if (!queue || (!queue.currentSong && !is247Active)) {
       return ctx.reply('Hiện không có bài hát nào đang phát!');
     }
 
@@ -26,7 +27,8 @@ module.exports = {
       queue.nowPlayingMessage = null;
     }
 
-    const embed = createNowPlayingEmbed(queue.currentSong, queue);
+    const songForEmbed = queue.currentSong || { requestedBy: 'Auto (24/7)', title: 'Nhạc nền Lofi 24/7', is247: true };
+    const embed = createNowPlayingEmbed(songForEmbed, queue);
     const controls = createMusicControls(queue);
 
     if (ctx.isInteraction) {

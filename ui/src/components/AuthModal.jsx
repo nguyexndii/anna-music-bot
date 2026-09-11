@@ -13,9 +13,9 @@ export default function AuthModal({ isOpen, onClose, onSubmitToken }) {
           <Key className="w-6 h-6" />
         </div>
         <div className="text-center">
-          <h3 className="text-base font-bold text-white">Đăng Nhập Magic Token (.web)</h3>
+          <h3 className="text-base font-bold text-white">Đăng Nhập Magic Token (/web)</h3>
           <p className="text-xs text-anna-muted mt-1">
-            Gõ lệnh <code className="bg-anna-card px-1.5 py-0.5 rounded text-anna-accent font-bold">.web</code> trong Discord để nhận liên kết riêng tư kèm Avatar của bạn!
+            Gõ lệnh <code className="bg-anna-card px-1.5 py-0.5 rounded text-anna-accent font-bold">/web</code> trong Discord để nhận liên kết riêng tư kèm Avatar của bạn!
           </p>
         </div>
 

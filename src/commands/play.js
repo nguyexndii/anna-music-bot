@@ -5,6 +5,7 @@ const { searchTrack } = require('../utils/musicExtractor');
 const { createErrorEmbed, createEmbed, createQueueAddedEmbed, createSuccessEmbed, createNowPlayingEmbed, createMusicControls, CUSTOM_EMOJIS, EMOJI_TAG } = require('../utils/embed');
 const { hasMusicPermission, isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
+const playlistHistoryManager = require('../structures/PlaylistHistoryManager');
 const config = require('../config');
 
 module.exports = {
@@ -131,6 +132,26 @@ module.exports = {
       } else {
         // Nhiều bài hát từ Playlist
         await queue.addSongs(tracks, ctx.member || ctx.user);
+
+        // Lưu danh sách phát vào lịch sử server
+        try {
+          const userObj = ctx.member?.user || ctx.user;
+          const reqName = ctx.member?.displayName || userObj?.username || 'Người dùng';
+          const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
+
+          playlistHistoryManager.addPlaylist(ctx.guild.id, {
+            url: query,
+            title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} bài)`,
+            trackCount: tracks.length,
+            thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
+            addedBy: reqName,
+            addedByAvatar: reqAvatar,
+            tracks: tracks
+          });
+        } catch (plErr) {
+          console.error('Error saving playlist to history in play command:', plErr);
+        }
+
         return ctx.editReply(`Đã thêm thành công **${tracks.length} bài hát** từ Playlist vào hàng chờ!`);
       }
     } catch (error) {

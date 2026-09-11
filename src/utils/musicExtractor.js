@@ -280,13 +280,16 @@ async function searchTrack(query, targetDurationSec = 0) {
       try {
         // Lấy ảnh bìa Playlist/Album làm fallback chuẩn đẹp
         let defaultCover = null;
+        let playlistTitle = null;
         try {
           const details = await spotifyUrlInfo.getDetails(cleanQuery);
           defaultCover = details?.preview?.image || null;
+          playlistTitle = details?.preview?.title || null;
         } catch (e) {
           try {
             const data = await spotifyUrlInfo.getData(cleanQuery);
             defaultCover = data?.coverArt?.sources?.[0]?.url || null;
+            playlistTitle = data?.name || data?.title || null;
           } catch (e2) {}
         }
 
@@ -309,7 +312,9 @@ async function searchTrack(query, targetDurationSec = 0) {
               thumbnail: defaultCover,
               uri: item.uri,
               source: 'spotify',
-              isLive: false
+              isLive: false,
+              playlistTitle: playlistTitle || 'Spotify Playlist',
+              playlistThumbnail: defaultCover
             };
           });
 
@@ -376,6 +381,8 @@ async function searchTrack(query, targetDurationSec = 0) {
         const res = await ytdlp(query, plOpts);
 
         if (res && res.entries && res.entries.length > 0) {
+          const playlistTitle = res.title || 'YouTube Playlist';
+          const playlistThumb = resolveBestThumbnail(res);
           const limited = res.entries.slice(0, 100);
           return limited.map(e => {
             const trackUrl = e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null);
@@ -385,7 +392,9 @@ async function searchTrack(query, targetDurationSec = 0) {
               searchQuery: e.title,
               duration: e.duration ? `${Math.floor(e.duration / 60)}:${String(e.duration % 60).padStart(2, '0')}` : '3:30',
               thumbnail: resolveBestThumbnail(e),
-              isLive: false
+              isLive: false,
+              playlistTitle: playlistTitle,
+              playlistThumbnail: playlistThumb
             };
           });
         }
@@ -433,12 +442,16 @@ function extractSoundCloudTitleFromUrl(url) {
         if (scData && scData.type === 'playlist') {
           const allTracks = await scData.all_tracks();
           const limited = allTracks.slice(0, 100);
+          const playlistTitle = scData.name || scData.title || 'SoundCloud Playlist';
+          const playlistThumb = scData.thumbnail || null;
           return limited.map(track => ({
             title: track.name || 'SoundCloud Track',
             url: track.permalink || track.url || query,
             duration: track.durationInMs ? formatMs(track.durationInMs) : '3:30',
             thumbnail: track.thumbnail || null,
-            isLive: false
+            isLive: false,
+            playlistTitle: playlistTitle,
+            playlistThumbnail: playlistThumb
           }));
         }
 

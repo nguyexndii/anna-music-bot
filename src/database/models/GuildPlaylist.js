@@ -7,6 +7,7 @@ const GuildPlaylistSchema = new mongoose.Schema({
   trackCount: { type: Number, default: 0 },
   thumbnail: { type: String, default: null },
   addedBy: { type: String, default: 'Web User' },
+  addedByAvatar: { type: String, default: null },
   addedAt: { type: Date, default: Date.now },
   tracks: [{
     title: { type: String },

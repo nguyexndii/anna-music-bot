@@ -26,7 +26,7 @@ class ErrorBoundary extends React.Component {
           </div>
           <h2 className="text-xl font-bold mb-2">Đã xảy ra sự cố hiển thị</h2>
           <p className="text-xs text-anna-muted max-w-md mb-6 leading-relaxed">
-            Trình duyệt có thể đang lưu cache phiên bản cũ. Vui lòng nhấn nút bên dưới để tải lại hoặc gõ lại lệnh <code className="text-anna-accent font-bold">.web</code> trong Discord.
+            Trình duyệt có thể đang lưu cache phiên bản cũ. Vui lòng nhấn nút bên dưới để tải lại hoặc gõ lại lệnh <code className="text-anna-accent font-bold">/web</code> trong Discord.
           </p>
           <button
             onClick={() => {

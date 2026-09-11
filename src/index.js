@@ -40,7 +40,7 @@ const {
   setVoiceChannelStatus,
   clearVoiceChannelStatus
 } = require('./utils/embed');
-const { hasMusicPermission, isAllowedVoiceChannel } = require('./utils/permissionHelper');
+const { hasMusicPermission, hasManagerPermission, isAllowedVoiceChannel } = require('./utils/permissionHelper');
 const { initLogger, logAction } = require('./utils/debugLogger');
 
 // 1. Khởi tạo Discord Client (Tắt triệt để ping/tít tít thông báo với allowedMentions)
@@ -957,7 +957,7 @@ client.on('interactionCreate', async (interaction) => {
         const result = await favoriteManager.toggleFavorite(interaction.user.id, queue.currentSong);
         if (result.isAdded) {
           return interaction.reply({
-            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${queue.currentSong.title}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Gõ \`.fav\` để xem danh sách`)],
+            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${queue.currentSong.title}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Dùng \`/favorite list\` để xem danh sách`)],
             flags: 64
           });
         } else {
@@ -972,7 +972,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // Nút Phát tất cả bài yêu thích từ Embed .fav
+    // Nút Phát tất cả bài yêu thích từ Embed /favorite play
     if (customId.startsWith('btn_play_user_fav_')) {
       const memberVoice = interaction.member?.voice?.channel;
       if (!memberVoice) {
@@ -1046,12 +1046,32 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (!queue || !queue.voiceChannel || !queue.connection) {
-      return interaction.reply({ embeds: [createErrorEmbed('Bot hiện chưa tham gia phòng Voice nào! Vui lòng dùng lệnh `.thamgia` hoặc `.p <tên_bài>` để mời bot vào phòng trước.')], flags: 64 });
+      return interaction.reply({ embeds: [createErrorEmbed('Bot hiện chưa tham gia phòng Voice nào! Vui lòng dùng lệnh `/join` hoặc `/play <tên_bài>` để mời bot vào phòng trước.')], flags: 64 });
     }
 
     const memberVoice = interaction.member?.voice?.channel;
     if (queue.voiceChannel && memberVoice?.id !== queue.voiceChannel.id) {
       return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở cùng phòng Voice với bot để điều khiển!')], flags: 64 });
+    }
+
+    const is247Mode = Boolean(queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)) || Boolean(queue.mode247 && !queue.currentSong);
+
+    // Kiểm tra phân quyền Quản lý khi bấm Tạm dừng / Dừng trong Chế độ 24/7
+    if ((customId === 'btn_pause' || customId === 'btn_stop') && is247Mode) {
+      if (!hasManagerPermission(interaction.member)) {
+        return interaction.reply({
+          embeds: [createErrorEmbed('Chỉ **Quản lý máy chủ** hoặc thành viên có **vai trò Quản lý / DJ** mới có quyền tạm dừng hoặc dừng nhạc nền 24/7!')],
+          flags: 64
+        });
+      }
+    }
+
+    // Chế độ 24/7 không áp dụng lặp bài (vô hiệu hóa Loop)
+    if (customId === 'btn_loop' && is247Mode) {
+      return interaction.reply({
+        embeds: [createErrorEmbed('Chế độ phát Lofi 24/7 tự động chuyển bài radio liên tục, không áp dụng chế độ lặp bài!')],
+        flags: 64
+      });
     }
 
     // Chống spam bấm nút điều khiển trên Discord (Skip, Pause, Stop, Loop)
@@ -1077,6 +1097,9 @@ client.on('interactionCreate', async (interaction) => {
       if (customId === 'btn_pause') {
         queue.togglePause();
       } else if (customId === 'btn_skip') {
+        if (is247Mode) {
+          queue._is247Skipping = true;
+        }
         queue.skip();
       } else if (customId === 'btn_loop') {
         queue.toggleLoop();
@@ -1084,11 +1107,12 @@ client.on('interactionCreate', async (interaction) => {
         queue.stop();
       }
 
-      // Cập nhật lại giao diện NowPlaying message nếu có (bao gồm cả bảng điều khiển Ephemeral)
-      if (queue.currentSong) {
-        const embed = createNowPlayingEmbed(queue.currentSong, queue);
+      // Cập nhật lại giao diện NowPlaying message (bao gồm cả chế độ 24/7 và bảng điều khiển Ephemeral)
+      const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: 'Nhạc nền Lofi 24/7', is247: true } : null);
+      if (songForEmbed) {
+        const embed = createNowPlayingEmbed(songForEmbed, queue);
         const controls = createMusicControls(queue);
-        // Cập nhật bảng điều khiển riêng (Ephemeral) mà user đang bấm
+        // Cập nhật bảng điều khiển mà user vừa bấm
         await interaction.editReply({ embeds: [embed], components: controls }).catch(() => {});
 
         if (queue.nowPlayingMessage && queue.nowPlayingMessage.id !== interaction.message?.id) {
@@ -1096,7 +1120,7 @@ client.on('interactionCreate', async (interaction) => {
             type: 'NOW_PLAYING_CONTROLS_BTN',
             channelId: interaction.channelId,
             messageId: queue.nowPlayingMessage.id,
-            song: (queue.currentSong.title || '').slice(0, 60)
+            song: (songForEmbed.title || '').slice(0, 60)
           });
           await queue.nowPlayingMessage.edit({ embeds: [embed], components: controls }).catch(() => {});
         }

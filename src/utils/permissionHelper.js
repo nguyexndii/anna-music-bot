@@ -51,8 +51,23 @@ function isAllowedVoiceChannel(member) {
   return true;
 }
 
+/**
+ * Kiểm tra xem người dùng có quyền Quản lý máy chủ hoặc vai trò Quản lý / DJ hay không
+ */
+function hasManagerPermission(member) {
+  if (!member || !member.guild) return false;
+  if (member.id === member.guild.ownerId) return true;
+  if (member.permissions?.has('Administrator') || member.permissions?.has('ManageGuild') || member.permissions?.has('ManageChannels')) return true;
+
+  const guildSettings = settingsManager.get(member.guild.id);
+  if (guildSettings.djRoleId && member.roles?.cache?.has(guildSettings.djRoleId)) return true;
+
+  return member.roles?.cache?.some(r => /quản\s*lý|manager|admin|mod|dj/i.test(r.name)) || false;
+}
+
 module.exports = {
   hasMusicPermission,
+  hasManagerPermission,
   isAllowedVoiceChannel,
   STAFF_VOICE_CHANNELS
 };
