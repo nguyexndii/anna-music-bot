@@ -949,8 +949,8 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút Yêu thích (Lưu bài hát đang phát vào MongoDB Atlas)
     if (customId === 'btn_favorite') {
-      if (!queue || !queue.currentSong) {
-        return interaction.reply({ embeds: [createErrorEmbed('Hiện tại không có bài hát nào đang phát để thêm vào yêu thích!')], flags: 64 });
+      if (!queue || !queue.currentSong || queue.isPreparing || queue.isStopped) {
+        return interaction.reply({ embeds: [createErrorEmbed('Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!')], flags: 64 });
       }
 
       try {
@@ -1052,6 +1052,16 @@ client.on('interactionCreate', async (interaction) => {
     const memberVoice = interaction.member?.voice?.channel;
     if (queue.voiceChannel && memberVoice?.id !== queue.voiceChannel.id) {
       return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở cùng phòng Voice với bot để điều khiển!')], flags: 64 });
+    }
+
+    // Khóa các nút điều khiển khi bot chưa sẵn sàng hoặc bài hát đang chuẩn bị
+    if (['btn_pause', 'btn_skip', 'btn_loop', 'btn_stop'].includes(customId)) {
+      if (!queue.currentSong || queue.isPreparing || queue.isStopped) {
+        return interaction.reply({
+          embeds: [createErrorEmbed('Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!')],
+          flags: 64
+        });
+      }
     }
 
     const is247Mode = Boolean(queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)) || Boolean(queue.mode247 && !queue.currentSong);

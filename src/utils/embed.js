@@ -236,6 +236,7 @@ function createNowPlayingEmbed(song, queue) {
  * Dàn nút bấm điều khiển nhạc (1 hàng 5 nút nguyên khối liền mạch phong cách Rythm / Loa Phường)
  */
 function createMusicControls(queue) {
+  const isPlayable = Boolean(queue?.currentSong && !queue?.isPreparing && !queue?.isStopped);
   const is247Mode = Boolean(queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247));
   const isLooping = !is247Mode && queue.loopMode && queue.loopMode !== 'off';
   const isPausedOrStopped = Boolean(queue.paused || queue.isStopped);
@@ -244,24 +245,28 @@ function createMusicControls(queue) {
     new ButtonBuilder()
       .setCustomId('btn_favorite')
       .setEmoji(CUSTOM_EMOJIS.heart)
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!isPlayable),
     new ButtonBuilder()
       .setCustomId('btn_pause')
       .setEmoji(isPausedOrStopped ? CUSTOM_EMOJIS.play : CUSTOM_EMOJIS.pause)
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!isPlayable),
     new ButtonBuilder()
       .setCustomId('btn_skip')
       .setEmoji(CUSTOM_EMOJIS.skip)
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!isPlayable),
     new ButtonBuilder()
       .setCustomId('btn_loop')
       .setEmoji(CUSTOM_EMOJIS.loop)
       .setStyle(isLooping ? ButtonStyle.Primary : ButtonStyle.Secondary)
-      .setDisabled(is247Mode),
+      .setDisabled(!isPlayable || is247Mode),
     new ButtonBuilder()
       .setCustomId('btn_stop')
       .setEmoji(CUSTOM_EMOJIS.close)
       .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!isPlayable)
   );
 
   const row2 = new ActionRowBuilder().addComponents(

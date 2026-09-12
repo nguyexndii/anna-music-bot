@@ -789,6 +789,18 @@ module.exports = function createApiRouter(client) {
         value: typeof value === 'object' ? JSON.stringify(value) : value
       });
 
+      // Vô hiệu hóa các nút điều khiển luồng phát khi bài hát chưa bắt đầu hoặc đang chuẩn bị
+      const playbackActions = ['pause', 'resume', 'stop', 'seek', 'skip', 'previous'];
+      if (playbackActions.includes(action)) {
+        if (!queue?.currentSong || queue?.isPreparing || queue?.isStopped) {
+          return res.status(400).json({
+            success: false,
+            code: 'NOT_PLAYING',
+            error: 'Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!'
+          });
+        }
+      }
+
       let resultMessage = '';
       switch (action) {
         case 'pause':
@@ -1107,6 +1119,8 @@ module.exports = function createApiRouter(client) {
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: lyricsData?.autoOffsetMs || 0,
+        userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
+        trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics,
@@ -1140,6 +1154,8 @@ module.exports = function createApiRouter(client) {
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: lyricsData?.autoOffsetMs || 0,
+        userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
+        trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: lyricsData?.syncedLyrics || null,
         synced: !!lyricsData?.syncedLyrics,
@@ -1148,6 +1164,35 @@ module.exports = function createApiRouter(client) {
       });
     } catch (err) {
       return res.status(500).json({ success: false, error: 'Lỗi lấy lời bài hát' });
+    }
+  });
+
+  // 6.0 Lưu nhớ mốc bù trừ lời bài hát (Offset) vào MongoDB & RAM Cache
+  router.post('/guilds/:guildId/lyrics/offset', async (req, res) => {
+    const { trackKey, offsetMs, title, artist } = req.body;
+    if (!trackKey || typeof offsetMs !== 'number') {
+      return res.status(400).json({ success: false, error: 'Thiếu tham số trackKey hoặc offsetMs' });
+    }
+    try {
+      const { saveLyricOffset } = require('../utils/lyricsHelper');
+      await saveLyricOffset(trackKey, offsetMs, title, artist);
+      return res.json({ success: true, trackKey, offsetMs });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  router.post('/lyrics/offset', async (req, res) => {
+    const { trackKey, offsetMs, title, artist } = req.body;
+    if (!trackKey || typeof offsetMs !== 'number') {
+      return res.status(400).json({ success: false, error: 'Thiếu tham số trackKey hoặc offsetMs' });
+    }
+    try {
+      const { saveLyricOffset } = require('../utils/lyricsHelper');
+      await saveLyricOffset(trackKey, offsetMs, title, artist);
+      return res.json({ success: true, trackKey, offsetMs });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
     }
   });
 
