@@ -427,7 +427,7 @@ function getCachedLyrics(key) {
   if (!key) return null;
   const item = lyricsMemoryCache.get(key);
   if (!item) return null;
-  if (Date.now() - item.ts > 3600 * 1000) {
+  if (Date.now() - item.ts > 3600 * 1000 || item.data?.source === 'youtube_auto_cc') {
     lyricsMemoryCache.delete(key);
     return null;
   }
@@ -540,7 +540,8 @@ function selectBestSubtitleTrack(officialSubs, autoSubs, context = {}, allowAuto
   const officialTrack = findTrackInSubs(officialSubs, context);
   if (officialTrack) return { track: officialTrack, isOfficial: true };
 
-  // 2. Ưu tiên số 2: Phụ đề tự động (Automatic Captions) - chỉ dùng khi allowAuto = true
+  // 2. Phụ đề tự động (Automatic Captions) - TUYỆT ĐỐI KHÔNG dùng làm lời bài hát (tránh từ ngữ thô tục / AI sai lệch)
+  // Chỉ cho phép dùng trong detectYouTubeIntroOffset khi allowAuto = true để căn nhịp mốc bắt đầu
   if (allowAuto) {
     const autoTrack = findTrackInSubs(autoSubs, context);
     if (autoTrack) return { track: autoTrack, isOfficial: false };
@@ -551,8 +552,9 @@ function selectBestSubtitleTrack(officialSubs, autoSubs, context = {}, allowAuto
 
 /**
  * Trích xuất phụ đề CC chính thức trực tiếp từ YouTube Video (Chuẩn nhịp 100% cho MV có intro/outro)
+ * TUYỆT ĐỐI KHÔNG nhận phụ đề tự động (AI speech-to-text) để tránh từ ngữ thô tục và sai lệch.
  */
-async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', allowAuto = false, trackKey = null, userSavedOffsetMs = 0) {
+async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey = null, userSavedOffsetMs = 0) {
   if (!url || typeof url !== 'string' || (!url.includes('youtube.com') && !url.includes('youtu.be'))) {
     return null;
   }
@@ -581,8 +583,8 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', allowAuto 
 
     const isVN = isVietnameseTrack(context);
 
-    // Ưu tiên phụ đề chính thức (info.subtitles), chỉ dùng auto captions khi allowAuto = true
-    const selected = selectBestSubtitleTrack(info.subtitles, info.automatic_captions, context, allowAuto);
+    // Chỉ nhận phụ đề chính thức (info.subtitles), TUYỆT ĐỐI KHÔNG nhận auto captions làm lời nhạc
+    const selected = selectBestSubtitleTrack(info.subtitles, info.automatic_captions, context, false);
     if (!selected || !selected.track || !Array.isArray(selected.track) || selected.track.length === 0) {
       return null;
     }
@@ -637,7 +639,7 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', allowAuto 
         }
       }
 
-      console.log(`[Lyrics CC] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC (${isOfficial ? 'Chính thức' : 'Tự động AI'}) từ video YouTube: ${info.title || url}`);
+      console.log(`[Lyrics CC] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chính thức từ video YouTube: ${info.title || url}`);
       return {
         title: info.title || 'YouTube Track',
         artist: info.uploader || info.channel || '',
@@ -647,8 +649,8 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', allowAuto 
         autoOffsetMs: 0,
         trackKey,
         userSavedOffsetMs: userSavedOffsetMs || 0,
-        source: isOfficial ? 'youtube_cc' : 'youtube_auto_cc',
-        isOfficialCc: isOfficial
+        source: 'youtube_cc',
+        isOfficialCc: true
       };
     }
   } catch (e) {
@@ -845,7 +847,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
   // Phụ đề CC do kênh/nghệ sĩ gắn trực tiếp trên YouTube sẽ chuẩn nhịp 100% theo đúng video mà không bị lệch.
   if (isYouTube) {
     try {
-      const ytSubPromise = fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, false, trackKey, userSavedOffsetMs);
+      const ytSubPromise = fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
       const ytSubResult = await Promise.race([
         ytSubPromise,
         new Promise(resolve => setTimeout(() => resolve(null), 15000))
@@ -982,18 +984,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
     } catch (e) {}
   }
 
-  // 2.8 Nếu là YouTube và LRCLIB chưa tìm thấy synced lyrics: Thử trích xuất YouTube Auto CC trước khi nhận plain lyrics
-  if (isYouTube) {
-    try {
-      const autoCcResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, true, trackKey, userSavedOffsetMs);
-      if (autoCcResult && autoCcResult.syncedLyrics && autoCcResult.syncedLyrics.length >= 5) {
-        setCachedLyrics(cacheKey, autoCcResult);
-        return autoCcResult;
-      }
-    } catch (e) {}
-  }
-
-  // 2.9 Nếu LRCLIB có bản lyric đọc (plain lyrics) thì dùng trước khi sang microservice/AI
+  // 2.9 Nếu LRCLIB có bản lyric đọc (plain lyrics) thì dùng trước khi sang microservice
   if (plainFallback) {
     setCachedLyrics(cacheKey, plainFallback);
     return plainFallback;
@@ -1010,7 +1001,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
 
   // 4. TẦNG 4: ĐỐI VỚI NHẠC KHÔNG PHẢI YOUTUBE (Spotify, SoundCloud, tìm theo tên...):
   // Nếu các kho lời chuẩn (LRCLIB, Syncedlyrics) đều không có, lúc này mới đi tìm video trên YouTube
-  // để trích xuất phụ đề CC làm cứu cánh trước khi gọi AI.
+  // để trích xuất phụ đề CC CHÍNH THỨC do nghệ sĩ tải lên (TUYỆT ĐỐI KHÔNG nhận auto CC của YouTube).
   if (!isYouTube) {
     try {
       const searchQuery = `${cleanTitle(rawTitle)} ${cleanArtistName(artist)}`.trim();
@@ -1020,7 +1011,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
           const sRes = await yts(searchQuery);
           const topVideo = sRes?.videos?.[0];
           if (topVideo && topVideo.url) {
-            return await fetchYouTubeSubtitles(topVideo.url, rawTitle, artist, true, trackKey, userSavedOffsetMs);
+            return await fetchYouTubeSubtitles(topVideo.url, rawTitle, artist, trackKey, userSavedOffsetMs);
           }
           return null;
         })();

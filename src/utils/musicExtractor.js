@@ -75,6 +75,89 @@ function parseDurationToSec(str) {
   return parts[0];
 }
 
+function normalizeSearchText(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .toLowerCase()
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Đánh giá độ khớp toàn diện giữa từ khóa tìm kiếm và ứng viên video YouTube.
+ * Bắt buộc ưu tiên tên bài hát và ca sĩ chính xác lên hàng đầu, ngăn tuyệt đối việc
+ * bắt nhầm sang bài khác chỉ vì có thời lượng trùng khớp (như sự cố bài 'Truy Lùng' bị đổi thành 'nguyên xi').
+ */
+function scoreCandidateVideo(v, query, targetDurationSec = 0) {
+  if (!v) return -999;
+  const vTitleNorm = normalizeSearchText(v.title);
+  const vAuthorNorm = normalizeSearchText(v.author?.name || v.uploader || v.channel || '');
+  const vCombined = `${vTitleNorm} ${vAuthorNorm}`;
+
+  const cleanQ = query.replace(/\b(audio|official|mv|video|lyric|lyrics)\b/gi, '').trim();
+  const parts = cleanQ.split(/\s+[-–—|]\s+/).map(p => p.trim()).filter(Boolean);
+
+  let titlePart = parts[0] || cleanQ;
+  let artistPart = parts.length > 1 ? parts.slice(1).join(' ') : '';
+
+  const normTitle = normalizeSearchText(titlePart);
+  const normArtist = normalizeSearchText(artistPart);
+
+  const titleWords = normTitle.split(' ').filter(w => w.length >= 2 && !['audio', 'video', 'mv', 'official'].includes(w));
+  const artistWords = normArtist ? normArtist.split(' ').filter(w => w.length >= 2) : [];
+
+  let score = 0;
+
+  // 1. So khớp tên bài hát (tiêu chí quan trọng nhất)
+  if (normTitle && vTitleNorm.includes(normTitle)) {
+    score += 100;
+  } else if (titleWords.length > 0) {
+    const matchedCount = titleWords.filter(w => vTitleNorm.includes(w)).length;
+    const ratio = matchedCount / titleWords.length;
+    score += ratio * 70;
+    if (ratio === 0) {
+      score -= 120; // Phạt cực nặng nếu tiêu đề hoàn toàn không chứa bất kỳ từ khóa nào của bài hát!
+    }
+  }
+
+  // 2. So khớp ca sĩ / tác giả
+  if (normArtist) {
+    if (vAuthorNorm.includes(normArtist)) {
+      score += 40; // Kênh chính thức của ca sĩ/nghệ sĩ
+    } else if (vTitleNorm.includes(normArtist)) {
+      score += 25; // Tiêu đề chứa tên ca sĩ
+    } else if (artistWords.length > 0) {
+      const matchedArt = artistWords.filter(w => vCombined.includes(w)).length;
+      score += (matchedArt / artistWords.length) * 20;
+    }
+  }
+
+  // 3. Phạt teaser / trailer / reaction / review / parody
+  if (/\b(teaser|trailer|reaction|review|preview|tập\s*\d+|parody|hậu\s*trường|behind\s*the\s*scenes)\b/i.test(vTitleNorm)) {
+    score -= 80;
+  }
+
+  // 4. Ưu tiên topic / audio / lyric video
+  if (vAuthorNorm.includes('topic') || vTitleNorm.includes('topic')) score += 15;
+  if (/\b(audio|lyric|lyrics)\b/i.test(vTitleNorm)) score += 10;
+
+  // 5. So khớp thời lượng nếu có targetDurationSec
+  if (targetDurationSec > 0 && v.seconds > 0) {
+    const diff = Math.abs(v.seconds - targetDurationSec);
+    if (diff <= 3) score += 35;
+    else if (diff <= 6) score += 20;
+    else if (diff <= 15) score += 10;
+    else if (diff > 60) score -= Math.min(50, Math.floor((diff - 60) / 2));
+  }
+
+  return score;
+}
+
 /**
  * Trích xuất ảnh thumbnail chất lượng cao và chuẩn xác nhất cho bài hát YouTube/Web
  */
@@ -596,42 +679,15 @@ function extractSoundCloudTitleFromUrl(url) {
           }
         }
 
-        let best = candidateVideos[0];
-        if (targetDurationSec > 0 && candidateVideos.length > 1) {
-          const sorted = [...candidateVideos].sort((a, b) => {
-            const aDiff = Math.abs((a.seconds || 0) - targetDurationSec);
-            const bDiff = Math.abs((b.seconds || 0) - targetDurationSec);
-            const aIsTopic = Boolean((a.author?.name || '').toLowerCase().includes('topic') || (a.title || '').toLowerCase().includes('topic'));
-            const bIsTopic = Boolean((b.author?.name || '').toLowerCase().includes('topic') || (b.title || '').toLowerCase().includes('topic'));
-            const aIsAudio = Boolean(/audio|lyric/i.test(a.title || ''));
-            const bIsAudio = Boolean(/audio|lyric/i.test(b.title || ''));
+        // Sắp xếp các ứng viên dựa trên độ khớp: Tên bài hát & Tác giả BẮT BUỘC ưu tiên số 1,
+        // sau đó kết hợp thời lượng bài hát (ngăn tuyệt đối việc nhận nhầm bài khác cùng độ dài như vụ 'nguyên xi' thay vì 'Truy Lùng')
+        const scoredCandidates = candidateVideos.map(v => ({
+          v,
+          score: scoreCandidateVideo(v, query, targetDurationSec)
+        }));
+        scoredCandidates.sort((a, b) => b.score - a.score);
 
-            // Nếu thời lượng lệch không quá 4 giây: Ưu tiên cực cao (tránh MV có intro phim)
-            const aGoodDur = aDiff <= 4;
-            const bGoodDur = bDiff <= 4;
-            if (aGoodDur && !bGoodDur) return -1;
-            if (!aGoodDur && bGoodDur) return 1;
-
-            if (aGoodDur && bGoodDur) {
-              if (aIsTopic && !bIsTopic) return -1;
-              if (!aIsTopic && bIsTopic) return 1;
-              if (aIsAudio && !bIsAudio) return -1;
-              if (!aIsAudio && bIsAudio) return 1;
-            }
-
-            return aDiff - bDiff;
-          });
-          best = sorted[0];
-        } else if (!isExplicitMv && candidateVideos.length > 1) {
-          const audioCandidate = candidateVideos.slice(0, 6).find(t => {
-            const title = (t.title || '').toLowerCase();
-            const author = (t.author?.name || '').toLowerCase();
-            return (title.includes('audio') || title.includes('lyric') || title.includes('topic') || author.includes('topic')) && !title.includes('teaser') && !title.includes('trailer');
-          });
-          if (audioCandidate) {
-            best = audioCandidate;
-          }
-        }
+        const best = scoredCandidates[0]?.v || candidateVideos[0];
         return [{
           title: best.title,
           url: best.url,
@@ -674,7 +730,11 @@ function extractSoundCloudTitleFromUrl(url) {
       const res = await ytdlp(`ytsearch3:${query}`, sOpts);
 
       if (res && res.entries && res.entries.length > 0) {
-        const bestEntry = res.entries[0];
+        const scoredEntries = res.entries.map(e => ({
+          e,
+          score: scoreCandidateVideo(e, query, targetDurationSec)
+        })).sort((a, b) => b.score - a.score);
+        const bestEntry = scoredEntries[0]?.e || res.entries[0];
         const url = bestEntry.url || `https://www.youtube.com/watch?v=${bestEntry.id}`;
         return [{
           title: bestEntry.title,
