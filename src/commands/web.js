@@ -78,16 +78,26 @@ module.exports = {
     try {
       const replyFlags = ctx.isInteraction ? 64 : 4096;
       const replyMsg = await ctx.reply({ embeds: [embed], components: [row], flags: replyFlags });
-      // Tự động xóa tin nhắn sau 2 phút để giữ kênh chat luôn sạch sẽ
-      if (ctx.isInteraction && ctx.interaction) {
-        setTimeout(() => {
-          ctx.interaction.deleteReply().catch(() => {});
-        }, 120 * 1000);
-      } else if (replyMsg && typeof replyMsg.delete === 'function') {
-        setTimeout(() => {
-          replyMsg.delete().catch(() => {});
-        }, 120 * 1000);
-      }
+      // Tự động vô hiệu hóa mã PIN sau 3 phút (vì Discord API không cho phép bot xóa tin nhắn ẩn)
+      setTimeout(async () => {
+        try {
+          if (ctx.isInteraction && ctx.interaction) {
+            const expiredEmbed = new EmbedBuilder()
+              .setColor('#ef7864')
+              .setAuthor({ name: 'ANNA MUSIC', iconURL: client.user.displayAvatarURL() })
+              .setTitle('⚠️ Mã PIN Web Player Đã Hết Hạn')
+              .setDescription(
+                'Mã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\n' +
+                'Nếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
+              )
+              .setFooter({ text: 'Bạn có thể bấm "Bỏ qua tin nhắn" bên dưới để đóng thông báo này' });
+
+            await ctx.interaction.editReply({ embeds: [expiredEmbed], components: [] }).catch(() => {});
+          } else if (replyMsg && typeof replyMsg.delete === 'function') {
+            await replyMsg.delete().catch(() => {});
+          }
+        } catch (e) {}
+      }, 180 * 1000);
     } catch (err) {
       console.error('[Web Command Error]:', err);
     }
