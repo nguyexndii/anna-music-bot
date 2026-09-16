@@ -123,8 +123,7 @@ module.exports = {
         const track = tracks[0];
         await queue.addSong(track, ctx.member || ctx.user);
 
-        const userSongs = queue.songs.filter(s => s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)');
-        const position = userSongs.length || 1;
+        const position = 1;
         return ctx.editReply({
           content: null,
           embeds: [createQueueAddedEmbed(track, position)]

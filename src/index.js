@@ -796,7 +796,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút Mở Bảng Điều Khiển Âm Nhạc (Open Music Controls - Ephemeral chỉ người bấm thấy)
     if (customId === 'btn_open_controls') {
-      if (!queue || !queue.currentSong) {
+      if (!queue || (!queue.currentSong && !queue.isPlaying)) {
         logAction('INTERACTION_REPLY', {
           type: 'BTN_OPEN_CONTROLS_NO_SONG',
           interactionId: interaction.id,
@@ -805,13 +805,18 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát!')], flags: 64 });
       }
 
-      const embed = createNowPlayingEmbed(queue.currentSong, queue);
+      const songForEmbed = queue.currentSong || {
+        title: 'Đang phát âm thanh',
+        duration: '3:30',
+        requestedBy: 'User'
+      };
+      const embed = createNowPlayingEmbed(songForEmbed, queue);
       const controls = createMusicControls(queue);
       logAction('INTERACTION_REPLY', {
         type: 'BTN_OPEN_CONTROLS',
         interactionId: interaction.id,
         channelId: interaction.channelId,
-        song: (queue.currentSong.title || '').slice(0, 60)
+        song: (songForEmbed.title || '').slice(0, 60)
       });
       return interaction.reply({ embeds: [embed], components: controls, flags: 64 });
     }

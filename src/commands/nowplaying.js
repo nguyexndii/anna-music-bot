@@ -18,7 +18,7 @@ module.exports = {
     const queue = musicManager.get(ctx.guild.id);
     const is247Active = Boolean(queue?.mode247 || (queue?.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)));
     if (!queue || (!queue.currentSong && !is247Active)) {
-      return ctx.reply('Hiện không có bài hát nào đang phát!');
+      return ctx.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát!')], flags: 64 });
     }
 
     // Xóa tin nhắn cũ nếu có để tránh trôi và trùng lặp
@@ -32,7 +32,7 @@ module.exports = {
     const controls = createMusicControls(queue);
 
     if (ctx.isInteraction) {
-      return ctx.reply({ embeds: [embed], components: controls });
+      return ctx.reply({ embeds: [embed], components: controls, flags: 64 });
     } else {
       const msg = await ctx.channel.send({ embeds: [embed], components: controls });
       queue.nowPlayingMessage = msg;

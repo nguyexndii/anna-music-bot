@@ -42,14 +42,14 @@ module.exports = {
       targetDurationMs = queue.currentSong.durationMs || (queue.currentSong.duration ? parseDurationToMs(queue.currentSong.duration) : 0);
       targetUrl = queue.currentSong.url || null;
     } else {
-      return ctx.reply('Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`');
+      return ctx.reply({ content: 'Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`', flags: 64 });
     }
 
     if (targetArtist === 'YouTube Music' || targetArtist === 'YouTube' || targetArtist === 'Unknown') {
       targetArtist = '';
     }
 
-    await ctx.deferReply();
+    await ctx.deferReply({ flags: 64 });
 
     try {
       const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl);

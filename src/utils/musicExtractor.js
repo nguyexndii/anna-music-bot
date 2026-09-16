@@ -158,11 +158,13 @@ function scoreCandidateVideo(v, query, targetDurationSec = 0) {
   return score;
 }
 
+const DEFAULT_FALLBACK_THUMB = 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg';
+
 /**
  * Trích xuất ảnh thumbnail chất lượng cao và chuẩn xác nhất cho bài hát YouTube/Web
  */
 function resolveBestThumbnail(entry, fallbackId = null) {
-  if (!entry && !fallbackId) return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+  if (!entry && !fallbackId) return DEFAULT_FALLBACK_THUMB;
   
   const id = (typeof entry === 'object' ? entry?.id : null) || fallbackId || (typeof entry?.url === 'string' ? entry.url.match(/(?:v=|\/vi\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] : null);
   
@@ -184,7 +186,7 @@ function resolveBestThumbnail(entry, fallbackId = null) {
     return entry.thumbnail;
   }
 
-  return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+  return DEFAULT_FALLBACK_THUMB;
 }
 
 /**
@@ -273,7 +275,7 @@ async function fetchSpotifyPlaylistFull(playlistId) {
             url: spotifyUrl,
             searchQuery: `${title}`,
             duration: formatMs(item.track.duration_ms),
-            thumbnail: item.track.album?.images?.[0]?.url || null,
+            thumbnail: item.track.album?.images?.[0]?.url || DEFAULT_FALLBACK_THUMB,
             isLive: false
           });
         }
@@ -378,9 +380,10 @@ async function searchTrack(query, targetDurationSec = 0) {
 
         const spotifyTracks = await spotifyUrlInfo.getTracks(cleanQuery);
         if (spotifyTracks && spotifyTracks.length > 0) {
-          const limited = spotifyTracks.slice(0, 100).map(item => {
+          const limited = spotifyTracks.slice(0, 100).map((item, idx) => {
             const artistName = item.artist || item.artists?.[0]?.name || '';
-            const title = artistName ? `${item.name} - ${artistName}` : item.name;
+            const rawTitle = (item.name || item.title || `Bài hát #${idx + 1}`).trim();
+            const title = artistName && !rawTitle.includes(artistName) ? `${rawTitle} - ${artistName}` : rawTitle;
             const spotifyId = item.id || (item.uri ? item.uri.replace('spotify:track:', '').split('?')[0] : null);
             const spotifyUrl = item.external_urls?.spotify || (spotifyId ? `https://open.spotify.com/track/${spotifyId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(title)}`);
             const spotifyDurSec = item.duration ? Math.round(item.duration / 1000) : 0;
@@ -392,14 +395,14 @@ async function searchTrack(query, targetDurationSec = 0) {
               duration: formatMs(item.duration),
               durationMs: item.duration || 0,
               spotifyDurationSec: spotifyDurSec,
-              thumbnail: defaultCover,
+              thumbnail: defaultCover || DEFAULT_FALLBACK_THUMB,
               uri: item.uri,
               source: 'spotify',
               isLive: false,
               playlistTitle: playlistTitle || 'Spotify Playlist',
-              playlistThumbnail: defaultCover
+              playlistThumbnail: defaultCover || DEFAULT_FALLBACK_THUMB
             };
-          });
+          }).filter(t => t.title && t.title.trim() !== '');
 
           // Tải song song thumbnail từng bài hát từ Spotify oEmbed (tối đa 25 bài/đợt, cực nhanh ~1-2s)
           await enrichSpotifyTracksWithThumbnails(limited, defaultCover);
@@ -467,19 +470,21 @@ async function searchTrack(query, targetDurationSec = 0) {
           const playlistTitle = res.title || 'YouTube Playlist';
           const playlistThumb = resolveBestThumbnail(res);
           const limited = res.entries.slice(0, 100);
-          return limited.map(e => {
+          return limited.map((e, idx) => {
             const trackUrl = e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null);
+            const safeTitle = (e.title || e.name || '').trim();
+            const dur = e.duration ? (typeof e.duration === 'string' ? e.duration : `${Math.floor(e.duration / 60)}:${String(Math.floor(e.duration % 60)).padStart(2, '0')}`) : '3:30';
             return {
-              title: e.title,
+              title: safeTitle,
               url: trackUrl,
-              searchQuery: e.title,
-              duration: e.duration ? `${Math.floor(e.duration / 60)}:${String(e.duration % 60).padStart(2, '0')}` : '3:30',
+              searchQuery: safeTitle,
+              duration: dur,
               thumbnail: resolveBestThumbnail(e),
               isLive: false,
               playlistTitle: playlistTitle,
-              playlistThumbnail: playlistThumb
+              playlistThumbnail: playlistThumb || DEFAULT_FALLBACK_THUMB
             };
-          });
+          }).filter(t => t.url && t.title && !['[private video]', '[deleted video]'].includes(t.title.toLowerCase()));
         }
       } catch (ytErr) {
         console.warn('[YouTube Playlist extraction error]:', ytErr.message);
@@ -1434,7 +1439,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
         title: p.title,
         url: p.url,
         duration: p.videoCount ? `${p.videoCount} bài` : 'Playlist',
-        thumbnail: p.thumbnail || `https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=120`,
+        thumbnail: p.thumbnail || DEFAULT_FALLBACK_THUMB,
         artist: p.author?.name || 'YouTube Playlist',
         isPlaylist: true,
         itemCount: p.videoCount,

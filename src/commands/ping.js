@@ -14,7 +14,7 @@ module.exports = {
     }),
   async execute(source, args) {
     const ctx = createContext(source, args);
-    const sent = await ctx.reply('Đang đo độ trễ mạng...');
+    const sent = await ctx.reply({ content: 'Đang đo độ trễ mạng...', flags: ctx.isInteraction ? 64 : 0 });
 
     const start = ctx.isInteraction ? ctx.interaction.createdTimestamp : ctx.message.createdTimestamp;
     const end = sent?.createdTimestamp || Date.now();

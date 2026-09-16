@@ -32,7 +32,7 @@ module.exports = {
     const ctx = createContext(source, args);
     const queue = musicManager.get(ctx.guild.id);
     if (!queue || (!queue.currentSong && queue.songs.length === 0)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ âm nhạc hiện đang trống!')] });
+      return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ âm nhạc hiện đang trống!')], flags: 64 });
     }
 
     const userSongs = queue.songs.filter(s => s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)');
@@ -51,7 +51,9 @@ module.exports = {
     };
 
     const embed = createQueueEmbed(queue, currentPage);
-    const replyMsg = await ctx.reply({ embeds: [embed], components: buildComponents(currentPage) });
+    const replyOptions = { embeds: [embed], components: buildComponents(currentPage) };
+    if (ctx.isInteraction) replyOptions.flags = 64;
+    const replyMsg = await ctx.reply(replyOptions);
 
     if (totalPages > 1 && replyMsg) {
       const collector = replyMsg.createMessageComponentCollector({

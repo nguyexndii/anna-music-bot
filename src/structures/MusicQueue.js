@@ -646,6 +646,31 @@ class MusicQueue {
     }
   }
 
+  _sanitizeTrack(song, idx = 0) {
+    if (!song) return null;
+    if (typeof song === 'string') {
+      return {
+        title: 'Bài hát yêu cầu',
+        url: song,
+        searchQuery: song,
+        duration: '3:30',
+        thumbnail: 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg'
+      };
+    }
+    const safeTitle = (song.title || song.name || song.rawSongName || (song.url ? `Bài hát #${idx + 1}` : 'Bài hát không tên')).trim();
+    song.title = safeTitle || `Bài hát #${idx + 1}`;
+    if (!song.url && song.searchQuery) {
+      song.url = `https://www.youtube.com/results?search_query=${encodeURIComponent(song.searchQuery)}`;
+    }
+    if (!song.thumbnail) {
+      song.thumbnail = 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg';
+    }
+    if (!song.duration) {
+      song.duration = '3:30';
+    }
+    return song;
+  }
+
   _attachRequester(song, requestUser) {
     if (!song) return;
     song.requestedBy = requestUser;
@@ -668,6 +693,8 @@ class MusicQueue {
 
   async addSong(song, requestUser) {
     this.clear247IdleTimer();
+    song = this._sanitizeTrack(song);
+    if (!song) return;
     this._attachRequester(song, requestUser);
 
     const isCurrentLofi = Boolean(this.currentSong && (this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247));
@@ -690,7 +717,8 @@ class MusicQueue {
       return;
     }
 
-    this.songs.push(song);
+    // Yêu cầu: Khi user add bài mà đã có hàng chờ hoặc đang phát nhạc, bài mới sẽ nằm ở ĐẦU danh sách (LIFO: A 1 2 3, thêm B -> B A 1 2 3)
+    this.songs.unshift(song);
     this._saveSessionState();
 
     this.clearDisconnectTimer();
@@ -705,9 +733,15 @@ class MusicQueue {
 
   async addSongs(songArray, requestUser) {
     this.clear247IdleTimer();
-    for (const song of songArray) {
-      this._attachRequester(song, requestUser);
+    const sanitized = [];
+    for (let i = 0; i < songArray.length; i++) {
+      const s = this._sanitizeTrack(songArray[i], i);
+      if (s) {
+        this._attachRequester(s, requestUser);
+        sanitized.push(s);
+      }
     }
+    if (sanitized.length === 0) return;
 
     const isCurrentLofi = Boolean(this.currentSong && (this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247));
 
@@ -719,7 +753,7 @@ class MusicQueue {
         this.currentResource = null;
       }
       this.player.stop(true);
-      this.songs.unshift(...songArray);
+      this.songs.unshift(...sanitized);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
@@ -728,7 +762,8 @@ class MusicQueue {
       return;
     }
 
-    this.songs.push(...songArray);
+    // Chèn nguyên cụm playlist vào đầu hàng chờ, giữ nguyên thứ tự các bài trong playlist
+    this.songs.unshift(...sanitized);
     this._saveSessionState();
     this.enrichMissingThumbnails().catch(() => {});
 
@@ -1041,7 +1076,7 @@ class MusicQueue {
 
   skip() {
     const now = Date.now();
-    if (this._lastSkipTime && (now - this._lastSkipTime < 1500)) {
+    if (this._lastSkipTime && (now - this._lastSkipTime < 800)) {
       return false;
     }
     this._lastSkipTime = now;
@@ -1057,7 +1092,12 @@ class MusicQueue {
     this.preloadedSongUrl = null;
     this.prefetchedSong = null;
     this.clearCrossfadeTimer();
-    this.player.stop();
+
+    if (this.player.state.status === AudioPlayerStatus.Idle) {
+      this._handleSongEnd();
+    } else {
+      this.player.stop(true);
+    }
     return true;
   }
 

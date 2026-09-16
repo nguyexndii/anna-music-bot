@@ -369,21 +369,22 @@ module.exports = function createApiRouter(client) {
         settings: guildSettings,
         current: currentTrack ? (() => {
           const reqInfo = resolveTrackRequester(currentTrack, guild);
+          const safeTitle = (currentTrack.title || currentTrack.name || currentTrack.rawSongName || 'Đang phát âm thanh').trim();
           return {
-            title: currentTrack.title,
+            title: safeTitle,
             artist: (() => {
               if (currentTrack.artist && currentTrack.artist !== 'Unknown' && !currentTrack.artist.startsWith('[') && !currentTrack.artist.includes('Topic')) {
                 return currentTrack.artist;
               }
-              const clean = (currentTrack.title || '').replace(/\[.*?\]|【.*?】/g, ' ').replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
+              const clean = safeTitle.replace(/\[.*?\]|【.*?】/g, ' ').replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
               const segs = clean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => s.trim()).filter(Boolean);
               if (segs.length >= 2) {
                 return segs[1].replace(/\(.*?prod.*?\)/gi, '').replace(/prod\.?\s*by.*/gi, '').trim() || segs[0];
               }
               return currentTrack.artist || 'YouTube Music';
             })(),
-            url: currentTrack.url || (currentTrack.searchQuery ? `https://www.youtube.com/results?search_query=${encodeURIComponent(currentTrack.searchQuery)}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(currentTrack.title)}`),
-            thumbnail: currentTrack.thumbnail,
+            url: currentTrack.url || (currentTrack.searchQuery ? `https://www.youtube.com/results?search_query=${encodeURIComponent(currentTrack.searchQuery)}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(safeTitle)}`),
+            thumbnail: currentTrack.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
             duration: currentTrack.duration,
             playbackDurationMs: (() => {
               let val = 0;
@@ -579,7 +580,7 @@ module.exports = function createApiRouter(client) {
           url: requestedUrl,
           title: rawResults[0]?.playlistTitle || `Danh sách phát (${rawResults.length} bài)`,
           trackCount: rawResults.length,
-          thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || null,
+          thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
           addedBy: user.displayName || user.username,
           addedByAvatar: user.avatar || null,
           tracks: rawResults
@@ -715,7 +716,7 @@ module.exports = function createApiRouter(client) {
         url,
         title: rawResults[0]?.playlistTitle || (rawResults.length > 1 ? `Danh sách phát (${rawResults.length} bài)` : (rawResults[0]?.title || 'Playlist')),
         trackCount: rawResults.length,
-        thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || null,
+        thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
         addedBy: req.user?.displayName || req.user?.username || 'Web User',
         addedByAvatar: req.user?.avatar || null,
         tracks: rawResults
@@ -789,14 +790,14 @@ module.exports = function createApiRouter(client) {
         value: typeof value === 'object' ? JSON.stringify(value) : value
       });
 
-      // Vô hiệu hóa các nút điều khiển luồng phát khi bài hát chưa bắt đầu hoặc đang chuẩn bị
+      // Vô hiệu hóa các nút điều khiển luồng phát khi không có bài hát và bot không phát âm thanh
       const playbackActions = ['pause', 'resume', 'stop', 'seek', 'skip', 'previous'];
       if (playbackActions.includes(action)) {
-        if (!queue?.currentSong || queue?.isPreparing || queue?.isStopped) {
+        if ((!queue?.currentSong && !queue?.isPlaying) || queue?.isStopped) {
           return res.status(400).json({
             success: false,
             code: 'NOT_PLAYING',
-            error: 'Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!'
+            error: 'Hiện không có bài hát nào đang phát trong phòng!'
           });
         }
       }

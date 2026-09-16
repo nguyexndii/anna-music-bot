@@ -139,6 +139,9 @@ module.exports = {
     const hasAdminPerm = ctx.member?.permissions?.has('Administrator') || ctx.member?.permissions?.has('ManageGuild');
     const isAdmin = Boolean(isOwner || hasAdminPerm);
     const payload = createHelpMenu('music', isAdmin);
+    if (ctx.isInteraction) {
+      payload.flags = 64;
+    }
     return ctx.reply(payload);
   }
 };
