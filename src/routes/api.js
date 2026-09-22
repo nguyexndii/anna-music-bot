@@ -555,7 +555,7 @@ module.exports = function createApiRouter(client) {
       }
 
       const queue = client.musicManager.getOrCreate(guild, textChannel, voiceChannel);
-      const isFirst = !queue.currentSong && queue.songs.length === 0;
+      const isFirst = !queue.currentSong || Boolean(queue.currentSong.is247 || queue.currentSong.requestedBy === 'Auto (24/7)') || queue.songs.length === 0;
       const isPlaylist = Array.isArray(rawResults) && rawResults.length > 1;
 
       // XỬ LÝ NẠP TOÀN BỘ PLAYLIST

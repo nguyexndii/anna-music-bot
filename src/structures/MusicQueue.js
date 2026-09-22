@@ -74,6 +74,7 @@ class MusicQueue {
     this._isPrefetching = false;
     this._isPlayingNext = false;
     this._isPreviousAction = false;
+    this.isQueueOnHold = false;
 
     this._initSettings();
     this._setupPlayerEvents();
@@ -373,7 +374,7 @@ class MusicQueue {
   async _handleSongEnd() {
     this.clearCrossfadeTimer();
     this.clearPreloadTimer();
-    if (this.isDestroyed || this.isStopped || this._switchingTo247) return;
+    if (this._isPlayingNext || this.isDestroyed || this.isStopped || this._switchingTo247) return;
     const lastSong = this.currentSong;
     const wasExplicitSkip = Boolean(this._skipRequested);
     const wasPrevious = Boolean(this._isPreviousAction);
@@ -407,17 +408,29 @@ class MusicQueue {
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
     const songToRelate = lastSong || (this.previousSongs.length > 0 ? this.previousSongs[this.previousSongs.length - 1] : null);
 
-    // 1. Nếu bài vừa kết thúc là nhạc Lofi 24/7 (hoặc bot đang ở chế độ 24/7 Lofi):
-    // TIẾP TỤC phát bài Lofi nền tiếp theo liên tục!
-    // Hàng chờ của người dùng (this.songs) được giữ nguyên an toàn cho đến khi người dùng chủ động bấm 'TIẾP TỤC PHÁT NHẠC' hoặc order bài mới!
-    if (isLofiTrack && this.mode247) {
+    // 0. Nếu phòng trống không còn ai (humanCount === 0) và bật chế độ 24/7:
+    if (humanCount === 0 && this.mode247) {
+      this.isQueueOnHold = true;
+      this.prefetchedSong = null;
+      this.preloadedResource = null;
+      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
       await this._play247BackgroundLofi();
       return;
     }
 
-    // 2. Nếu bài vừa kết thúc là bài hát của người dùng và trong hàng chờ còn bài -> Phát bài tiếp theo
-    if (this.songs.length > 0) {
+    // 1. Nếu trong hàng chờ còn bài hát của người dùng:
+    // Ưu tiên phát ngay bài tiếp theo nếu:
+    // - Không bị tạm giữ hàng chờ (this.isQueueOnHold)
+    // - HOẶC người dùng vừa bấm Skip / PlayNow / Thêm bài mới (wasExplicitSkip)
+    if (this.songs.length > 0 && (!this.isQueueOnHold || wasExplicitSkip)) {
+      this.isQueueOnHold = false;
       await this.playNext();
+      return;
+    }
+
+    // 2. Nếu bài vừa kết thúc là nhạc Lofi 24/7 (hoặc bot đang ở chế độ 24/7 Lofi và hàng chờ trống hoặc đang tạm giữ):
+    if (isLofiTrack && this.mode247) {
+      await this._play247BackgroundLofi();
       return;
     }
 
@@ -428,11 +441,13 @@ class MusicQueue {
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
     if (this.prefetchedSong && humanCount > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
-      const nextTrack = this.prefetchedSong;
+      const nextTrack = this._sanitizeTrack(this.prefetchedSong);
       this.prefetchedSong = null;
-      this.songs.push(nextTrack);
-      await this.playNext();
-      return;
+      if (nextTrack) {
+        this.songs.push(nextTrack);
+        await this.playNext();
+        return;
+      }
     }
 
     // 1. KHI CÒN NGƯỜI TRONG PHÒNG VOICE (humanCount > 0):
@@ -464,10 +479,13 @@ class MusicQueue {
         }
 
         if (relatedTrack) {
-          relatedTrack.requestedBy = 'Tự động phát 🎵';
-          this.songs.push(relatedTrack);
-          await this.playNext();
-          return;
+          const sanitizedRel = this._sanitizeTrack(relatedTrack);
+          if (sanitizedRel) {
+            sanitizedRel.requestedBy = 'Tự động phát 🎵';
+            this.songs.push(sanitizedRel);
+            await this.playNext();
+            return;
+          }
         }
       }
 
@@ -526,6 +544,7 @@ class MusicQueue {
           cleanTrack = results.find(t => !isMemeOrVocal(t)) || results[0];
         }
 
+        cleanTrack = this._sanitizeTrack(cleanTrack);
         cleanTrack.requestedBy = 'Auto (24/7)';
         cleanTrack.is247 = true;
         lofiHistoryManager.addTrack(this.guild.id, cleanTrack);
@@ -698,22 +717,22 @@ class MusicQueue {
     this._attachRequester(song, requestUser);
 
     const isCurrentLofi = Boolean(this.currentSong && (this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247));
+    this.isQueueOnHold = false;
 
     if (isCurrentLofi) {
       // Khi đang phát nhạc nền Lofi 24/7 và có người dùng order nhạc mới:
-      // Dừng bài Lofi ngay lập tức, chuyển bài mới vào hàng chờ và phát ngay!
-      this.currentSong = null;
+      // Chèn bài mới lên đầu hàng chờ và dừng bài Lofi để sự kiện chuyển bài tự động phát bài mới tuần tự, không bị race condition
       this._skipRequested = true;
-      if (this.currentResource) {
-        this._cleanupResource(this.currentResource);
-        this.currentResource = null;
-      }
-      this.player.stop(true);
       this.songs.unshift(song);
       this._saveSessionState();
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
-      await this.playNext();
+
+      if (this.player.state.status === AudioPlayerStatus.Idle) {
+        await this.playNext();
+      } else {
+        this.player.stop(true);
+      }
       return;
     }
 
@@ -744,21 +763,21 @@ class MusicQueue {
     if (sanitized.length === 0) return;
 
     const isCurrentLofi = Boolean(this.currentSong && (this.currentSong.requestedBy === 'Auto (24/7)' || this.currentSong.is247));
+    this.isQueueOnHold = false;
 
     if (isCurrentLofi) {
-      this.currentSong = null;
       this._skipRequested = true;
-      if (this.currentResource) {
-        this._cleanupResource(this.currentResource);
-        this.currentResource = null;
-      }
-      this.player.stop(true);
       this.songs.unshift(...sanitized);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
-      await this.playNext();
+
+      if (this.player.state.status === AudioPlayerStatus.Idle) {
+        await this.playNext();
+      } else {
+        this.player.stop(true);
+      }
       return;
     }
 
@@ -836,7 +855,17 @@ class MusicQueue {
 
       const nextSong = this.songs.shift();
       if (!nextSong) return;
-      this.currentSong = nextSong;
+      this.currentSong = this._sanitizeTrack(nextSong);
+      if (!this.currentSong || !this.currentSong.title) {
+        const safeTitle = (nextSong?.title || nextSong?.name || nextSong?.searchQuery || 'Bài hát yêu cầu').trim();
+        this.currentSong = {
+          ...nextSong,
+          title: safeTitle || 'Bài hát yêu cầu',
+          url: nextSong?.url || `https://www.youtube.com/results?search_query=${encodeURIComponent(safeTitle)}`,
+          thumbnail: nextSong?.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
+          duration: nextSong?.duration || '3:30'
+        };
+      }
       this.currentSong.seekPosition = 0;
       if (this.currentResource) {
         this._cleanupResource(this.currentResource);
@@ -894,7 +923,8 @@ class MusicQueue {
       if (this.currentSong?.requestedBy === 'Auto (24/7)') {
         setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Mode');
       } else {
-        setVoiceChannelStatus(this.voiceChannel, `🎶 ${this.currentSong?.title || 'Unknown'}`);
+        const voiceTitle = (this.currentSong?.title || this.currentSong?.name || 'Đang phát nhạc').trim();
+        setVoiceChannelStatus(this.voiceChannel, `🎶 ${voiceTitle}`);
       }
 
       // Lập lịch tải trước (Preload) ở 20s cuối bài để bảo vệ RAM VPS
@@ -970,13 +1000,14 @@ class MusicQueue {
       }
     } catch (error) {
       console.error(`[Play Error] ${this.currentSong?.title || 'Unknown'}:`, error);
-      const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
+      const failedSong = this.currentSong;
+      const is247Lofi = Boolean(failedSong?.requestedBy === 'Auto (24/7)' || failedSong?.is247);
 
       logAction('PLAY_ERROR', {
         guildId: this.guild.id,
         channelId: this.textChannel?.id,
-        song: this.currentSong?.title || 'Unknown',
-        url: this.currentSong?.url || 'N/A',
+        song: failedSong?.title || 'Unknown',
+        url: failedSong?.url || 'N/A',
         error: error.message || String(error),
         is247: is247Lofi
       });
@@ -984,11 +1015,22 @@ class MusicQueue {
       // Chỉ gửi thông báo lỗi ra textChannel nếu là bài do user yêu cầu (không spam bài 24/7 nền)
       if (this.textChannel && !is247Lofi) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Không thể phát bài **${this.currentSong?.title || 'đã chọn'}**: ${error.message}`)],
+          embeds: [createErrorEmbed(`Không thể phát bài **${failedSong?.title || 'đã chọn'}**: ${error.message}`)],
           flags: 4096
         }).catch(() => {});
       }
-      this._handleSongEnd();
+
+      // Dọn dẹp resource và timer của bài lỗi
+      if (this.currentResource) {
+        this._cleanupResource(this.currentResource);
+        this.currentResource = null;
+      }
+      this.clearPreloadTimer();
+      this.clearCrossfadeTimer();
+
+      // Giải phóng khóa _isPlayingNext TRƯỚC KHI chuyển tiếp để _handleSongEnd không bị chặn bởi guard clause!
+      this._isPlayingNext = false;
+      await this._handleSongEnd();
     } finally {
       this._isPlayingNext = false;
     }
@@ -1085,6 +1127,7 @@ class MusicQueue {
     this.paused = false;
     try { this.player.unpause(); } catch (e) {}
 
+    this.isQueueOnHold = false;
     this._skipRequested = true;
     this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
@@ -1259,6 +1302,9 @@ class MusicQueue {
 
     // Giữ nguyên hàng chờ (this.songs), chỉ đặt lại chế độ lặp
     this.loopMode = 'off';
+    if (this.songs && this.songs.length > 0) {
+      this.isQueueOnHold = true;
+    }
 
     // Lưu lại bài hát người dùng đang nghe trước khi dọn dẹp
     if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
@@ -1319,6 +1365,8 @@ class MusicQueue {
       // Đang ở Lofi -> Muốn quay về phát nhạc người dùng
       this.paused = false;
       try { this.player?.unpause(); } catch (e) {}
+      this.isQueueOnHold = false;
+      this._skipRequested = true;
 
       // 1. Trường hợp trong hàng chờ CÒN bài hát của người dùng
       if (this.songs && this.songs.length > 0) {
@@ -1393,6 +1441,7 @@ class MusicQueue {
     this.preloadedSongUrl = null;
     this.songs = [];
     this.currentSong = null;
+    this.isQueueOnHold = false;
     this._cleanupResource(this.currentResource);
     this.currentResource = null;
     this.player.stop(true);
