@@ -37,19 +37,25 @@ const spotifyUrlInfo = require('spotify-url-info')(fetch);
 // Đường dẫn file cookies YouTube (Netscape format). Cài trong .env: YTDLP_COOKIES_FILE=/root/anna-music-bot/youtube.cookies
 // File này giúp yt-dlp xác thực để bypass kiểm tra bot của YouTube trên Datacenter IP
 function getCookiesFile() {
-  if (process.env.YTDLP_COOKIES_FILE && fs.existsSync(process.env.YTDLP_COOKIES_FILE)) {
-    return process.env.YTDLP_COOKIES_FILE;
-  }
-  const rootCookies = path.resolve(__dirname, '../../youtube.cookies');
-  if (fs.existsSync(rootCookies)) {
-    return rootCookies;
-  }
-  const cwdCookies = path.resolve(process.cwd(), 'youtube.cookies');
-  if (fs.existsSync(cwdCookies)) {
-    return cwdCookies;
-  }
-  if (fs.existsSync('/root/anna-music-bot/youtube.cookies')) {
-    return '/root/anna-music-bot/youtube.cookies';
+  const candidates = [
+    process.env.YTDLP_COOKIES_FILE,
+    path.resolve(__dirname, '../../youtube.cookies'),
+    path.resolve(process.cwd(), 'youtube.cookies'),
+    '/root/anna-music-bot/youtube.cookies'
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) {
+        const stat = fs.statSync(c);
+        if (stat.isFile() && stat.size > 100) {
+          const sample = fs.readFileSync(c, 'utf8').slice(0, 300);
+          if (sample.includes('NETSCAPE') || sample.includes('.youtube.com') || sample.includes('# HTTP Cookie File')) {
+            return c;
+          }
+        }
+      }
+    } catch (e) {}
   }
   return null;
 }

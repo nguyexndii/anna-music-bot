@@ -411,7 +411,13 @@ class MusicQueue {
     const humanCount = this.getHumanMemberCount();
     const guildSettings = settingsManager.get(this.guild.id);
     const isLofiTrack = lastSong?.requestedBy === 'Auto (24/7)' || lastSong?.is247;
-    const songToRelate = lastSong || (this.previousSongs.length > 0 ? this.previousSongs[this.previousSongs.length - 1] : null);
+    const isFailedTrack = Boolean(lastSong && (
+      (this.lastPlayErrorUrl && lastSong.url === this.lastPlayErrorUrl) ||
+      (this.lastPlayErrorTitle && lastSong.title === this.lastPlayErrorTitle)
+    ));
+    const songToRelate = (!isFailedTrack && lastSong)
+      ? lastSong
+      : (this.previousSongs.length > 0 ? this.previousSongs[this.previousSongs.length - 1] : null);
 
     // 0. Nếu phòng trống không còn ai (humanCount === 0) và bật chế độ 24/7:
     if (humanCount === 0 && this.mode247) {
@@ -468,15 +474,17 @@ class MusicQueue {
         }
 
         // Fallback tự động nếu không tìm được: Tìm bài hát hay nhất cùng ca sĩ hoặc cùng thể loại
-        if (!relatedTrack) {
+        if (!relatedTrack && songToRelate) {
           try {
             const cleanTitle = (songToRelate.title || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').trim();
             const artist = (songToRelate.artist && songToRelate.artist !== 'Unknown') ? songToRelate.artist : cleanTitle.split(/[-–|]/)[0]?.trim();
-            const query = artist ? `${artist} bài hát hay nhất tuyển chọn` : `${cleanTitle} official audio`;
+            const query = (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất') && !artist.includes('King Of Rap'))
+              ? `${artist} bài hát hay nhất tuyển chọn`
+              : `nhac tre remix hot tiktok official audio`;
             console.log(`[Autoplay Fallback Query] Thử tìm bài thay thế: "${query}"`);
             const fallbackResults = await searchTrack(query);
             if (fallbackResults && fallbackResults.length > 0) {
-              relatedTrack = fallbackResults.find(t => t.url !== songToRelate.url) || fallbackResults[0];
+              relatedTrack = fallbackResults.find(t => t.url !== songToRelate.url && t.url !== this.lastPlayErrorUrl && t.title !== this.lastPlayErrorTitle) || null;
             }
           } catch (fbErr) {
             console.warn('[Autoplay Fallback Error]:', fbErr.message);
@@ -1029,6 +1037,9 @@ class MusicQueue {
       console.error(`[Play Error] ${this.currentSong?.title || 'Unknown'}:`, error);
       const failedSong = this.currentSong;
       const is247Lofi = Boolean(failedSong?.requestedBy === 'Auto (24/7)' || failedSong?.is247);
+
+      this.lastPlayErrorUrl = failedSong?.url || null;
+      this.lastPlayErrorTitle = failedSong?.title || null;
 
       logAction('PLAY_ERROR', {
         guildId: this.guild.id,
