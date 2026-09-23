@@ -224,13 +224,7 @@ class MusicQueue {
       adapterCreator: currentGuild.voiceAdapterCreator,
       selfDeaf: true,
       selfMute: false,
-      debug: true
-    });
-
-    this.connection.on('debug', msg => {
-      if (!msg.includes('ping') && !msg.includes('pong')) {
-        console.log(`[VoiceDebug] ${this.guild.name}:`, msg);
-      }
+      debug: false
     });
 
     this.connection.on('error', error => {
@@ -380,6 +374,17 @@ class MusicQueue {
     const wasPrevious = Boolean(this._isPreviousAction);
     this._skipRequested = false;
     this._isPreviousAction = false;
+
+    if (lastSong) {
+      logAction('TRACK_END', {
+        guild: this.guild.name,
+        guildId: this.guild.id,
+        channelId: this.voiceChannel?.id,
+        title: lastSong.title || 'Unknown',
+        wasSkip: wasExplicitSkip,
+        is247: Boolean(lastSong.is247 || lastSong.requestedBy === 'Auto (24/7)')
+      });
+    }
 
     if (!wasPrevious && lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
       this.lastUserTrack = lastSong;
@@ -550,6 +555,12 @@ class MusicQueue {
         lofiHistoryManager.addTrack(this.guild.id, cleanTrack);
 
         this.songs.unshift(cleanTrack);
+        logAction('SWITCH_TO_247_LOFI', {
+          guild: this.guild.name,
+          guildId: this.guild.id,
+          channelId: this.voiceChannel?.id,
+          track: cleanTrack.title
+        });
         await this.playNext();
       }
     } catch (e) {
@@ -917,6 +928,22 @@ class MusicQueue {
           }
           historyManager.addSong(this.guild.id, this.currentSong).catch(() => {});
         }
+
+        const requesterName = this.currentSong.requestedByName ||
+          (typeof this.currentSong.requestedBy === 'object'
+            ? (this.currentSong.requestedBy.displayName || this.currentSong.requestedBy.username)
+            : this.currentSong.requestedBy) || 'Auto';
+
+        logAction('TRACK_START', {
+          guild: this.guild.name,
+          guildId: this.guild.id,
+          channelId: this.voiceChannel?.id,
+          title: this.currentSong.title || 'Unknown',
+          url: this.currentSong.url || 'N/A',
+          duration: this.currentSong.duration || 'N/A',
+          requestedBy: requesterName,
+          is247: Boolean(this.currentSong.is247 || this.currentSong.requestedBy === 'Auto (24/7)')
+        });
       }
 
       // Cập nhật trạng thái kênh Voice (Voice Channel Status)

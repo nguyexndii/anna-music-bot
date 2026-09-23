@@ -6,8 +6,105 @@
  * với cờ im lặng flags: 4096 để không tạo tiếng chuông tít tít phiền toái.
  */
 
+const fs = require('fs');
+const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
+
+const LOGS_DIR = path.join(__dirname, '../../logs');
+const EVENT_LOG_FILE = path.join(LOGS_DIR, 'events.log');
+const OLD_LOG_FILE = path.join(LOGS_DIR, 'events.old.log');
+const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
+
+function formatVietnamTime(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date);
+
+    const map = {};
+    for (const p of parts) map[p.type] = p.value;
+    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+  } catch (e) {
+    return date.toISOString().replace('T', ' ').substring(0, 19);
+  }
+}
+
+function writeToEventLogFile(action, details = {}) {
+  // Bỏ qua các sự kiện message edit/send phụ không quan trọng để giữ file log sạch sẽ
+  if (['MESSAGE_EDIT', 'MESSAGE_SEND', 'MESSAGE_REPLY', 'MESSAGE_DELETE'].includes(action)) {
+    if (!details.type || (!details.type.includes('DISCONNECT') && !details.type.includes('BANNER'))) {
+      return;
+    }
+  }
+
+  try {
+    if (!fs.existsSync(LOGS_DIR)) {
+      fs.mkdirSync(LOGS_DIR, { recursive: true });
+    }
+
+    if (fs.existsSync(EVENT_LOG_FILE)) {
+      const stat = fs.statSync(EVENT_LOG_FILE);
+      if (stat.size >= MAX_LOG_SIZE) {
+        if (fs.existsSync(OLD_LOG_FILE)) {
+          try { fs.unlinkSync(OLD_LOG_FILE); } catch (e) {}
+        }
+        try { fs.renameSync(EVENT_LOG_FILE, OLD_LOG_FILE); } catch (e) {}
+      }
+    }
+
+    const timeStr = formatVietnamTime();
+    let summary = '';
+
+    if (details.error) {
+      summary = `❌ Lỗi: ${details.error}`;
+    } else if (action === 'TRACK_START') {
+      summary = `🎵 Phát bài: "${details.title || 'Unknown'}" | Order: ${details.requestedBy || 'Auto'}${details.is247 ? ' (24/7 Lofi)' : ''}`;
+    } else if (action === 'TRACK_END') {
+      summary = `⏹️ Kết thúc bài: "${details.title || 'Unknown'}"${details.wasSkip ? ' [Bị Skip]' : ''}`;
+    } else if (action === 'VOICE_CONNECTION_READY') {
+      summary = `🟢 Kết nối Voice sẵn sàng tại ${details.guild || 'Server'} (kênh: ${details.channelId || 'N/A'})`;
+    } else if (action === 'VOICE_CONNECTION_DISCONNECTED') {
+      summary = `🔌 Mất kết nối Voice tại ${details.guild || 'Server'} (Đang tự động khôi phục...)`;
+    } else if (action === 'VOICE_CONNECTION_RECONNECTING') {
+      summary = `🔄 Đang thử kết nối lại Voice tại ${details.guild || 'Server'}...`;
+    } else if (action === 'VOICE_USER_JOIN') {
+      summary = `👤 ${details.user || 'User'} vào phòng Voice (kênh: ${details.channelId || 'N/A'})`;
+    } else if (action === 'VOICE_USER_LEAVE') {
+      summary = `🚪 ${details.user || 'User'} rời phòng Voice (kênh: ${details.channelId || 'N/A'})`;
+    } else if (action === 'VOICE_USER_MOVE') {
+      summary = `🔀 ${details.user || 'User'} chuyển phòng: ${details.oldChannelId} ➔ ${details.newChannelId}`;
+    } else if (action === 'SLASH_COMMAND') {
+      summary = `⚡ ${details.user || 'User'} dùng lệnh: ${details.command || 'unknown'}`;
+    } else if (action === 'SWITCH_TO_247_LOFI') {
+      summary = `♾️ Chuyển sang chế độ Treo Lofi 24/7 nền: "${details.track || 'Lofi Instrumental'}"`;
+    } else if (action === 'KEEPER_JOIN') {
+      summary = `🛡️ [Keeper] Bot phụ vào giữ phòng (humans: ${details.humanCount || 0}, musicBot: ${details.hasMusicBot ? 'Có' : 'Không'})`;
+    } else if (action === 'KEEPER_LEAVE') {
+      summary = `👋 [Keeper] Bot phụ rời phòng (Đủ ${details.humanCount || 0} người + bot nhạc)`;
+    } else if (action === 'DISCONNECT_NOTICE') {
+      summary = `👋 Hết nhạc, bot rời phòng Voice`;
+    } else {
+      const cleanDetails = Object.entries(details)
+        .filter(([k]) => !['guildId', 'channelId', 'guild', 'isLogMessage', 'avatar'].includes(k))
+        .map(([k, v]) => `${k}=${v}`)
+        .join(' ');
+      summary = cleanDetails || action;
+    }
+
+    const line = `[${timeStr}] [${action}] ${summary}\n`;
+    fs.appendFileSync(EVENT_LOG_FILE, line, 'utf8');
+  } catch (err) {
+    // Tránh gián đoạn bot
+  }
+}
 
 let discordClient = null;
 
@@ -167,6 +264,42 @@ function getActionInfo(action, details = {}) {
     };
   }
 
+  if (action === 'TRACK_START') {
+    return {
+      title: '▶️ Bắt Đầu Phát Nhạc (Track Start)',
+      color: 0x57F287,
+      desc: details.title ? `Đang phát: **${details.title}**` : 'Bắt đầu phát bài hát'
+    };
+  }
+  if (action === 'TRACK_END') {
+    return {
+      title: '⏹️ Kết Thúc Bài Hát (Track End)',
+      color: 0x95A5A6,
+      desc: details.title ? `Đã phát xong: **${details.title}**${details.wasSkip ? ' (Bị Skip)' : ''}` : 'Kết thúc bài hát'
+    };
+  }
+  if (action === 'SWITCH_TO_247_LOFI') {
+    return {
+      title: '♾️ Chuyển Sang Lofi 24/7 Nền',
+      color: 0x3498DB,
+      desc: details.track ? `Treo Lofi nền: **${details.track}**` : 'Chuyển sang chế độ Treo Lofi nền'
+    };
+  }
+  if (action === 'KEEPER_JOIN') {
+    return {
+      title: '🛡️ [Voice Keeper] Bot Phụ Vào Giữ Phòng',
+      color: 0x57F287,
+      desc: details.desc || 'Bot phụ đã vào giữ phòng để tránh reset thời gian'
+    };
+  }
+  if (action === 'KEEPER_LEAVE') {
+    return {
+      title: '👋 [Voice Keeper] Bot Phụ Rời Phòng (Nhường Chỗ)',
+      color: 0xFEE75C,
+      desc: details.desc || 'Phòng đã an toàn (có Bot Nhạc + từ 2 người thật trở lên)'
+    };
+  }
+
   return {
     title: `📋 Hoạt Động: ${action}`,
     color: 0x95A5A6,
@@ -211,7 +344,7 @@ async function processLogQueue() {
 }
 
 /**
- * Ghi 1 dòng log debug voi timestamp ISO hien tai và tự động bắn vào Kênh Log Discord nếu có
+ * Ghi 1 dòng log debug voi timestamp ISO hien tai, luu file log su kien sieu toc va ban vao Kenh Log Discord
  * @param {string} action  Tên hành động viết HOA (e.g. VOICE_USER_JOIN, MESSAGE_USER_SEND)
  * @param {Object} details Các cặp key-value bổ sung (tùy chọn)
  */
@@ -224,7 +357,10 @@ function logAction(action, details = {}) {
     })
     .join(' ');
   
-  // 1. Luôn in ra console terminal
+  // 1. Ghi vào file log sự kiện siêu tốc (logs/events.log)
+  writeToEventLogFile(action, details);
+
+  // 2. In ra console terminal
   console.log(`[DEBUG ${ts}] ${action}${pairs ? ' ' + pairs : ''}`);
 
   // 2. Kiểm tra và gửi vào kênh Log của máy chủ Discord
@@ -335,5 +471,7 @@ function logAction(action, details = {}) {
 
 module.exports = {
   initLogger,
-  logAction
+  logAction,
+  writeToEventLogFile,
+  formatVietnamTime
 };

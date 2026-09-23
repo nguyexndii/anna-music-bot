@@ -251,6 +251,29 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  // 2.1 Xem log sự kiện hệ thống siêu tốc (Fast Event Log)
+  router.get('/logs', (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+      const fs = require('fs');
+      const path = require('path');
+      const logPath = path.join(__dirname, '../../logs/events.log');
+      if (!fs.existsSync(logPath)) {
+        return res.json({ success: true, count: 0, logs: [] });
+      }
+      const raw = fs.readFileSync(logPath, 'utf8');
+      const lines = raw.trim().split('\n').filter(Boolean);
+      const lastLines = lines.slice(-limit);
+      return res.json({
+        success: true,
+        count: lastLines.length,
+        logs: lastLines
+      });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   const activeWebUsersMap = new Map();
 
   function recordActiveUser(guildId, user) {
