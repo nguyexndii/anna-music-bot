@@ -452,12 +452,16 @@ class MusicQueue {
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
     if (this.prefetchedSong && humanCount > 0 && guildSettings.autoplay !== false && !isLofiTrack) {
-      const nextTrack = this._sanitizeTrack(this.prefetchedSong);
-      this.prefetchedSong = null;
-      if (nextTrack) {
-        this.songs.push(nextTrack);
-        await this.playNext();
-        return;
+      if (historyManager.isRecentlyPlayed(this.guild.id, this.prefetchedSong, 25)) {
+        this.prefetchedSong = null;
+      } else {
+        const nextTrack = this._sanitizeTrack(this.prefetchedSong);
+        this.prefetchedSong = null;
+        if (nextTrack) {
+          this.songs.push(nextTrack);
+          await this.playNext();
+          return;
+        }
       }
     }
 
@@ -484,7 +488,13 @@ class MusicQueue {
             console.log(`[Autoplay Fallback Query] Thử tìm bài thay thế: "${query}"`);
             const fallbackResults = await searchTrack(query);
             if (fallbackResults && fallbackResults.length > 0) {
-              relatedTrack = fallbackResults.find(t => t.url !== songToRelate.url && t.url !== this.lastPlayErrorUrl && t.title !== this.lastPlayErrorTitle) || null;
+              relatedTrack = fallbackResults.find(t => 
+                t && t.url &&
+                t.url !== songToRelate.url && 
+                t.url !== this.lastPlayErrorUrl && 
+                t.title !== this.lastPlayErrorTitle &&
+                !historyManager.isRecentlyPlayed(this.guild.id, t, 25)
+              ) || null;
             }
           } catch (fbErr) {
             console.warn('[Autoplay Fallback Error]:', fbErr.message);

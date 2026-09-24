@@ -767,10 +767,48 @@ function extractSoundCloudTitleFromUrl(url) {
   }
 }
 
+const { getGeminiRecommendation } = require('./geminiHelper');
+const historyManager = require('../structures/HistoryManager');
+
+/**
+ * Kiểm tra xem một bài hát có nằm trong lịch sử phát gần nhất không (Hỗ trợ cả Video ID, URL và Tiêu đề)
+ */
+function isTrackInHistory(track, guildId, playedList, limit = 25) {
+  if (!track) return false;
+  if (guildId && historyManager.isRecentlyPlayed(guildId, track, limit)) {
+    return true;
+  }
+  if (Array.isArray(playedList) && playedList.length > 0) {
+    const trackUrl = typeof track === 'object' ? track.url : track;
+    const trackTitle = typeof track === 'object' ? track.title : '';
+    const trackId = historyManager.extractVideoId ? historyManager.extractVideoId(trackUrl) : null;
+    const getTokens = historyManager.getKeywords || ((s) => s.toLowerCase().split(/\s+/));
+    const tTokens = trackTitle ? getTokens(trackTitle) : [];
+
+    for (const p of playedList.slice(0, limit)) {
+      if (!p) continue;
+      const pUrl = typeof p === 'object' ? p.url : p;
+      const pTitle = typeof p === 'object' ? p.title : '';
+      const pId = historyManager.extractVideoId ? historyManager.extractVideoId(pUrl) : null;
+      if (trackId && pId && trackId === pId) return true;
+      if (trackUrl && pUrl && trackUrl === pUrl) return true;
+      if (tTokens.length > 0 && pTitle) {
+        const pTokens = getTokens(pTitle);
+        if (pTokens.length > 0) {
+          const matches = tTokens.filter(t => pTokens.includes(t));
+          if ((matches.length / Math.min(tTokens.length, pTokens.length)) >= 0.7) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Lớp 1 (Ưu tiên cao nhất): Lấy bài tương tự từ YouTube Mix (RD<videoId>)
+ * Duyệt tối đa 25 bài, bỏ qua bài hiện tại và tất cả các bài trong 25 bài gần nhất để chống lặp Ping-Pong
  */
-async function getYoutubeMix(lastSong, playedUrls = []) {
+async function getYoutubeMix(lastSong, guildId = null, playedList = []) {
   if (!lastSong || !lastSong.url) return null;
 
   try {
@@ -784,7 +822,7 @@ async function getYoutubeMix(lastSong, playedUrls = []) {
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
-      playlistEnd: 15
+      playlistEnd: 25
     };
     const cFile = getCookiesFile();
     if (cFile) mixOpts.cookies = cFile;
@@ -797,7 +835,13 @@ async function getYoutubeMix(lastSong, playedUrls = []) {
         const trackUrl = entry.url || (entry.id ? `https://www.youtube.com/watch?v=${entry.id}` : null);
         if (!trackUrl) continue;
 
-        if (trackUrl === lastSong.url || playedUrls.includes(trackUrl)) {
+        // Bỏ qua bài vừa phát
+        if (trackUrl === lastSong.url || (entry.id && entry.id === videoId)) {
+          continue;
+        }
+
+        // Bỏ qua bài đã phát trong 25 bài gần nhất
+        if (isTrackInHistory(entry, guildId, playedList, 25)) {
           continue;
         }
 
@@ -820,7 +864,7 @@ async function getYoutubeMix(lastSong, playedUrls = []) {
 /**
  * Lớp 2 (Fallback thứ 2): Lấy bài tương tự từ Last.fm Similar Track API
  */
-async function getLastfmSimilar(lastSong, playedUrls = []) {
+async function getLastfmSimilar(lastSong, guildId = null, playedList = []) {
   const apiKey = process.env.LASTFM_API_KEY;
   if (!apiKey || !lastSong || !lastSong.title) return null;
 
@@ -828,7 +872,7 @@ async function getLastfmSimilar(lastSong, playedUrls = []) {
     const { artist, songName } = parseArtistAndTitle(lastSong.title);
     if (!artist || !songName) return null;
 
-    const apiUrl = `https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(songName)}&api_key=${encodeURIComponent(apiKey)}&format=json&limit=10`;
+    const apiUrl = `https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(songName)}&api_key=${encodeURIComponent(apiKey)}&format=json&limit=15`;
     const response = await fetch(apiUrl);
     if (!response.ok) return null;
 
@@ -842,22 +886,23 @@ async function getLastfmSimilar(lastSong, playedUrls = []) {
       const fullQuery = `${trackName} ${trackArtist}`.trim();
 
       // Bỏ qua nếu bài hát đã có trong lịch sử phát
-      if (playedUrls.some(u => typeof u === 'string' && u.toLowerCase().includes(trackName.toLowerCase()))) {
+      if (isTrackInHistory({ title: fullQuery, url: null }, guildId, playedList, 25)) {
         continue;
       }
 
       const results = await searchTrack(fullQuery);
       if (results && results.length > 0) {
-        const found = results[0];
-        if (found.url && !playedUrls.includes(found.url) && found.url !== lastSong.url) {
-          return {
-            title: found.title,
-            url: found.url,
-            duration: found.duration || '3:30',
-            thumbnail: found.thumbnail || null,
-            isLive: false,
-            requestedBy: 'Auto'
-          };
+        for (const found of results) {
+          if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
+            return {
+              title: found.title,
+              url: found.url,
+              duration: found.duration || '3:30',
+              thumbnail: found.thumbnail || null,
+              isLive: false,
+              requestedBy: 'Auto'
+            };
+          }
         }
       }
     }
@@ -870,7 +915,7 @@ async function getLastfmSimilar(lastSong, playedUrls = []) {
 /**
  * Lớp 3 (Fallback cuối cùng): Logic Heuristic nhận diện thể loại / ca sĩ và lọc từ khóa rác
  */
-async function getHeuristicRelatedTrack(lastSong, playedUrls = []) {
+async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = []) {
   if (!lastSong || !lastSong.title) return null;
 
   try {
@@ -928,7 +973,8 @@ async function getHeuristicRelatedTrack(lastSong, playedUrls = []) {
 
             const trackUrl = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
 
-            if (trackUrl === lastSong.url || playedUrls.includes(trackUrl)) continue;
+            if (trackUrl === lastSong.url) continue;
+            if (isTrackInHistory(entry, guildId, playedList, 25)) continue;
 
             if (!isOriginalRemix && junkPattern.test(entry.title)) {
               continue;
@@ -958,12 +1004,8 @@ async function getHeuristicRelatedTrack(lastSong, playedUrls = []) {
   return null;
 }
 
-const { getGeminiRecommendation } = require('./geminiHelper');
-
-const historyManager = require('../structures/HistoryManager');
-
 /**
- * Thuật toán Autoplay Điều Phối Đa Lớp Thông Minh (Chống lặp lại 20 bài gần nhất):
+ * Thuật toán Autoplay Điều Phối Đa Lớp Thông Minh (Chống lặp lại 25 bài gần nhất):
  * 0. Gemini DJ AI (Khi BẬT trong Cài đặt)
  * 1. YouTube Mix (Ưu tiên cao)
  * 2. Last.fm Similar Track (Fallback thứ 2)
@@ -983,13 +1025,12 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
         const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
         const results = await searchTrack(query);
         if (results && results.length > 0) {
-          const found = results[0];
-          const isRepeat = guildId ? historyManager.isRecentlyPlayed(guildId, found, 20) : playedList.some(p => typeof p === 'string' ? p === found.url : (p.url === found.url || p.title === found.title));
-
-          if (found.url && !isRepeat && found.url !== lastSong.url) {
-            console.log(`[Autoplay] Found via Gemini DJ AI: ${found.title} (${aiRec.reason || ''})`);
-            found.requestedBy = 'Auto';
-            return found;
+          for (const found of results) {
+            if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
+              console.log(`[Autoplay] Found via Gemini DJ AI: ${found.title} (${aiRec.reason || ''})`);
+              found.requestedBy = 'Auto';
+              return found;
+            }
           }
         }
       }
@@ -999,23 +1040,23 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
   }
 
   // 1. Lớp 1: YouTube Mix (Ưu tiên cao)
-  const ytMixTrack = await getYoutubeMix(lastSong, playedList);
+  const ytMixTrack = await getYoutubeMix(lastSong, guildId, playedList);
   if (ytMixTrack) {
-    console.log('[Autoplay] Found via YouTube Mix');
+    console.log(`[Autoplay] Found via YouTube Mix: "${ytMixTrack.title}"`);
     return ytMixTrack;
   }
 
   // 2. Lớp 2: Last.fm Similar Track (Fallback thứ 2)
-  const lastfmTrack = await getLastfmSimilar(lastSong, playedList);
+  const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList);
   if (lastfmTrack) {
-    console.log('[Autoplay] Found via Last.fm');
+    console.log(`[Autoplay] Found via Last.fm: "${lastfmTrack.title}"`);
     return lastfmTrack;
   }
 
   // 3. Lớp 3: Heuristic Fallback (Fallback cuối cùng)
-  const heuristicTrack = await getHeuristicRelatedTrack(lastSong, playedList);
+  const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList);
   if (heuristicTrack) {
-    console.log('[Autoplay] Found via heuristic fallback');
+    console.log(`[Autoplay] Found via heuristic fallback: "${heuristicTrack.title}"`);
     return heuristicTrack;
   }
 

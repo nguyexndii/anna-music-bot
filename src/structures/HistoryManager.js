@@ -16,6 +16,12 @@ function getKeywords(str) {
   return clean.split(/\s+/).filter(w => w.length > 1);
 }
 
+function extractVideoId(url) {
+  if (!url || typeof url !== 'string') return null;
+  const match = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/v\/)([\w-]{11})/);
+  return match ? match[1] : null;
+}
+
 class HistoryManager {
   constructor() {
     this.cache = new Map();
@@ -185,20 +191,29 @@ class HistoryManager {
   }
 
   /**
-   * Kiểm tra xem bài hát này có nằm trong 20 bài gần nhất không
+   * Kiểm tra xem bài hát này có nằm trong các bài gần nhất không (mặc định 25 bài)
    */
-  isRecentlyPlayed(guildId, trackOrTitle, limit = 20) {
+  isRecentlyPlayed(guildId, trackOrTitle, limit = 25) {
     if (!guildId || !trackOrTitle) return false;
 
     const list = this.cache.get(guildId) || [];
     const recent = list.slice(0, limit);
 
     const checkTitle = typeof trackOrTitle === 'string' ? trackOrTitle : (trackOrTitle.title || '');
-    const checkUrl = typeof trackOrTitle === 'object' ? trackOrTitle.url : null;
+    const checkUrl = typeof trackOrTitle === 'object' ? trackOrTitle.url : (typeof trackOrTitle === 'string' && trackOrTitle.startsWith('http') ? trackOrTitle : null);
+    const checkVideoId = extractVideoId(checkUrl);
     const checkTokens = getKeywords(checkTitle);
 
     for (const item of recent) {
-      // 1. Kiểm tra trùng URL
+      if (!item) continue;
+
+      // 1. Kiểm tra trùng YouTube video ID hoặc trùng URL chính xác
+      if (checkVideoId) {
+        const itemVideoId = extractVideoId(item.url);
+        if (itemVideoId && itemVideoId === checkVideoId) {
+          return true;
+        }
+      }
       if (checkUrl && item.url && item.url === checkUrl) {
         return true;
       }
@@ -218,4 +233,8 @@ class HistoryManager {
   }
 }
 
-module.exports = new HistoryManager();
+const historyManagerInstance = new HistoryManager();
+historyManagerInstance.getKeywords = getKeywords;
+historyManagerInstance.extractVideoId = extractVideoId;
+
+module.exports = historyManagerInstance;
