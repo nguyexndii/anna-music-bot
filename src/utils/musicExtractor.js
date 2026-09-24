@@ -60,7 +60,8 @@ function getCookiesFile() {
   return null;
 }
 
-
+// Cấu hình player client bypass kiểm tra bot của YouTube trên Datacenter IP
+const YTDLP_EXTRACTOR_ARGS = 'youtube:player_client=android,mweb';
 /**
  * Định dạng mili-giây sang MM:SS
  */
@@ -734,7 +735,8 @@ function extractSoundCloudTitleFromUrl(url) {
       const sOpts = {
         dumpSingleJson: true,
         noWarnings: true,
-        flatPlaylist: true
+        flatPlaylist: true,
+        extractorArgs: YTDLP_EXTRACTOR_ARGS
       };
       const cFile = getCookiesFile();
       if (cFile) sOpts.cookies = cFile;
@@ -822,7 +824,8 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = []) {
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
-      playlistEnd: 25
+      playlistEnd: 25,
+      extractorArgs: YTDLP_EXTRACTOR_ARGS
     };
     const cFile = getCookiesFile();
     if (cFile) mixOpts.cookies = cFile;
@@ -961,7 +964,8 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
         const relOpts = {
           dumpSingleJson: true,
           noWarnings: true,
-          flatPlaylist: true
+          flatPlaylist: true,
+          extractorArgs: YTDLP_EXTRACTOR_ARGS
         };
         const cFile = getCookiesFile();
         if (cFile) relOpts.cookies = cFile;
@@ -1123,6 +1127,7 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
 
     if (!isSoundCloud) {
       ytdlpOptions.preferFreeFormats = true;
+      ytdlpOptions.extractorArgs = YTDLP_EXTRACTOR_ARGS;
       const cookiesFile = getCookiesFile();
       if (cookiesFile) {
         ytdlpOptions.cookies = cookiesFile;
@@ -1586,7 +1591,8 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
     const smOpts = {
       dumpSingleJson: true,
       noWarnings: true,
-      flatPlaylist: true
+      flatPlaylist: true,
+      extractorArgs: YTDLP_EXTRACTOR_ARGS
     };
     const cFile = getCookiesFile();
     if (cFile) smOpts.cookies = cFile;
