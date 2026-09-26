@@ -96,6 +96,14 @@ function normalizeSearchText(str) {
 }
 
 /**
+ * Nhận diện video là bản diễn live trên sân khấu / fancam / concert / listening party / demo
+ */
+function isLiveStageVideo(title) {
+  if (!title || typeof title !== 'string') return false;
+  return /(?:\[\s*live|\(\s*live|[\-|–—|]\s*live(?:\s+(?:at|in|on|version|ver|stage|performance)|$|\s*[)\]|])|\blive\s*(?:ver|version|performance|stage|session|at\b|in\b|listening)|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bon\s*stage\b|\bstage\s*(?:ver|version)?\b|\bdemo\b)/i.test(title);
+}
+
+/**
  * Đánh giá độ khớp toàn diện giữa từ khóa tìm kiếm và ứng viên video YouTube.
  * Bắt buộc ưu tiên tên bài hát và ca sĩ chính xác lên hàng đầu, ngăn tuyệt đối việc
  * bắt nhầm sang bài khác chỉ vì có thời lượng trùng khớp (như sự cố bài 'Truy Lùng' bị đổi thành 'nguyên xi').
@@ -149,9 +157,15 @@ function scoreCandidateVideo(v, query, targetDurationSec = 0) {
     score -= 80;
   }
 
-  // 4. Ưu tiên topic / audio / lyric video
-  if (vAuthorNorm.includes('topic') || vTitleNorm.includes('topic')) score += 15;
-  if (/\b(audio|lyric|lyrics)\b/i.test(vTitleNorm)) score += 10;
+  // 3.1 Phạt nặng bản hát Live sân khấu / Fancam / Concert / Listening party / Demo nếu người dùng không yêu cầu Live
+  const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(cleanQ);
+  if (!userWantsLive && isLiveStageVideo(v.title)) {
+    score -= 100; // Phạt nặng để ưu tiên bản phòng thu chính thức (Official Studio Audio/MV)
+  }
+
+  // 4. Ưu tiên topic / audio / lyric video / official / album track / studio
+  if (vAuthorNorm.includes('topic') || vTitleNorm.includes('topic')) score += 20;
+  if (/\b(official\s*(?:audio|video|music\s*video|mv|lyric|lyrics)?|audio|lyric|lyrics|album|studio|visualizer)\b/i.test(vTitleNorm)) score += 15;
 
   // 5. So khớp thời lượng nếu có targetDurationSec
   if (targetDurationSec > 0 && v.seconds > 0) {
@@ -676,6 +690,7 @@ function extractSoundCloudTitleFromUrl(url) {
     // 6. Tìm kiếm YouTube cho từ khóa (Tự động ưu tiên bản Audio / Lyric Video chuẩn nhịp nếu user không ghi rõ 'mv')
     try {
       const userWantsRemix = /\b(remix|mix|mashup|vinahouse|cover|speed\s*up|slowed|nightcore|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi)\b/i.test(query);
+      const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(query);
       const isExplicitMv = /\bmv\b|\bvideo\b|\bm\/v\b/i.test(query);
       const r = await yts(query);
       if (r && r.videos && r.videos.length > 0) {
@@ -684,10 +699,16 @@ function extractSoundCloudTitleFromUrl(url) {
           const cleanFiltered = candidateVideos.filter(v => {
             const t = (v.title || '').toLowerCase();
             if (v.seconds > 600) return false;
+            if (!userWantsLive && isLiveStageVideo(v.title)) return false;
             return !/\b(remix|mashup|vinahouse|bass\s*boosted|speed\s*up|slowed|nightcore|cover|parody|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi\s*ver|tiktok)/i.test(t);
           });
           if (cleanFiltered.length > 0) {
             candidateVideos = cleanFiltered;
+          }
+        } else if (!userWantsLive) {
+          const nonLive = candidateVideos.filter(v => !isLiveStageVideo(v.title));
+          if (nonLive.length > 0) {
+            candidateVideos = nonLive;
           }
         }
 
@@ -848,6 +869,11 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = []) {
           continue;
         }
 
+        // Lọc bỏ các bài hát diễn live sân khấu / concert / fancam / listening party / demo trong Autoplay
+        if (isLiveStageVideo(entry.title)) {
+          continue;
+        }
+
         return {
           title: entry.title,
           url: trackUrl,
@@ -980,7 +1006,7 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
             if (trackUrl === lastSong.url) continue;
             if (isTrackInHistory(entry, guildId, playedList, 25)) continue;
 
-            if (!isOriginalRemix && junkPattern.test(entry.title)) {
+            if (!isOriginalRemix && (junkPattern.test(entry.title) || isLiveStageVideo(entry.title))) {
               continue;
             }
 
@@ -1353,10 +1379,12 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
             ? (targetUrl.match(/(?:v=|\/vi\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || '')
             : '';
           const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
+          const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(trackTitle || '');
           const candidateVideos = ytsResults.videos.filter(v => {
             if (!v || !v.url) return false;
             if (targetId && v.videoId === targetId) return false;
             if (v.seconds && (v.seconds < 45 || v.seconds > 600)) return false;
+            if (!userWantsLive && isLiveStageVideo(v.title)) return false;
             if (!userWantsRemix) {
               const t = (v.title || '').toLowerCase();
               if (/\b(remix|mashup|vinahouse|bass\s*boosted|parody|karaoke|beat|slowed|speed\s*up)\b/i.test(t)) return false;

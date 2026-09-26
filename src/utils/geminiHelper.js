@@ -91,15 +91,17 @@ Hãy phân tích và gợi ý 1 BÀI HÁT TIẾP THEO HOÀN HẢO NHẤT theo c�
 - Nếu bài vừa nghe là BALLAD / SUY / BUỒN: Bài tiếp theo phải là Ballad sâu lắng, giàu cảm xúc.
 - Nếu bài vừa nghe là HIP-HOP / RAP: Bài tiếp theo phải là Rap/Hip-hop cùng chất flow/vibe.
 
-3. NGUYÊN TẮC CHỐNG LẶP BÀI (NGHIÊM NGẶT):
+3. NGUYÊN TẮC CHỐNG LẶP BÀI VÀ KHÓA CHẶT BẢN THU PHÒNG THU (CHÍNH THỐNG):
 - TUYỆT ĐỐI KHÔNG gợi ý lại bất kỳ bài hát nào có trong danh sách 20 bài vừa phát gần đây!
+- TUYỆT ĐỐI KHÔNG GỢI Ý BẢN HÁT LIVE SÂN KHẤU (Live stage, Live concert, Liveshow, Fancam, Listening party, On stage, Hát live, Bản quay điện thoại, Demo). BẮT BUỘC 100% PHẢI LÀ BẢN THU ÂM PHÒNG THU CHÍNH THỨC (Studio Master / Official Audio / Official MV / Album Track) có chất lượng âm thanh cao nhất.
+- Trong trường "searchQuery", BẮT BUỘC gắn kèm "official audio" (hoặc "official mv", "official visualizer") vào sau tên bài hát và ca sĩ (ví dụ: "Thôi Em Đừng Đi MCK official audio") để hệ thống lấy đúng bản master chính thống chuẩn phòng thu, không lấy bản diễn live ngoài sân khấu.
 - Không gợi ý các video tạp nham, livestream, video review/phản ứng, video parody/chế nhảm.
 
 4. Trả về đúng định dạng JSON:
 {
   "artist": "Tên ca sĩ / DJ Producer",
   "title": "Tên bài hát",
-  "searchQuery": "Từ khóa tìm kiếm YouTube chuẩn nhất",
+  "searchQuery": "Từ khóa tìm kiếm YouTube chuẩn nhất kèm 'official audio'",
   "reason": "Lý do ngắn gọn vì sao bài này hợp"
 }`;
 
@@ -116,11 +118,12 @@ Hãy phân tích và chọn 1 bài hát chính xác, chất lượng cao nhất 
 Yêu cầu:
 1. Nếu là một câu lời bài hát, tìm chính xác tên bài hát và ca sĩ thể hiện gốc.
 2. Nếu là tâm trạng / không gian / thời điểm (ví dụ: nhạc làm việc, nhạc buồn đêm mưa, nhạc chill...), hãy chọn bài hát có gu âm nhạc tinh tế nhất.
-3. Trả về đúng định dạng JSON:
+3. Ưu tiên tuyệt đối bản thu phòng thu chính thức (Official Audio / Official MV), KHÔNG chọn các bản diễn live sân khấu/fancam/demo trừ khi người dùng ghi rõ chữ 'live'.
+4. Trả về đúng định dạng JSON:
 {
   "artist": "Tên ca sĩ",
   "title": "Tên bài hát",
-  "searchQuery": "Từ khóa tìm kiếm YouTube chuẩn nhất",
+  "searchQuery": "Từ khóa tìm kiếm YouTube chuẩn nhất kèm 'official audio'",
   "comment": "1 câu bình luận ngắn thú vị hoặc chia sẻ cảm xúc về bài này"
 }`;
 
