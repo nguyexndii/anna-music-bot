@@ -425,6 +425,14 @@ class MusicQueue {
       this.prefetchedSong = null;
       this.preloadedResource = null;
       setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
+      if (isFailedTrack) {
+        setTimeout(() => {
+          if (this.mode247 && !this.currentSong && !this.isDestroyed) {
+            this._play247BackgroundLofi();
+          }
+        }, 5000);
+        return;
+      }
       await this._play247BackgroundLofi();
       return;
     }
@@ -441,6 +449,14 @@ class MusicQueue {
 
     // 2. Nếu bài vừa kết thúc là nhạc Lofi 24/7 (hoặc bot đang ở chế độ 24/7 Lofi và hàng chờ trống hoặc đang tạm giữ):
     if (isLofiTrack && this.mode247) {
+      if (isFailedTrack) {
+        setTimeout(() => {
+          if (this.mode247 && !this.currentSong && !this.isDestroyed) {
+            this._play247BackgroundLofi();
+          }
+        }, 5000);
+        return;
+      }
       await this._play247BackgroundLofi();
       return;
     }
@@ -552,19 +568,24 @@ class MusicQueue {
       const query = lofiInfo?.searchQuery || 'nhac viet khong loi acoustic guitar chill instrumental';
       const results = await searchTrack(query);
       if (results && results.length > 0 && this.mode247 && !this.currentSong) {
-        // Lọc bài: loại bỏ bài meme/troll/vocal và tránh trùng lặp ít nhất 20-25 bài gần nhất
+        // Lọc bài: loại bỏ bài meme/troll/vocal, bài dài >10 phút / mix 1 tiếng và tránh trùng lặp
         const isMemeOrVocal = (t) => {
           const title = (t.title || '').toLowerCase();
           return /\b(khá\s*bảnh|kha\s*banh|mặt\s*lồn|troll|meme|chế|hài|bựa|vinahouse|nhạc\s*chế)\b/i.test(title);
         };
+        const isExtendedMix = (t) => {
+          if (!t) return false;
+          if (t.seconds && t.seconds > 600) return true;
+          const title = (t.title || '').toLowerCase();
+          return /\b(\d+\s*hours?|\d+h|extended\s*loop|mixset|compilation)\b/i.test(title);
+        };
 
-        let cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 30));
+        let cleanTrack = results.find(t => !isMemeOrVocal(t) && !isExtendedMix(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 30));
         if (!cleanTrack) {
-          // Nếu tất cả đều dính trong 30 bài, thử lọc không dính 15 bài gần nhất
-          cleanTrack = results.find(t => !isMemeOrVocal(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 15));
+          cleanTrack = results.find(t => !isMemeOrVocal(t) && !isExtendedMix(t) && !lofiHistoryManager.isRecentlyPlayed(this.guild.id, t, 15));
         }
         if (!cleanTrack) {
-          cleanTrack = results.find(t => !isMemeOrVocal(t)) || results[0];
+          cleanTrack = results.find(t => !isMemeOrVocal(t) && !isExtendedMix(t)) || results.find(t => !isMemeOrVocal(t)) || results[0];
         }
 
         cleanTrack = this._sanitizeTrack(cleanTrack);

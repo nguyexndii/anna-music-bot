@@ -1332,10 +1332,13 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
 
     const rawTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery || '') : (trackTitle || '');
-    const cleanTitle = (rawTitle || '')
+    let cleanTitle = (rawTitle || '')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]/gu, ' ')
+      .replace(/#[\w\d_-]+/g, ' ')
       .replace(/https?:\/\/\S+/g, ' ')
       .replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ')
       .replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?|mv\s*official|official|full\s*hd|4k|1080p)/gi, ' ')
+      .replace(/\b(\d+\s*hours?|\d+h|extended\s*loop|loop|mixset|compilation)\b/gi, ' ')
       .replace(/[-|:/\\–—]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -1385,15 +1388,27 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
     try {
       const is247Track = Boolean(trackItem && (trackItem.is247 || trackItem.requestedBy === 'Auto (24/7)' || trackItem.requestedBy === 'Auto'));
       const scSearchQuery = is247Track ? `${cleanTitle || 'lofi hip hop'} instrumental` : (cleanTitle || 'lofi chill');
-      const scInfo = await ytdlp(`scsearch10:${scSearchQuery}`, {
+      let scInfo = await ytdlp(`scsearch10:${scSearchQuery}`, {
         dumpSingleJson: true,
         flatPlaylist: true,
         noWarnings: true
       });
 
+      // Nếu tìm kiếm chi tiết không có kết quả, thử từ khóa ngắn gọn hơn để không bị rỗng
+      if ((!scInfo || !scInfo.entries || scInfo.entries.length === 0) && is247Track && cleanTitle) {
+        const compactScQuery = `${cleanTitle.split(/\s+/).slice(0, 3).join(' ')} instrumental`;
+        try {
+          scInfo = await ytdlp(`scsearch10:${compactScQuery}`, {
+            dumpSingleJson: true,
+            flatPlaylist: true,
+            noWarnings: true
+          });
+        } catch (e) {}
+      }
+
       if (scInfo && scInfo.entries && scInfo.entries.length > 0) {
         const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
-        const candidateTracks = scInfo.entries.filter(e => {
+        let candidateTracks = scInfo.entries.filter(e => {
           if (!e || (!e.url && !e.webpage_url)) return false;
           // Loại bỏ bài quá ngắn (<45s là preview SoundCloud Go+) hoặc quá dài (>600s là playlist/mashup 20 phút)
           if (e.duration && (e.duration < 45 || e.duration > 600)) return false;
@@ -1416,6 +1431,16 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
           }
           return true;
         });
+
+        // Nếu chế độ 24/7 mà ứng viên bị lọc hết (do tên bài không chứa từ khóa lofi trong bộ lọc), lấy bài instrumental bất kỳ hợp lệ
+        if (candidateTracks.length === 0 && is247Track && scInfo.entries.length > 0) {
+          candidateTracks = scInfo.entries.filter(e => {
+            if (!e || (!e.url && !e.webpage_url)) return false;
+            if (e.duration && (e.duration < 45 || e.duration > 600)) return false;
+            const titleLower = (e.title || '').toLowerCase();
+            return !/\b(khá\s*bảnh|kha\s*banh|mặt\s*lồn|troll|meme|chế|hài|bựa|nhạc\s*chế)\b/i.test(titleLower);
+          });
+        }
 
         const expectedSec = (typeof trackItem === 'object' && trackItem !== null)
           ? (trackItem.spotifyDurationSec || (trackItem.durationMs ? Math.round(trackItem.durationMs / 1000) : (trackItem.duration ? parseDurationToSec(trackItem.duration) : 0)))
