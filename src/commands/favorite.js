@@ -3,6 +3,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   EmbedBuilder
 } = require('discord.js');
 const favoriteManager = require('../structures/FavoriteManager');
@@ -32,10 +33,20 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('play')
-        .setDescription('Play all your favorite songs into voice channel')
+        .setDescription('Play favorite songs into voice channel')
         .setDescriptionLocalizations({
-          vi: 'Phát toàn bộ bài hát yêu thích vào phòng Voice'
+          vi: 'Phát bài hát yêu thích vào phòng Voice'
         })
+        .addIntegerOption(opt =>
+          opt
+            .setName('index')
+            .setDescription('Position number of the specific song to play (leave blank to play all)')
+            .setDescriptionLocalizations({
+              vi: 'Số thứ tự bài hát muốn phát (để trống nếu muốn phát tất cả)'
+            })
+            .setMinValue(1)
+            .setRequired(false)
+        )
     )
     .addSubcommand(sub =>
       sub
@@ -91,20 +102,33 @@ module.exports = {
       sub = args[0]?.toLowerCase() || 'list';
     }
 
-    // 1. Lệnh play / p -> Phát toàn bộ bài hát yêu thích
+    // 1. Lệnh play / p -> Phát toàn bộ bài hát yêu thích hoặc 1 bài cụ thể
     if (sub === 'play' || sub === 'p') {
       const voiceChannel = ctx.member?.voice?.channel;
       if (!voiceChannel) {
-        return ctx.reply({ embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice trước để phát nhạc!')] });
+        return ctx.reply({ embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice trước để phát nhạc!')], flags: 64, ephemeral: true });
       }
 
       const favorites = await favoriteManager.getFavorites(userId);
       if (!favorites || favorites.length === 0) {
-        return ctx.reply({ embeds: [createErrorEmbed('Danh sách yêu thích của bạn hiện đang trống! Hãy bấm nút `♡` khi đang nghe nhạc để thêm bài.')] });
+        return ctx.reply({ embeds: [createErrorEmbed('Danh sách yêu thích của bạn hiện đang trống! Hãy bấm nút `♡` khi đang nghe nhạc để thêm bài.')], flags: 64, ephemeral: true });
       }
 
+      const playIdx = ctx.isInteraction ? ctx.options.getInteger('index') : parseInt(args[1], 10);
       const queue = musicManager.getOrCreate(ctx.guild, ctx.channel, voiceChannel);
       await queue.connect();
+
+      if (playIdx && !isNaN(playIdx) && playIdx >= 1) {
+        if (playIdx > favorites.length) {
+          return ctx.reply({ embeds: [createErrorEmbed(`Số thứ tự không hợp lệ! Bạn có **${favorites.length} bài hát** trong danh sách yêu thích.`)], flags: 64, ephemeral: true });
+        }
+        const song = favorites[playIdx - 1];
+        await ctx.deferReply({ flags: 64, ephemeral: true });
+        await queue.addSong(song, ctx.member || ctx.user);
+        return ctx.editReply({
+          embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${song.title}**](${song.url}) vào hàng chờ!`)]
+        });
+      }
 
       await ctx.deferReply();
       await queue.addSongs(favorites, ctx.member || ctx.user);
@@ -138,23 +162,25 @@ module.exports = {
     // 3. Lệnh clear -> Xóa toàn bộ
     if (sub === 'clear') {
       await favoriteManager.clearFavorites(userId);
-      return ctx.reply({ embeds: [createSuccessEmbed('Đã xóa sạch toàn bộ danh sách bài hát yêu thích của bạn!')] });
+      return ctx.reply({ embeds: [createSuccessEmbed('Đã xóa sạch toàn bộ danh sách bài hát yêu thích của bạn!')], flags: 64, ephemeral: true });
     }
 
     // 4. Lệnh remove <số thứ tự>
     if (sub === 'remove' || sub === 'xoa') {
       const idx = ctx.isInteraction ? ctx.options.getInteger('index') : parseInt(args[1], 10);
       if (isNaN(idx) || idx < 1) {
-        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/favorite remove 1`')] });
+        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/favorite remove 1`')], flags: 64, ephemeral: true });
       }
 
       const result = await favoriteManager.removeFavorite(userId, idx - 1);
       if (!result.removedSong) {
-        return ctx.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát ở số thứ tự này!')] });
+        return ctx.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát ở số thứ tự này!')], flags: 64, ephemeral: true });
       }
 
       return ctx.reply({
-        embeds: [createSuccessEmbed(`Đã xóa bài **${result.removedSong.title}** khỏi danh sách yêu thích!\nCòn lại: **${result.total} bài**`)]
+        embeds: [createSuccessEmbed(`Đã xóa bài **${result.removedSong.title}** khỏi danh sách yêu thích!\nCòn lại: **${result.total} bài**`)],
+        flags: 64,
+        ephemeral: true
       });
     }
 
@@ -171,7 +197,7 @@ module.exports = {
       embed.setDescription(
         'Danh sách yêu thích của bạn hiện đang trống!\n\n💡 **Cách thêm bài hát:**\n• Bấm nút **`♡`** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/favorite add <tên bài hát>`'
       );
-      return ctx.reply({ embeds: [embed] });
+      return ctx.reply({ embeds: [embed], flags: 64, ephemeral: true });
     }
 
     const listSlice = favorites.slice(0, 15);
@@ -184,17 +210,36 @@ module.exports = {
       desc += `\n*...và còn **${favorites.length - 15} bài hát** khác nữa.*`;
     }
 
-    desc += '\n\n💡 *Dùng `/favorite play` để phát toàn bộ danh sách này vào phòng Voice.*';
+    desc += '\n\n💡 *Chọn bài từ menu bên dưới để thêm vào hàng chờ, hoặc dùng nút để phát toàn bộ.*';
     embed.setDescription(desc);
 
-    const row = new ActionRowBuilder().addComponents(
+    const components = [];
+
+    // Dropdown menu chọn bài cụ thể (tối đa 25 options theo giới hạn Discord)
+    const selectOptions = favorites.slice(0, 25).map((song, idx) => ({
+      label: `${idx + 1}. ${song.title}`.slice(0, 100),
+      description: `Thời lượng: ${song.duration || '3:30'}`.slice(0, 100),
+      value: `fav_song_${idx}`,
+      emoji: '🎵'
+    }));
+
+    if (selectOptions.length > 0) {
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`menu_play_fav_song_${userId}`)
+        .setPlaceholder('🎵 Chọn bài hát cụ thể để phát...')
+        .addOptions(selectOptions);
+      components.push(new ActionRowBuilder().addComponents(selectMenu));
+    }
+
+    const btnRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`btn_play_user_fav_${userId}`)
-        .setLabel('Phát tất cả bài yêu thích')
+        .setLabel(`Phát tất cả (${favorites.length} bài)`)
         .setEmoji('▶')
         .setStyle(ButtonStyle.Success)
     );
+    components.push(btnRow);
 
-    return ctx.reply({ embeds: [embed], components: [row] });
+    return ctx.reply({ embeds: [embed], components, flags: 64, ephemeral: true });
   }
 };

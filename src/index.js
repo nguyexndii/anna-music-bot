@@ -655,6 +655,62 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
+    // Chọn bài hát cụ thể từ Menu Yêu thích (/favorite list)
+    if (interaction.customId.startsWith('menu_play_fav_song_')) {
+      const targetUserId = interaction.customId.replace('menu_play_fav_song_', '');
+      if (interaction.user.id !== targetUserId) {
+        return interaction.reply({ embeds: [createErrorEmbed('Bạn chỉ có thể chọn bài từ danh sách yêu thích của chính mình!')], flags: 64 });
+      }
+
+      const memberVoice = interaction.member?.voice?.channel;
+      if (!memberVoice) {
+        return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để phát nhạc!')], flags: 64 });
+      }
+
+      if (!hasMusicPermission(interaction.member)) {
+        const guildSettings = settingsManager.get(interaction.guild.id);
+        const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
+        return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để thêm bài.`)], flags: 64 });
+      }
+
+      if (!isAllowedVoiceChannel(interaction.member)) {
+        const guildSettings = settingsManager.get(interaction.guild.id);
+        return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
+      }
+
+      const favorites = await favoriteManager.getFavorites(targetUserId);
+      const songIdx = parseInt(interaction.values[0].replace('fav_song_', ''), 10);
+      const selectedSong = favorites && favorites[songIdx];
+
+      if (!selectedSong) {
+        return interaction.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát đã chọn!')], flags: 64 });
+      }
+
+      logAction('INTERACTION_DEFER_REPLY', {
+        type: 'MENU_PLAY_FAV_SONG',
+        interactionId: interaction.id,
+        channelId: interaction.channelId,
+        song: selectedSong.title,
+        flags: 64
+      });
+
+      await interaction.deferReply({ flags: 64 });
+      const q = musicManager.getOrCreate(interaction.guild, interaction.channel, memberVoice);
+      await q.connect();
+      await q.addSong(selectedSong, interaction.member || interaction.user);
+
+      logAction('INTERACTION_EDIT_REPLY', {
+        type: 'MENU_PLAY_FAV_SONG_DONE',
+        interactionId: interaction.id,
+        channelId: interaction.channelId,
+        song: selectedSong.title
+      });
+
+      return interaction.editReply({
+        embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${selectedSong.title}**](${selectedSong.url}) vào hàng chờ!`)]
+      });
+    }
+
     // Bảng Cài đặt
     if (interaction.customId === 'menu_settings') {
       const isOwner = interaction.guild.ownerId === interaction.user.id;
@@ -979,12 +1035,27 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút Phát tất cả bài yêu thích từ Embed /favorite play
     if (customId.startsWith('btn_play_user_fav_')) {
+      const targetUserId = customId.replace('btn_play_user_fav_', '');
+      if (interaction.user.id !== targetUserId) {
+        return interaction.reply({ embeds: [createErrorEmbed('Bạn chỉ có thể phát danh sách yêu thích của chính mình!')], flags: 64 });
+      }
+
       const memberVoice = interaction.member?.voice?.channel;
       if (!memberVoice) {
         return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để phát nhạc!')], flags: 64 });
       }
 
-      const targetUserId = customId.replace('btn_play_user_fav_', '');
+      if (!hasMusicPermission(interaction.member)) {
+        const guildSettings = settingsManager.get(interaction.guild.id);
+        const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
+        return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để thêm bài.`)], flags: 64 });
+      }
+
+      if (!isAllowedVoiceChannel(interaction.member)) {
+        const guildSettings = settingsManager.get(interaction.guild.id);
+        return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
+      }
+
       const favorites = await favoriteManager.getFavorites(targetUserId);
 
       if (!favorites || favorites.length === 0) {
