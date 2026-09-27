@@ -22,7 +22,7 @@ module.exports = {
         })
         .setMinValue(1)
         .setMaxValue(100)
-        .setRequired(false)
+        .setRequired(true)
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);

@@ -16,10 +16,10 @@ module.exports = {
     })
     .addStringOption(opt =>
       opt
-        .setName('query')
-        .setDescription('Song title to search lyrics for')
+        .setName('song')
+        .setDescription('Song title to search lyrics for (leave empty for current song)')
         .setDescriptionLocalizations({
-          vi: 'Tên bài hát cần tra cứu lời'
+          vi: 'Tên bài hát cần tra cứu lời (để trống để xem bài đang phát)'
         })
         .setRequired(false)
     ),
@@ -31,7 +31,7 @@ module.exports = {
     let targetDurationMs = 0;
     let targetUrl = null;
 
-    const queryInput = ctx.options.getString('query');
+    const queryInput = ctx.options.getString('song') || ctx.options.getString('query');
     if (queryInput) {
       targetTitle = queryInput.trim();
     } else if (args && args.length > 0) {

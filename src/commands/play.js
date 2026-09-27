@@ -20,12 +20,12 @@ module.exports = {
     })
     .addStringOption(option =>
       option
-        .setName('query')
+        .setName('song')
         .setDescription('Song title, artist name, or URL')
         .setDescriptionLocalizations({
-          vi: 'Tên bài hát, ca sĩ hoặc đường dẫn'
+          vi: 'Tên bài hát, ca sĩ hoặc link YouTube/Spotify'
         })
-        .setRequired(false)
+        .setRequired(true)
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
@@ -63,7 +63,7 @@ module.exports = {
       return ctx.reply(`Không thể kết nối vào phòng Voice: ${connErr.message}`);
     }
 
-    let query = ctx.isInteraction ? ctx.options.getString('query') : args.join(' ');
+    let query = ctx.isInteraction ? (ctx.options.getString('song') || ctx.options.getString('query')) : args.join(' ');
     query = query ? query.trim() : '';
 
     if (!query) {

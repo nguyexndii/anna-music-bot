@@ -13,10 +13,10 @@ const SLASH_SHORTCUTS = [
       .setDescriptionLocalizations({ vi: 'Phát bài hát hoặc Playlist nhanh (Lệnh tắt của /play)' })
       .addStringOption(opt =>
         opt
-          .setName('query')
+          .setName('song')
           .setDescription('Song title, artist name, or URL')
-          .setDescriptionLocalizations({ vi: 'Tên bài hát, ca sĩ hoặc đường dẫn' })
-          .setRequired(false)
+          .setDescriptionLocalizations({ vi: 'Tên bài hát, ca sĩ hoặc link YouTube/Spotify' })
+          .setRequired(true)
       )
   },
   {
@@ -32,14 +32,6 @@ const SLASH_SHORTCUTS = [
       .setName('q')
       .setDescription('View current music queue (Shortcut for /queue)')
       .setDescriptionLocalizations({ vi: 'Xem danh sách hàng chờ (Lệnh tắt của /queue)' })
-      .addIntegerOption(opt =>
-        opt
-          .setName('page')
-          .setDescription('Page number to view')
-          .setDescriptionLocalizations({ vi: 'Số trang cần xem' })
-          .setMinValue(1)
-          .setRequired(false)
-      )
   },
   {
     target: 'nowplaying',
@@ -61,7 +53,7 @@ const SLASH_SHORTCUTS = [
           .setDescriptionLocalizations({ vi: 'Mức âm lượng từ 1 đến 100' })
           .setMinValue(1)
           .setMaxValue(100)
-          .setRequired(false)
+          .setRequired(true)
       )
   },
   {
@@ -79,19 +71,27 @@ const SLASH_SHORTCUTS = [
       .addSubcommand(sub =>
         sub
           .setName('play')
-          .setDescription('Play all favorite songs into voice')
-          .setDescriptionLocalizations({ vi: 'Phát tất cả bài yêu thích' })
+          .setDescription('Play favorite songs into voice channel')
+          .setDescriptionLocalizations({ vi: 'Phát bài hát yêu thích vào phòng Voice' })
+          .addIntegerOption(opt =>
+            opt
+              .setName('index')
+              .setDescription('Position number of the specific song to play (leave blank to play all)')
+              .setDescriptionLocalizations({ vi: 'Số thứ tự bài hát muốn phát (để trống nếu muốn phát tất cả)' })
+              .setMinValue(1)
+              .setRequired(false)
+          )
       )
       .addSubcommand(sub =>
         sub
           .setName('add')
-          .setDescription('Add song to favorites')
-          .setDescriptionLocalizations({ vi: 'Thêm bài vào danh sách yêu thích' })
+          .setDescription('Add a song to your favorites')
+          .setDescriptionLocalizations({ vi: 'Thêm bài hát vào danh sách yêu thích' })
           .addStringOption(opt =>
             opt
-              .setName('query')
+              .setName('song')
               .setDescription('Song title or URL')
-              .setDescriptionLocalizations({ vi: 'Tên bài hát hoặc link' })
+              .setDescriptionLocalizations({ vi: 'Tên bài hát hoặc link YouTube/Spotify' })
               .setRequired(true)
           )
       )
@@ -124,9 +124,9 @@ const SLASH_SHORTCUTS = [
       .setDescriptionLocalizations({ vi: 'Hiển thị lời bài hát (Lệnh tắt của /lyrics)' })
       .addStringOption(opt =>
         opt
-          .setName('query')
-          .setDescription('Song title to search lyrics for')
-          .setDescriptionLocalizations({ vi: 'Tên bài hát tra cứu lời' })
+          .setName('song')
+          .setDescription('Song title to search lyrics for (leave empty for current song)')
+          .setDescriptionLocalizations({ vi: 'Tên bài hát cần tra cứu lời (để trống để xem bài đang phát)' })
           .setRequired(false)
       )
   },

@@ -57,7 +57,7 @@ module.exports = {
         })
         .addStringOption(opt =>
           opt
-            .setName('query')
+            .setName('song')
             .setDescription('Song title or URL')
             .setDescriptionLocalizations({
               vi: 'Tên bài hát hoặc link YouTube/Spotify'
@@ -140,7 +140,7 @@ module.exports = {
 
     // 2. Lệnh add <tên/link> -> Thêm bài hát thủ công
     if (sub === 'add' || sub === 'a') {
-      let query = ctx.isInteraction ? ctx.options.getString('query') : args.slice(1).join(' ').trim();
+      let query = ctx.isInteraction ? (ctx.options.getString('song') || ctx.options.getString('query')) : args.slice(1).join(' ').trim();
       if (!query) {
         return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập tên bài hát hoặc link cần thêm! Ví dụ: `/favorite add Vũ Lạ Lùng`')] });
       }

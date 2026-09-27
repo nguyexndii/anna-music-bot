@@ -17,17 +17,7 @@ module.exports = {
     .setDescription('View current music queue')
     .setDescriptionLocalizations({
       vi: 'Xem danh sách bài hát trong hàng chờ'
-    })
-    .addIntegerOption(opt =>
-      opt
-        .setName('page')
-        .setDescription('Page number to view')
-        .setDescriptionLocalizations({
-          vi: 'Số trang cần xem'
-        })
-        .setMinValue(1)
-        .setRequired(false)
-    ),
+    }),
   async execute(source, args) {
     const ctx = createContext(source, args);
     const queue = musicManager.get(ctx.guild.id);

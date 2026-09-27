@@ -1047,7 +1047,14 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
   const guildId = typeof guildIdOrHistory === 'string' ? guildIdOrHistory : null;
   const playedList = Array.isArray(guildIdOrHistory) ? guildIdOrHistory : (guildId ? historyManager.getHistory(guildId) : []);
 
-  // 0. Lớp 0 (Siêu ưu tiên nếu bật Trí tuệ nhân tạo): Gemini DJ AI
+  // 1. Lớp 1 (Ưu tiên số 1 - Chuẩn gu YouTube): YouTube Mix (RD<videoId>)
+  const ytMixTrack = await getYoutubeMix(lastSong, guildId, playedList);
+  if (ytMixTrack) {
+    console.log(`[Autoplay] Found via YouTube Mix: "${ytMixTrack.title}"`);
+    return ytMixTrack;
+  }
+
+  // 2. Lớp 2 (Dự phòng thông minh số 2): Gemini DJ AI
   if (useAi) {
     try {
       const aiRec = await getGeminiRecommendation(lastSong.title, playedList);
@@ -1069,21 +1076,14 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
     }
   }
 
-  // 1. Lớp 1: YouTube Mix (Ưu tiên cao)
-  const ytMixTrack = await getYoutubeMix(lastSong, guildId, playedList);
-  if (ytMixTrack) {
-    console.log(`[Autoplay] Found via YouTube Mix: "${ytMixTrack.title}"`);
-    return ytMixTrack;
-  }
-
-  // 2. Lớp 2: Last.fm Similar Track (Fallback thứ 2)
+  // 3. Lớp 3: Last.fm Similar Track (Fallback thứ 3)
   const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList);
   if (lastfmTrack) {
     console.log(`[Autoplay] Found via Last.fm: "${lastfmTrack.title}"`);
     return lastfmTrack;
   }
 
-  // 3. Lớp 3: Heuristic Fallback (Fallback cuối cùng)
+  // 4. Lớp 4: Heuristic Fallback (Fallback cuối cùng)
   const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList);
   if (heuristicTrack) {
     console.log(`[Autoplay] Found via heuristic fallback: "${heuristicTrack.title}"`);
