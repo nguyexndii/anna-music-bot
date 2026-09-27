@@ -89,7 +89,13 @@ app.use('/api', createApiRouter(client));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', uptime: process.uptime(), botStatus: client.user ? 'ONLINE' : 'OFFLINE' });
+  res.status(200).json({
+    status: 'OK',
+    uptime: process.uptime(),
+    botStatus: client.user ? 'ONLINE' : 'OFFLINE',
+    wsPing: client.ws ? client.ws.ping : null,
+    wsStatus: client.ws ? client.ws.status : null
+  });
 });
 
 app.get('*', (req, res, next) => {
@@ -463,6 +469,8 @@ client.on('guildDelete', async (guild) => {
 // Xử lý Tương tác (Slash Commands, Nút bấm, Menu Dropdown, Modal thêm bài hát)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.guild) return;
+
+  try {
 
   // 0. Xử lý Slash Commands (Chat Input)
   if (interaction.isChatInputCommand()) {
@@ -852,29 +860,36 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút Mở Bảng Điều Khiển Âm Nhạc (Open Music Controls - Ephemeral chỉ người bấm thấy)
     if (customId === 'btn_open_controls') {
-      if (!queue || (!queue.currentSong && !queue.isPlaying)) {
-        logAction('INTERACTION_REPLY', {
-          type: 'BTN_OPEN_CONTROLS_NO_SONG',
-          interactionId: interaction.id,
-          channelId: interaction.channelId
-        });
-        return interaction.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát!')], flags: 64 });
-      }
+      try {
+        if (!queue || (!queue.currentSong && !queue.isPlaying)) {
+          logAction('INTERACTION_REPLY', {
+            type: 'BTN_OPEN_CONTROLS_NO_SONG',
+            interactionId: interaction.id,
+            channelId: interaction.channelId
+          });
+          return await interaction.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát!')], flags: 64 });
+        }
 
-      const songForEmbed = queue.currentSong || {
-        title: 'Đang phát âm thanh',
-        duration: '3:30',
-        requestedBy: 'User'
-      };
-      const embed = createNowPlayingEmbed(songForEmbed, queue);
-      const controls = createMusicControls(queue);
-      logAction('INTERACTION_REPLY', {
-        type: 'BTN_OPEN_CONTROLS',
-        interactionId: interaction.id,
-        channelId: interaction.channelId,
-        song: (songForEmbed.title || '').slice(0, 60)
-      });
-      return interaction.reply({ embeds: [embed], components: controls, flags: 64 });
+        const songForEmbed = queue.currentSong || {
+          title: 'Đang phát âm thanh',
+          duration: '3:30',
+          requestedBy: 'User'
+        };
+        const embed = createNowPlayingEmbed(songForEmbed, queue);
+        const controls = createMusicControls(queue);
+        logAction('INTERACTION_REPLY', {
+          type: 'BTN_OPEN_CONTROLS',
+          interactionId: interaction.id,
+          channelId: interaction.channelId,
+          song: (songForEmbed.title || '').slice(0, 60)
+        });
+        return await interaction.reply({ embeds: [embed], components: controls, flags: 64 });
+      } catch (openControlsErr) {
+        console.error('[BTN_OPEN_CONTROLS Error]:', openControlsErr);
+        if (!interaction.replied && !interaction.deferred) {
+          return await interaction.reply({ embeds: [createErrorEmbed(`Lỗi khi mở bảng điều khiển: ${openControlsErr.message}`)], flags: 64 }).catch(() => {});
+        }
+      }
     }
 
     // Nút Bảng cài đặt
@@ -1214,6 +1229,16 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       console.error('Lỗi khi xử lý nút bấm:', error);
     }
+  }
+  } catch (globalInteractionErr) {
+    console.error('[Global Interaction Error]:', globalInteractionErr);
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ embeds: [createErrorEmbed(`Lỗi tương tác: ${globalInteractionErr.message}`)], flags: 64 });
+      } else if (interaction.deferred && !interaction.replied) {
+        await interaction.editReply({ embeds: [createErrorEmbed(`Lỗi tương tác: ${globalInteractionErr.message}`)] });
+      }
+    } catch (e) {}
   }
 });
 

@@ -106,12 +106,12 @@ module.exports = {
     if (sub === 'play' || sub === 'p') {
       const voiceChannel = ctx.member?.voice?.channel;
       if (!voiceChannel) {
-        return ctx.reply({ embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice trước để phát nhạc!')], flags: 64, ephemeral: true });
+        return ctx.reply({ embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice trước để phát nhạc!')], flags: 64 });
       }
 
       const favorites = await favoriteManager.getFavorites(userId);
       if (!favorites || favorites.length === 0) {
-        return ctx.reply({ embeds: [createErrorEmbed('Danh sách yêu thích của bạn hiện đang trống! Hãy bấm nút `♡` khi đang nghe nhạc để thêm bài.')], flags: 64, ephemeral: true });
+        return ctx.reply({ embeds: [createErrorEmbed('Danh sách yêu thích của bạn hiện đang trống! Hãy bấm nút `♡` khi đang nghe nhạc để thêm bài.')], flags: 64 });
       }
 
       const playIdx = ctx.isInteraction ? ctx.options.getInteger('index') : parseInt(args[1], 10);
@@ -120,10 +120,10 @@ module.exports = {
 
       if (playIdx && !isNaN(playIdx) && playIdx >= 1) {
         if (playIdx > favorites.length) {
-          return ctx.reply({ embeds: [createErrorEmbed(`Số thứ tự không hợp lệ! Bạn có **${favorites.length} bài hát** trong danh sách yêu thích.`)], flags: 64, ephemeral: true });
+          return ctx.reply({ embeds: [createErrorEmbed(`Số thứ tự không hợp lệ! Bạn có **${favorites.length} bài hát** trong danh sách yêu thích.`)], flags: 64 });
         }
         const song = favorites[playIdx - 1];
-        await ctx.deferReply({ flags: 64, ephemeral: true });
+        await ctx.deferReply({ flags: 64 });
         await queue.addSong(song, ctx.member || ctx.user);
         return ctx.editReply({
           embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${song.title}**](${song.url}) vào hàng chờ!`)]
@@ -162,19 +162,19 @@ module.exports = {
     // 3. Lệnh clear -> Xóa toàn bộ
     if (sub === 'clear') {
       await favoriteManager.clearFavorites(userId);
-      return ctx.reply({ embeds: [createSuccessEmbed('Đã xóa sạch toàn bộ danh sách bài hát yêu thích của bạn!')], flags: 64, ephemeral: true });
+      return ctx.reply({ embeds: [createSuccessEmbed('Đã xóa sạch toàn bộ danh sách bài hát yêu thích của bạn!')], flags: 64 });
     }
 
     // 4. Lệnh remove <số thứ tự>
     if (sub === 'remove' || sub === 'xoa') {
       const idx = ctx.isInteraction ? ctx.options.getInteger('index') : parseInt(args[1], 10);
       if (isNaN(idx) || idx < 1) {
-        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/favorite remove 1`')], flags: 64, ephemeral: true });
+        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/favorite remove 1`')], flags: 64 });
       }
 
       const result = await favoriteManager.removeFavorite(userId, idx - 1);
       if (!result.removedSong) {
-        return ctx.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát ở số thứ tự này!')], flags: 64, ephemeral: true });
+        return ctx.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát ở số thứ tự này!')], flags: 64 });
       }
 
       return ctx.reply({
@@ -197,7 +197,7 @@ module.exports = {
       embed.setDescription(
         'Danh sách yêu thích của bạn hiện đang trống!\n\n💡 **Cách thêm bài hát:**\n• Bấm nút **`♡`** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/favorite add <tên bài hát>`'
       );
-      return ctx.reply({ embeds: [embed], flags: 64, ephemeral: true });
+      return ctx.reply({ embeds: [embed], flags: 64 });
     }
 
     const listSlice = favorites.slice(0, 15);
@@ -240,6 +240,6 @@ module.exports = {
     );
     components.push(btnRow);
 
-    return ctx.reply({ embeds: [embed], components, flags: 64, ephemeral: true });
+    return ctx.reply({ embeds: [embed], components, flags: 64 });
   }
 };
