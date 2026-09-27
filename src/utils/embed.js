@@ -42,6 +42,25 @@ function parseDurationToMs(durationStr) {
 }
 
 /**
+ * Chuẩn hóa tên bài hát để chèn an toàn vào cú pháp Markdown link của Discord: [Title](URL)
+ * - Đổi dấu ngoặc vuông '[' và ']' thành '(' và ')' để không phá vỡ cặp ngoặc link Markdown
+ * - Đổi ký tự backtick ` thành ' để không làm vỡ khối inline code
+ * - Cắt ngắn độ dài an toàn và thêm '...' nếu vượt quá maxLength
+ */
+function formatMarkdownTitle(title, maxLength = 55) {
+  if (!title) return 'Không rõ tiêu đề';
+  let clean = String(title)
+    .replace(/\[/g, '(')
+    .replace(/\]/g, ')')
+    .replace(/`/g, "'")
+    .trim();
+  if (maxLength && clean.length > maxLength) {
+    clean = clean.slice(0, maxLength).trim() + '...';
+  }
+  return clean;
+}
+
+/**
  * Tạo thanh tiến trình âm nhạc mượt mà: `0:45 ━━━━🔘───────── 4:18`
  */
 function createProgressBar(currentMs, totalMs, size = 12) {
@@ -296,7 +315,7 @@ function createQueueEmbed(queue, page = 1) {
   const userSongs = queue.songs.filter(s => s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)');
 
   if (is247) {
-    const curTitle = (queue.currentSong?.title || 'Nhạc nền Lofi 24/7 (Thư giãn)').slice(0, 60);
+    const curTitle = formatMarkdownTitle(queue.currentSong?.title || 'Nhạc nền Lofi 24/7 (Thư giãn)', 60);
     const curLink = (queue.currentSong?.url && queue.currentSong?.url !== 'null')
       ? `[**${curTitle}**](${queue.currentSong.url})`
       : `**${curTitle}**`;
@@ -306,7 +325,7 @@ function createQueueEmbed(queue, page = 1) {
       inline: false
     });
   } else if (queue.currentSong) {
-    const curTitle = (queue.currentSong.title || 'Unknown').slice(0, 60);
+    const curTitle = formatMarkdownTitle(queue.currentSong.title || 'Unknown', 60);
     const curLink = (queue.currentSong.url && queue.currentSong.url !== 'null')
       ? `[**${curTitle}**](${queue.currentSong.url})`
       : `**${curTitle}**`;
@@ -342,7 +361,7 @@ function createQueueEmbed(queue, page = 1) {
         if (cleanReq) req = `• ${cleanReq}`;
       }
 
-      const songTitle = (s.title || 'Unknown').slice(0, 52);
+      const songTitle = formatMarkdownTitle(s.title || 'Unknown', 52);
       const titleMarkdown = (s.url && s.url !== 'null')
         ? `[${songTitle}](${s.url})`
         : `**${songTitle}**`;
@@ -694,6 +713,7 @@ module.exports = {
   createProgressBar,
   formatDurationMs,
   parseDurationToMs,
+  formatMarkdownTitle,
   setVoiceChannelStatus,
   clearVoiceChannelStatus
 };

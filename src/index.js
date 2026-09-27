@@ -37,6 +37,7 @@ const {
   createSuccessEmbed,
   createErrorEmbed,
   createEmbed,
+  formatMarkdownTitle,
   setVoiceChannelStatus,
   clearVoiceChannelStatus
 } = require('./utils/embed');
@@ -715,7 +716,7 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       return interaction.editReply({
-        embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${selectedSong.title}**](${selectedSong.url}) vào hàng chờ!`)]
+        embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${formatMarkdownTitle(selectedSong.title, 60)}**](${selectedSong.url}) vào hàng chờ!`)]
       });
     }
 
@@ -1033,12 +1034,12 @@ client.on('interactionCreate', async (interaction) => {
         const result = await favoriteManager.toggleFavorite(interaction.user.id, queue.currentSong);
         if (result.isAdded) {
           return interaction.reply({
-            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${queue.currentSong.title}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Dùng \`/favorite list\` để xem danh sách`)],
+            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${formatMarkdownTitle(queue.currentSong.title, 60)}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Dùng \`/favorite list\` để xem danh sách`)],
             flags: 64
           });
         } else {
           return interaction.reply({
-            embeds: [createSuccessEmbed(`💔 Đã xóa [**${queue.currentSong.title}**](${queue.currentSong.url}) khỏi danh sách **Bài Hát Yêu Thích** của bạn.\nCòn lại: **${result.total} bài**`)],
+            embeds: [createSuccessEmbed(`💔 Đã xóa [**${formatMarkdownTitle(queue.currentSong.title, 60)}**](${queue.currentSong.url}) khỏi danh sách **Bài Hát Yêu Thích** của bạn.\nCòn lại: **${result.total} bài**`)],
             flags: 64
           });
         }

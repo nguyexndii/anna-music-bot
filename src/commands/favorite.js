@@ -9,7 +9,7 @@ const {
 const favoriteManager = require('../structures/FavoriteManager');
 const musicManager = require('../structures/MusicManager');
 const { searchTrack } = require('../utils/musicExtractor');
-const { createEmbed, createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
+const { createEmbed, createSuccessEmbed, createErrorEmbed, formatMarkdownTitle } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
@@ -126,7 +126,7 @@ module.exports = {
         await ctx.deferReply({ flags: 64 });
         await queue.addSong(song, ctx.member || ctx.user);
         return ctx.editReply({
-          embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${song.title}**](${song.url}) vào hàng chờ!`)]
+          embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${formatMarkdownTitle(song.title, 60)}**](${song.url}) vào hàng chờ!`)]
         });
       }
 
@@ -155,7 +155,7 @@ module.exports = {
       const result = await favoriteManager.toggleFavorite(userId, track);
 
       return ctx.editReply({
-        embeds: [createSuccessEmbed(`Đã thêm bài hát vào danh sách yêu thích trên MongoDB Atlas: [**${track.title}**](${track.url})\nTổng cộng: **${result.total} bài**`)]
+        embeds: [createSuccessEmbed(`Đã thêm bài hát vào danh sách yêu thích trên MongoDB Atlas: [**${formatMarkdownTitle(track.title, 60)}**](${track.url})\nTổng cộng: **${result.total} bài**`)]
       });
     }
 
@@ -178,7 +178,7 @@ module.exports = {
       }
 
       return ctx.reply({
-        embeds: [createSuccessEmbed(`Đã xóa bài **${result.removedSong.title}** khỏi danh sách yêu thích!\nCòn lại: **${result.total} bài**`)],
+        embeds: [createSuccessEmbed(`Đã xóa bài **${formatMarkdownTitle(result.removedSong.title, 60)}** khỏi danh sách yêu thích!\nCòn lại: **${result.total} bài**`)],
         flags: 64,
         ephemeral: true
       });
@@ -203,7 +203,9 @@ module.exports = {
     const listSlice = favorites.slice(0, 15);
     let desc = `**Bạn đang có ${favorites.length} bài hát yêu thích:**\n\n`;
     listSlice.forEach((song, idx) => {
-      desc += `\`${idx + 1}.\` [${song.title.slice(0, 50)}](${song.url}) | \`${song.duration}\`\n`;
+      const cleanTitle = formatMarkdownTitle(song.title, 55);
+      const songUrl = (song.url && song.url !== 'null') ? song.url : `https://www.youtube.com/results?search_query=${encodeURIComponent(song.title)}`;
+      desc += `${idx + 1}. [${cleanTitle}](${songUrl}) | \`${song.duration || '3:30'}\`\n`;
     });
 
     if (favorites.length > 15) {
