@@ -1,6 +1,6 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed, createAutoplayLayersEmbed, createAutoplayLayersComponents } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
@@ -24,7 +24,8 @@ module.exports = {
         .setRequired(false)
         .addChoices(
           { name: 'On', name_localizations: { vi: 'Bật (ON)' }, value: 'on' },
-          { name: 'Off', name_localizations: { vi: 'Tắt (OFF)' }, value: 'off' }
+          { name: 'Off', name_localizations: { vi: 'Tắt (OFF)' }, value: 'off' },
+          { name: 'Layers', name_localizations: { vi: 'Cấu hình các tầng (Layers)' }, value: 'layers' }
         )
     ),
   async execute(source, args) {
@@ -41,6 +42,14 @@ module.exports = {
 
     const current = settingsManager.get(ctx.guild.id);
     const statusOption = ctx.options.getString('status');
+
+    // Mở giao diện cấu hình tầng Autoplay nếu chọn 'layers'
+    if (statusOption === 'layers' || (args && (args[0]?.toLowerCase() === 'layers' || args[0]?.toLowerCase() === 'layer'))) {
+      const layersEmbed = createAutoplayLayersEmbed(ctx.guild, current);
+      const layersComponents = createAutoplayLayersComponents(current);
+      return ctx.reply({ embeds: [layersEmbed], components: layersComponents });
+    }
+
     let newVal;
     if (statusOption === 'on') {
       newVal = true;
@@ -53,6 +62,13 @@ module.exports = {
     settingsManager.update(ctx.guild.id, { autoplay: newVal });
 
     const statusText = newVal ? '🟢 BẬT (Tự động phát bài tương tự khi hết hàng chờ)' : '🔴 TẮT (Dừng lại khi phát hết nhạc)';
-    return ctx.reply({ embeds: [createSuccessEmbed(`Chế độ Tự động phát (Autoplay): **${statusText}**`)] });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('btn_open_autoplay_layers')
+        .setLabel('🎛️ Cấu hình tầng Autoplay')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    return ctx.reply({ embeds: [createSuccessEmbed(`Chế độ Tự động phát (Autoplay): **${statusText}**`)], components: [row] });
   }
 };

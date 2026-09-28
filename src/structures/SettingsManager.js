@@ -21,8 +21,22 @@ const DEFAULT_GUILD_SETTINGS = {
   updateVoiceStatus: true,     // Bật/Tắt tự động đổi trạng thái dòng chữ trên kênh Voice
   loopMode: 'off',             // Chế độ lặp: 'off' (Tắt) | 'song' (Lặp bài) | 'queue' (Lặp hàng chờ)
   useAiAssistant: true,        // Bật/Tắt Trợ lý DJ Gemini AI để gợi ý và tìm nhạc thông minh
+  autoplayLayers: ['ytmix', 'ai', 'lastfm', 'heuristic'], // Thứ tự và danh sách tầng Autoplay được kích hoạt
   language: 'en'               // Ngôn ngữ hệ thống: 'en' (English) | 'vi' (Tiếng Việt)
 };
+
+const VALID_AUTOPLAY_LAYERS = ['ytmix', 'ai', 'lastfm', 'heuristic'];
+
+function cleanAutoplayLayers(layers) {
+  if (!Array.isArray(layers)) return ['ytmix', 'ai', 'lastfm', 'heuristic'];
+  const cleaned = [];
+  for (const l of layers) {
+    if (typeof l === 'string' && VALID_AUTOPLAY_LAYERS.includes(l) && !cleaned.includes(l)) {
+      cleaned.push(l);
+    }
+  }
+  return cleaned.length > 0 ? cleaned : ['ytmix', 'ai', 'lastfm', 'heuristic'];
+}
 
 class SettingsManager {
   constructor() {
@@ -39,7 +53,9 @@ class SettingsManager {
         const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
         const data = JSON.parse(raw);
         for (const [guildId, guildSettings] of Object.entries(data)) {
-          this.settings.set(guildId, { ...DEFAULT_GUILD_SETTINGS, ...guildSettings });
+          const merged = { ...DEFAULT_GUILD_SETTINGS, ...guildSettings };
+          merged.autoplayLayers = cleanAutoplayLayers(merged.autoplayLayers);
+          this.settings.set(guildId, merged);
         }
       }
     } catch (e) {
@@ -69,7 +85,11 @@ class SettingsManager {
 
   update(guildId, newSettings) {
     const current = this.get(guildId);
-    const updated = { ...current, ...newSettings };
+    const toApply = { ...newSettings };
+    if (toApply.autoplayLayers !== undefined) {
+      toApply.autoplayLayers = cleanAutoplayLayers(toApply.autoplayLayers);
+    }
+    const updated = { ...current, ...toApply };
     this.settings.set(guildId, updated);
     this._save();
     return updated;
@@ -82,4 +102,8 @@ class SettingsManager {
   }
 }
 
-module.exports = new SettingsManager();
+const settingsInstance = new SettingsManager();
+settingsInstance.cleanAutoplayLayers = cleanAutoplayLayers;
+settingsInstance.VALID_AUTOPLAY_LAYERS = VALID_AUTOPLAY_LAYERS;
+
+module.exports = settingsInstance;

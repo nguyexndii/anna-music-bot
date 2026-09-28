@@ -503,6 +503,11 @@ function createSettingsEmbed(guild, settings) {
         inline: true
       },
       {
+        name: 'Tầng Autoplay kích hoạt',
+        value: `\`${(Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0 ? settings.autoplayLayers : ['ytmix', 'ai', 'lastfm', 'heuristic']).map(k => ({ ytmix: 'YouTube Mix', ai: 'Gemini AI', lastfm: 'Last.fm', heuristic: 'Heuristic' }[k] || k)).join(' ➔ ')}\``,
+        inline: true
+      },
+      {
         name: 'Khóa phòng Voice cố định',
         value: `Cài đặt hiện tại: ${voiceLockText}`,
         inline: true
@@ -593,6 +598,11 @@ function createSettingsSelectMenu(settings) {
         .setValue('set_autoplay')
         .setEmoji(CUSTOM_EMOJIS.play),
       new StringSelectMenuOptionBuilder()
+        .setLabel('Cấu hình tầng Autoplay (Autoplay Layers)')
+        .setDescription('Tích chọn & tùy chỉnh thứ tự các tầng: YouTube Mix, Gemini AI...')
+        .setValue('set_autoplay_layers')
+        .setEmoji('🎛️'),
+      new StringSelectMenuOptionBuilder()
         .setLabel('Khóa phòng Voice cố định')
         .setDescription(`Chỉ phát nhạc tại phòng voice chỉ định (Hiện tại: ${settings.lockedVoiceChannelId ? 'ĐÃ KHÓA' : 'MỌI PHÒNG'})`)
         .setValue('set_voice_lock')
@@ -653,6 +663,143 @@ function createSettingsSelectMenu(settings) {
   return row;
 }
 
+const AUTOPLAY_LAYER_INFO = {
+  ytmix: {
+    name: 'YouTube Mix (RD)',
+    badge: '🔴',
+    desc: 'Thuật toán Radio Mix chuẩn gu của YouTube'
+  },
+  ai: {
+    name: 'Gemini DJ AI',
+    badge: '✨',
+    desc: 'Trí tuệ nhân tạo gợi ý bài theo vibe & thể loại'
+  },
+  lastfm: {
+    name: 'Last.fm Similar',
+    badge: '📻',
+    desc: 'Kho dữ liệu bài hát tương tự quốc tế'
+  },
+  heuristic: {
+    name: 'Heuristic Fallback',
+    badge: '🔍',
+    desc: 'Tìm kiếm bài cùng ca sĩ hoặc bài nổi bật'
+  }
+};
+
+/**
+ * Tạo Embed bảng điều khiển cấu hình tầng Autoplay trực quan
+ */
+function createAutoplayLayersEmbed(guild, settings) {
+  const activeLayers = (Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0)
+    ? settings.autoplayLayers
+    : ['ytmix', 'ai', 'lastfm', 'heuristic'];
+
+  const allKeys = ['ytmix', 'ai', 'lastfm', 'heuristic'];
+  const inactiveKeys = allKeys.filter(k => !activeLayers.includes(k));
+
+  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+  let activeListText = '';
+  activeLayers.forEach((key, idx) => {
+    const info = AUTOPLAY_LAYER_INFO[key] || { name: key, badge: '🎵', desc: '' };
+    const num = numberEmojis[idx] || `${idx + 1}.`;
+    activeListText += `${num} ${info.badge} **${info.name}**\n↳ *${info.desc}*\n`;
+  });
+
+  let inactiveListText = '';
+  if (inactiveKeys.length > 0) {
+    inactiveKeys.forEach(key => {
+      const info = AUTOPLAY_LAYER_INFO[key] || { name: key, badge: '🎵' };
+      inactiveListText += `• ❌ ~~${info.name}~~\n`;
+    });
+  } else {
+    inactiveListText = '*Không có (Tất cả 4 tầng đều đang bật)*\n';
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🎛️ Cấu Hình Thứ Tự Tầng Gợi Ý Autoplay — ${guild.name}`)
+    .setColor('#5865F2')
+    .setDescription(
+      'Khi hàng chờ phát hết nhạc, bot sẽ tự động tìm bài hát tiếp theo lần lượt theo các tầng được tích chọn bên dưới:\n\n' +
+      '▶️ **Các tầng đang kích hoạt (Theo thứ tự ưu tiên):**\n' +
+      activeListText + '\n' +
+      '⏹️ **Các tầng đã tắt:**\n' +
+      inactiveListText + '\n' +
+      '💡 **Hướng dẫn:**\n' +
+      '• Mở **Dropdown Menu** bên dưới để **tích chọn những tầng bạn muốn** (chọn từ 1 đến 4 tầng).\n' +
+      '• Hoặc dùng các nút **Preset nhanh** bên dưới để chuyển đổi 1 chạm (*chỉ YouTube Mix*, *YouTube Mix + AI*, v.v.).'
+    )
+    .setFooter({ text: 'Chỉ Quản trị viên máy chủ mới có quyền thay đổi • Cập nhật tức thì' })
+    .setTimestamp();
+
+  return embed;
+}
+
+/**
+ * Dropdown Menu đa chọn và các nút Preset nhanh cho tầng Autoplay
+ */
+function createAutoplayLayersComponents(settings) {
+  const activeLayers = (Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0)
+    ? settings.autoplayLayers
+    : ['ytmix', 'ai', 'lastfm', 'heuristic'];
+
+  // 1. Dropdown đa chọn (Multi-select)
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId('menu_autoplay_layers')
+    .setPlaceholder('🔽 Bấm vào đây để tích chọn các tầng Autoplay...')
+    .setMinValues(1)
+    .setMaxValues(4)
+    .addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel('YouTube Mix (RD)')
+        .setDescription('Thuật toán Radio Mix chuẩn gu của YouTube')
+        .setValue('ytmix')
+        .setEmoji('🔴')
+        .setDefault(activeLayers.includes('ytmix')),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Gemini DJ AI')
+        .setDescription('Trí tuệ nhân tạo gợi ý bài theo vibe & thể loại')
+        .setValue('ai')
+        .setEmoji('✨')
+        .setDefault(activeLayers.includes('ai')),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Last.fm Similar')
+        .setDescription('Kho dữ liệu bài hát tương tự quốc tế')
+        .setValue('lastfm')
+        .setEmoji('📻')
+        .setDefault(activeLayers.includes('lastfm')),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Heuristic Fallback')
+        .setDescription('Tìm kiếm bài cùng ca sĩ hoặc bài nổi bật')
+        .setValue('heuristic')
+        .setEmoji('🔍')
+        .setDefault(activeLayers.includes('heuristic'))
+    );
+
+  const rowMenu = new ActionRowBuilder().addComponents(selectMenu);
+
+  // 2. Hàng nút Preset nhanh
+  const rowButtons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('btn_layer_yt_only')
+      .setLabel('🎯 Chỉ YouTube Mix')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('btn_layer_yt_ai')
+      .setLabel('✨ YouTube Mix + AI')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('btn_layer_default')
+      .setLabel('🔄 Mặc định (4 tầng)')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('btn_settings_back')
+      .setLabel('⬅️ Quay lại Cài đặt')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return [rowMenu, rowButtons];
+}
+
 const _lastVoiceStatus = new Map();
 
 /**
@@ -710,6 +857,8 @@ module.exports = {
   createQueueDeleteSelectMenu,
   createSettingsEmbed,
   createSettingsSelectMenu,
+  createAutoplayLayersEmbed,
+  createAutoplayLayersComponents,
   createProgressBar,
   formatDurationMs,
   parseDurationToMs,

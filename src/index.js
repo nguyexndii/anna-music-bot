@@ -31,6 +31,8 @@ const {
   createMusicControls,
   createSettingsEmbed,
   createSettingsSelectMenu,
+  createAutoplayLayersEmbed,
+  createAutoplayLayersComponents,
   createQueueEmbed,
   createQueuePaginationButtons,
   createQueueDeleteSelectMenu,
@@ -736,7 +738,11 @@ client.on('interactionCreate', async (interaction) => {
 
       let updatedSettings = {};
 
-      if (selectedValue === 'set_language') {
+      if (selectedValue === 'set_autoplay_layers') {
+        const layersEmbed = createAutoplayLayersEmbed(interaction.guild, currentSettings);
+        const layersComponents = createAutoplayLayersComponents(currentSettings);
+        return interaction.update({ embeds: [layersEmbed], components: layersComponents });
+      } else if (selectedValue === 'set_language') {
         const newLang = currentSettings.language === 'en' ? 'vi' : 'en';
         updatedSettings = settingsManager.update(guildId, { language: newLang });
       } else if (selectedValue === 'set_ai') {
@@ -831,12 +837,78 @@ client.on('interactionCreate', async (interaction) => {
 
       return interaction.update({ embeds: [newEmbed], components: [newMenu] });
     }
+
+    // Xử lý Dropdown đa chọn cấu hình tầng Autoplay
+    if (interaction.customId === 'menu_autoplay_layers') {
+      const isOwner = interaction.guild.ownerId === interaction.user.id;
+      const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
+
+      if (!isOwner && !hasAdminPerm) {
+        return interaction.reply({
+          embeds: [createErrorEmbed('Bạn không có quyền thực hiện thao tác này! Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên** mới có quyền cấu hình tầng Autoplay.')],
+          flags: 64
+        });
+      }
+
+      const guildId = interaction.guild.id;
+      const selectedLayers = interaction.values; // Mảng các giá trị được tích chọn
+      const updatedSettings = settingsManager.update(guildId, { autoplayLayers: selectedLayers });
+
+      const newEmbed = createAutoplayLayersEmbed(interaction.guild, updatedSettings);
+      const newComponents = createAutoplayLayersComponents(updatedSettings);
+
+      return interaction.update({ embeds: [newEmbed], components: newComponents });
+    }
   }
 
   // 3. Xử lý Nút bấm điều khiển nhạc
   if (interaction.isButton()) {
     const queue = musicManager.get(interaction.guild.id);
     const customId = interaction.customId;
+
+    // Cấu hình tầng Autoplay qua Preset Buttons, nút Mở nhanh hoặc Quay lại
+    if (customId === 'btn_open_autoplay_layers' || customId === 'btn_layer_yt_only' || customId === 'btn_layer_yt_ai' || customId === 'btn_layer_default' || customId === 'btn_settings_back') {
+      const isOwner = interaction.guild?.ownerId === interaction.user.id;
+      const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
+
+      if (!isOwner && !hasAdminPerm) {
+        return interaction.reply({
+          embeds: [createErrorEmbed('Bạn không có quyền thực hiện thao tác này! Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên** mới có quyền cấu hình tầng Autoplay.')],
+          flags: 64
+        });
+      }
+
+      const guildId = interaction.guild.id;
+
+      if (customId === 'btn_open_autoplay_layers') {
+        const currentSettings = settingsManager.get(guildId);
+        const layersEmbed = createAutoplayLayersEmbed(interaction.guild, currentSettings);
+        const layersComponents = createAutoplayLayersComponents(currentSettings);
+        return interaction.reply({ embeds: [layersEmbed], components: layersComponents, flags: 64 });
+      }
+
+      if (customId === 'btn_settings_back') {
+        const currentSettings = settingsManager.get(guildId);
+        const settingsEmbed = createSettingsEmbed(interaction.guild, currentSettings);
+        const settingsMenu = createSettingsSelectMenu(currentSettings);
+        return interaction.update({ embeds: [settingsEmbed], components: [settingsMenu] });
+      }
+
+      let newLayers = ['ytmix', 'ai', 'lastfm', 'heuristic'];
+      if (customId === 'btn_layer_yt_only') {
+        newLayers = ['ytmix'];
+      } else if (customId === 'btn_layer_yt_ai') {
+        newLayers = ['ytmix', 'ai'];
+      } else if (customId === 'btn_layer_default') {
+        newLayers = ['ytmix', 'ai', 'lastfm', 'heuristic'];
+      }
+
+      const updatedSettings = settingsManager.update(guildId, { autoplayLayers: newLayers });
+      const newEmbed = createAutoplayLayersEmbed(interaction.guild, updatedSettings);
+      const newComponents = createAutoplayLayersComponents(updatedSettings);
+
+      return interaction.update({ embeds: [newEmbed], components: newComponents });
+    }
 
     // Chuyển Tab trong Menu Trợ Giúp (Help Menu Tabs)
     if (customId.startsWith('help_tab_')) {

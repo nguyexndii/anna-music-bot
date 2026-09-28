@@ -792,6 +792,7 @@ function extractSoundCloudTitleFromUrl(url) {
 
 const { getGeminiRecommendation } = require('./geminiHelper');
 const historyManager = require('../structures/HistoryManager');
+const settingsManager = require('../structures/SettingsManager');
 
 /**
  * Kiểm tra xem một bài hát có nằm trong lịch sử phát gần nhất không (Hỗ trợ cả Video ID, URL và Tiêu đề)
@@ -1047,47 +1048,63 @@ async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = true) {
   const guildId = typeof guildIdOrHistory === 'string' ? guildIdOrHistory : null;
   const playedList = Array.isArray(guildIdOrHistory) ? guildIdOrHistory : (guildId ? historyManager.getHistory(guildId) : []);
 
-  // 1. Lớp 1 (Ưu tiên số 1 - Chuẩn gu YouTube): YouTube Mix (RD<videoId>)
-  const ytMixTrack = await getYoutubeMix(lastSong, guildId, playedList);
-  if (ytMixTrack) {
-    console.log(`[Autoplay] Found via YouTube Mix: "${ytMixTrack.title}"`);
-    return ytMixTrack;
-  }
+  const guildSettings = guildId ? settingsManager.get(guildId) : null;
+  const configuredLayers = (guildSettings && Array.isArray(guildSettings.autoplayLayers) && guildSettings.autoplayLayers.length > 0)
+    ? guildSettings.autoplayLayers
+    : ['ytmix', 'ai', 'lastfm', 'heuristic'];
 
-  // 2. Lớp 2 (Dự phòng thông minh số 2): Gemini DJ AI
-  if (useAi) {
-    try {
-      const aiRec = await getGeminiRecommendation(lastSong.title, playedList);
-      if (aiRec && (aiRec.searchQuery || aiRec.title)) {
-        const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
-        const results = await searchTrack(query);
-        if (results && results.length > 0) {
-          for (const found of results) {
-            if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
-              console.log(`[Autoplay] Found via Gemini DJ AI: ${found.title} (${aiRec.reason || ''})`);
-              found.requestedBy = 'Auto';
-              return found;
+  for (const layer of configuredLayers) {
+    // 1. Tầng YouTube Mix (list=RD<videoId>)
+    if (layer === 'ytmix') {
+      const ytMixTrack = await getYoutubeMix(lastSong, guildId, playedList);
+      if (ytMixTrack) {
+        console.log(`[Autoplay] Found via YouTube Mix: "${ytMixTrack.title}"`);
+        return ytMixTrack;
+      }
+    }
+
+    // 2. Tầng Gemini DJ AI
+    else if (layer === 'ai') {
+      const aiAllowed = useAi && (guildSettings ? guildSettings.useAiAssistant !== false : true);
+      if (aiAllowed) {
+        try {
+          const aiRec = await getGeminiRecommendation(lastSong.title, playedList);
+          if (aiRec && (aiRec.searchQuery || aiRec.title)) {
+            const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
+            const results = await searchTrack(query);
+            if (results && results.length > 0) {
+              for (const found of results) {
+                if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
+                  console.log(`[Autoplay] Found via Gemini DJ AI: ${found.title} (${aiRec.reason || ''})`);
+                  found.requestedBy = 'Auto';
+                  return found;
+                }
+              }
             }
           }
+        } catch (aiErr) {
+          console.warn('[Autoplay Gemini AI Warning]:', aiErr.message);
         }
       }
-    } catch (aiErr) {
-      console.warn('[Autoplay Gemini AI Warning]:', aiErr.message);
     }
-  }
 
-  // 3. Lớp 3: Last.fm Similar Track (Fallback thứ 3)
-  const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList);
-  if (lastfmTrack) {
-    console.log(`[Autoplay] Found via Last.fm: "${lastfmTrack.title}"`);
-    return lastfmTrack;
-  }
+    // 3. Tầng Last.fm Similar Track
+    else if (layer === 'lastfm') {
+      const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList);
+      if (lastfmTrack) {
+        console.log(`[Autoplay] Found via Last.fm: "${lastfmTrack.title}"`);
+        return lastfmTrack;
+      }
+    }
 
-  // 4. Lớp 4: Heuristic Fallback (Fallback cuối cùng)
-  const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList);
-  if (heuristicTrack) {
-    console.log(`[Autoplay] Found via heuristic fallback: "${heuristicTrack.title}"`);
-    return heuristicTrack;
+    // 4. Tầng Heuristic Fallback
+    else if (layer === 'heuristic') {
+      const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList);
+      if (heuristicTrack) {
+        console.log(`[Autoplay] Found via heuristic fallback: "${heuristicTrack.title}"`);
+        return heuristicTrack;
+      }
+    }
   }
 
   return null;
