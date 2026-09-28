@@ -18,6 +18,7 @@ module.exports = {
   geminiApiKeys: cleanEnv(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY).split(',').map(k => cleanEnv(k)).filter(Boolean),
   mongoUri: cleanEnv(process.env.MONGODB_URI),
   webJwtSecret: cleanEnv(process.env.WEB_JWT_SECRET),
+  adminId: cleanEnv(process.env.ADMIN_USER_ID, '875358286487097395'),
   webUrl: (() => {
     const raw = cleanEnv(process.env.WEB_URL);
     if (!raw || raw.includes('103.249.116.185')) return 'https://anna-music-bot-ui.pages.dev';

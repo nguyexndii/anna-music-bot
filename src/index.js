@@ -45,6 +45,7 @@ const {
 } = require('./utils/embed');
 const { hasMusicPermission, hasManagerPermission, isAllowedVoiceChannel } = require('./utils/permissionHelper');
 const { initLogger, logAction } = require('./utils/debugLogger');
+const { initStatusNotifier } = require('./utils/statusNotifier');
 
 // 1. Khởi tạo Discord Client (Tắt triệt để ping/tít tít thông báo với allowedMentions)
 const client = new Client({
@@ -61,6 +62,11 @@ const client = new Client({
 });
 
 initLogger(client);
+initStatusNotifier(client, {
+  adminId: config.adminId || '875358286487097395',
+  botName: 'Anna Music Bot',
+  platform: 'VPS Ubuntu (PM2)'
+});
 
 client.commands = new Collection();
 client.aliases = new Collection();
