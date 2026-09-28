@@ -19,11 +19,11 @@ if (!global._tokenStoreCleaner) {
 
 let secretKeySource = config.webJwtSecret || process.env.WEB_JWT_SECRET;
 if (!secretKeySource) {
-  if (!global._warnedWebJwtSecret) {
-    console.warn('[TokenHelper] Cảnh báo: Chưa cấu hình WEB_JWT_SECRET trong biến môi trường, đang fallback về token bot.');
-    global._warnedWebJwtSecret = true;
+  if (!global._ephemeralSecretKey) {
+    global._ephemeralSecretKey = crypto.randomBytes(64).toString('hex');
+    console.warn('[TokenHelper Security] Chưa cấu hình WEB_JWT_SECRET trong .env! Đã tự động tạo khóa mật mã ngẫu nhiên 64-byte trong RAM để bảo vệ hệ thống.');
   }
-  secretKeySource = config.token || 'anna-music-secret-key-2026';
+  secretKeySource = global._ephemeralSecretKey;
 }
 
 const SECRET_KEY = crypto.createHash('sha256').update(secretKeySource).digest();
@@ -51,8 +51,8 @@ function generateWebToken(userData, pinExpiryMinutes = 3, sessionExpiryHours = 2
   const pinExp = now + pinExpiryMinutes * 60 * 1000;
   const linkExp = now + 5 * 60 * 1000; // Link mở web có hiệu lực 5 phút
 
-  // 1. Tạo mã PIN 6 số ngẫu nhiên mới (hiệu lực 3 phút, dùng 1 lần)
-  const pin = Math.floor(100000 + Math.random() * 900000).toString();
+  // 1. Tạo mã PIN 6 số ngẫu nhiên an toàn chuẩn mật mã học (CSPRNG)
+  const pin = crypto.randomInt(100000, 1000000).toString();
 
   // 2. Tạo Mã Dùng 1 Lần cho đường Link Web (One-Time Access Token)
   const oneTimeCode = `otc_${crypto.randomBytes(24).toString('base64url')}`;
@@ -140,7 +140,9 @@ function verifyWebToken(tokenOrPin, consume = false) {
     if (!base64Payload || !signature) return null;
 
     const expectedSignature = crypto.createHmac('sha256', SECRET_KEY).update(base64Payload).digest('base64url');
-    if (signature !== expectedSignature) return null;
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
 
     try {
       const payload = JSON.parse(Buffer.from(base64Payload, 'base64url').toString('utf8'));

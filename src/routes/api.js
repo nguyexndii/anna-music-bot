@@ -153,17 +153,58 @@ module.exports = function createApiRouter(client) {
     next();
   };
 
-  // 1. Xác thực Token & PIN từ Discord
+  // Bản đồ ghi nhận số lần nhập sai mã PIN để chống Brute-force vét cạn
+  const failedLoginMap = new Map();
+  // Định kỳ dọn dẹp các IP đã hết hạn khóa sau mỗi 10 phút
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, data] of failedLoginMap.entries()) {
+      if (data.lockedUntil && data.lockedUntil < now) {
+        failedLoginMap.delete(ip);
+      }
+    }
+  }, 10 * 60 * 1000);
+
+  // 1. Xác thực Token & PIN từ Discord (Có cơ chế chống Brute-force 5 lần sai khóa 15 phút)
   router.post('/auth/verify', authVerifyLimiter, async (req, res) => {
     const { token } = req.body;
     if (!token) {
       return res.status(400).json({ success: false, error: 'Vui lòng cung cấp mã PIN hoặc Token' });
     }
 
+    const clientIp = req.ip || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const attemptData = failedLoginMap.get(clientIp);
+
+    // Kiểm tra xem IP này có đang bị tạm khóa hay không
+    if (attemptData && attemptData.lockedUntil > Date.now()) {
+      const waitMinutes = Math.ceil((attemptData.lockedUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        success: false,
+        error: `Bạn đã nhập sai mã PIN quá 5 lần. IP tạm thời bị khóa trong ${waitMinutes} phút để đảm bảo an toàn.`
+      });
+    }
+
     const user = verifyWebToken(token, true);
     if (!user) {
-      return res.status(401).json({ success: false, error: 'Mã PIN hoặc liên kết không hợp lệ, đã được sử dụng hoặc đã hết hạn.' });
+      const currentFailCount = (attemptData?.count || 0) + 1;
+      if (currentFailCount >= 5) {
+        failedLoginMap.set(clientIp, { count: currentFailCount, lockedUntil: Date.now() + 15 * 60 * 1000 });
+        return res.status(429).json({
+          success: false,
+          error: 'Bạn đã nhập sai mã PIN quá 5 lần liên tiếp. Tài khoản bị tạm khóa 15 phút!'
+        });
+      }
+
+      failedLoginMap.set(clientIp, { count: currentFailCount, lockedUntil: 0 });
+      const remainingAttempts = 5 - currentFailCount;
+      return res.status(401).json({
+        success: false,
+        error: `Mã PIN không chính xác hoặc đã hết hạn. Bạn còn ${remainingAttempts} lần thử.`
+      });
     }
+
+    // Đăng nhập thành công -> Xóa lịch sử nhập sai của IP
+    failedLoginMap.delete(clientIp);
 
     const guild = client.guilds.cache.get(user.guildId);
     if (!guild) {
@@ -251,9 +292,15 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  // 2.1 Xem log sự kiện hệ thống siêu tốc (Fast Event Log)
-  router.get('/logs', (req, res) => {
+  // 2.1 Xem log sự kiện hệ thống (Bảo vệ bằng requireAuth & Chỉ Admin mới được xem)
+  router.get('/logs', requireAuth, async (req, res) => {
     try {
+      const user = req.user;
+      const isAdmin = (user.userId === config.adminId) || await checkIsAdmin(user.guildId, user.userId);
+      if (!isAdmin) {
+        return res.status(403).json({ success: false, error: 'Quyền bị từ chối: Chỉ Quản trị viên mới được phép xem nhật ký hệ thống.' });
+      }
+
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
       const fs = require('fs');
       const path = require('path');
@@ -311,21 +358,17 @@ module.exports = function createApiRouter(client) {
     return active;
   }
 
-  // 3. Trạng thái phòng nhạc (Real-time State)
-  router.get('/guilds/:guildId/state', async (req, res) => {
+  // 3. Trạng thái phòng nhạc (Real-time State - Yêu cầu người dùng đã xác thực token)
+  router.get('/guilds/:guildId/state', requireAuth, async (req, res) => {
     const { guildId } = req.params;
     const guild = client.guilds.cache.get(guildId);
     if (!guild) {
       return res.status(404).json({ success: false, error: 'Không tìm thấy máy chủ' });
     }
 
-    const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.token;
-    let caller = null;
-    if (token) {
-      caller = verifyWebToken(token);
-      if (caller) {
-        recordActiveUser(guildId, caller);
-      }
+    const caller = req.user;
+    if (caller) {
+      recordActiveUser(guildId, caller);
     }
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
@@ -1199,7 +1242,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 6.0 Lưu nhớ mốc bù trừ lời bài hát (Offset) vào MongoDB & RAM Cache
-  router.post('/guilds/:guildId/lyrics/offset', async (req, res) => {
+  router.post('/guilds/:guildId/lyrics/offset', requireAuth, async (req, res) => {
     const { trackKey, offsetMs, title, artist } = req.body;
     if (!trackKey || typeof offsetMs !== 'number') {
       return res.status(400).json({ success: false, error: 'Thiếu tham số trackKey hoặc offsetMs' });
@@ -1213,7 +1256,7 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  router.post('/lyrics/offset', async (req, res) => {
+  router.post('/lyrics/offset', requireAuth, async (req, res) => {
     const { trackKey, offsetMs, title, artist } = req.body;
     if (!trackKey || typeof offsetMs !== 'number') {
       return res.status(400).json({ success: false, error: 'Thiếu tham số trackKey hoặc offsetMs' });
