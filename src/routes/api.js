@@ -1,5 +1,6 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const config = require('../config');
 const { verifyWebToken, createSessionToken } = require('../utils/tokenHelper');
 const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
 const { getLyrics } = require('../utils/lyricsHelper');
@@ -49,6 +50,19 @@ module.exports = function createApiRouter(client) {
     statusCode: 429,
     handler: (req, res) => {
       res.status(429).json({ success: false, error: 'Thử lại quá nhiều lần, vui lòng chờ.' });
+    }
+  });
+
+  // Rate-limit cho /api/search: tối đa 30 request/phút/IP (chống DoS scraper & YouTube IP ban)
+  const searchLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
+    statusCode: 429,
+    handler: (req, res) => {
+      res.status(429).json({ success: false, error: 'Bạn đang tìm kiếm quá nhanh, vui lòng chờ trong giây lát!' });
     }
   });
 
@@ -153,6 +167,28 @@ module.exports = function createApiRouter(client) {
     next();
   };
 
+  // Middleware ngăn chặn IDOR: Đảm bảo User chỉ được truy cập vào dữ liệu của máy chủ họ đã xác thực
+  const requireSameGuild = (req, res, next) => {
+    const targetGuildId = req.params.guildId;
+    const user = req.user;
+    if (!targetGuildId || !user) {
+      return res.status(401).json({ success: false, error: 'Chưa xác thực hoặc thiếu ID máy chủ' });
+    }
+    // Chủ bot (Super Admin) luôn có toàn quyền kiểm tra mọi máy chủ
+    if (config.adminId && user.userId === config.adminId) {
+      return next();
+    }
+    // Thành viên chỉ được thao tác trên đúng máy chủ được cấp token
+    if (user.guildId !== targetGuildId) {
+      return res.status(403).json({
+        success: false,
+        code: 'CROSS_GUILD_FORBIDDEN',
+        error: 'Quyền bị từ chối: Phiên đăng nhập của bạn không thuộc máy chủ này!'
+      });
+    }
+    next();
+  };
+
   // Bản đồ ghi nhận số lần nhập sai mã PIN để chống Brute-force vét cạn
   const failedLoginMap = new Map();
   // Định kỳ dọn dẹp các IP đã hết hạn khóa sau mỗi 10 phút
@@ -245,8 +281,8 @@ module.exports = function createApiRouter(client) {
     });
   });
 
-  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp)
-  router.get('/search', async (req, res) => {
+  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp, Rate-limited 30 req/phút)
+  router.get('/search', searchLimiter, async (req, res) => {
     const query = req.query.q?.trim();
     const limit = parseInt(req.query.limit, 10) || 20;
     const mode = req.query.mode || 'official';
@@ -358,8 +394,8 @@ module.exports = function createApiRouter(client) {
     return active;
   }
 
-  // 3. Trạng thái phòng nhạc (Real-time State - Yêu cầu người dùng đã xác thực token)
-  router.get('/guilds/:guildId/state', requireAuth, async (req, res) => {
+  // 3. Trạng thái phòng nhạc (Real-time State - Yêu cầu người dùng đã xác thực token cùng máy chủ)
+  router.get('/guilds/:guildId/state', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const guild = client.guilds.cache.get(guildId);
     if (!guild) {
@@ -524,7 +560,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 4. Order / Thêm bài hát hoặc Playlist từ Web
-  router.post('/guilds/:guildId/play', requireAuth, async (req, res) => {
+  router.post('/guilds/:guildId/play', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const { query, track } = req.body;
     const user = req.user;
@@ -750,7 +786,7 @@ module.exports = function createApiRouter(client) {
 
   // 4.1 Lấy thông tin chi tiết Playlist (cho phép xem trước và thêm từng bài lẻ)
   let isExtractingPlaylist = false;
-  router.get('/guilds/:guildId/playlist-info', requireAuth, async (req, res) => {
+  router.get('/guilds/:guildId/playlist-info', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const url = req.query.url?.trim();
     if (!url) {
@@ -804,7 +840,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 5. Thao tác điều khiển Player (Pause, Resume, Skip, Seek, Volume, 24/7...)
-  router.post('/guilds/:guildId/action', requireAuth, async (req, res) => {
+  router.post('/guilds/:guildId/action', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const { action, value } = req.body;
     const user = req.user;
@@ -1097,7 +1133,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 6. Lấy Cài đặt & Danh sách Kênh của Máy chủ
-  router.get('/guilds/:guildId/settings', requireAuth, async (req, res) => {
+  router.get('/guilds/:guildId/settings', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const user = req.user;
     const guild = client.guilds.cache.get(guildId);
@@ -1134,7 +1170,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 7. Cập nhật Cài đặt Máy chủ từ Web Dashboard
-  router.post('/guilds/:guildId/settings', requireAuth, async (req, res) => {
+  router.post('/guilds/:guildId/settings', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const user = req.user;
 
@@ -1242,7 +1278,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 6.0 Lưu nhớ mốc bù trừ lời bài hát (Offset) vào MongoDB & RAM Cache
-  router.post('/guilds/:guildId/lyrics/offset', requireAuth, async (req, res) => {
+  router.post('/guilds/:guildId/lyrics/offset', requireAuth, requireSameGuild, async (req, res) => {
     const { trackKey, offsetMs, title, artist } = req.body;
     if (!trackKey || typeof offsetMs !== 'number') {
       return res.status(400).json({ success: false, error: 'Thiếu tham số trackKey hoặc offsetMs' });

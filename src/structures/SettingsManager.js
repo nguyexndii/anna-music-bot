@@ -85,10 +85,24 @@ class SettingsManager {
 
   update(guildId, newSettings) {
     const current = this.get(guildId);
-    const toApply = { ...newSettings };
+    if (!newSettings || typeof newSettings !== 'object') return current;
+
+    const toApply = {};
+    // Whitelist: Chỉ cho phép các trường cấu hình hợp lệ đã định nghĩa trong DEFAULT_GUILD_SETTINGS
+    for (const key of Object.keys(DEFAULT_GUILD_SETTINGS)) {
+      if (newSettings[key] !== undefined) {
+        toApply[key] = newSettings[key];
+      }
+    }
+
     if (toApply.autoplayLayers !== undefined) {
       toApply.autoplayLayers = cleanAutoplayLayers(toApply.autoplayLayers);
     }
+    if (toApply.defaultVolume !== undefined) {
+      const vol = parseInt(toApply.defaultVolume, 10);
+      toApply.defaultVolume = (!isNaN(vol) && vol >= 1 && vol <= 150) ? vol : current.defaultVolume;
+    }
+
     const updated = { ...current, ...toApply };
     this.settings.set(guildId, updated);
     this._save();

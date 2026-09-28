@@ -368,6 +368,64 @@ async function enrichSpotifyTracksWithThumbnails(tracks, defaultCover) {
 }
 
 /**
+ * Kiểm tra xem một URL có an toàn để trích xuất âm thanh không (Ngăn chặn tấn công SSRF)
+ * Chặn: localhost, private IPv4/IPv6, link-local, cloud metadata service (169.254.169.254)
+ */
+function isSafeExternalUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const parsed = new URL(urlStr);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase().trim();
+
+    // Chặn localhost, local domain
+    if (hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+      return false;
+    }
+
+    // Chặn IPv6 loopback & link-local
+    if (hostname === '::1' || hostname === '[::1]' || hostname.startsWith('fe80:')) {
+      return false;
+    }
+
+    // Chặn IPv4 loopback (127.0.0.0/8)
+    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return false;
+    }
+
+    // Chặn Cloud Metadata IP (169.254.169.254) & Link-local (169.254.0.0/16)
+    if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return false;
+    }
+
+    // Chặn Private Network IPv4:
+    // 10.0.0.0/8
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return false;
+    }
+    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+    if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return false;
+    }
+    // 192.168.0.0/16
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+      return false;
+    }
+    // 0.0.0.0
+    if (hostname === '0.0.0.0' || hostname === '0') {
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * Tìm kiếm và trích xuất thông tin bài hát / Playlist từ YouTube, Spotify, SoundCloud
  * (Tối đa 100 bài đối với Playlist)
  */
@@ -376,6 +434,15 @@ async function searchTrack(query, targetDurationSec = 0) {
     if (!query || typeof query !== 'string') return null;
 
     let cleanQuery = query.trim();
+
+    // Kiểm tra an toàn bảo mật SSRF cho đường dẫn URL ngoại vi
+    if (cleanQuery.startsWith('http://') || cleanQuery.startsWith('https://')) {
+      if (!isSafeExternalUrl(cleanQuery)) {
+        console.warn(`[Security Alert: SSRF Blocked] URL không an toàn bị từ chối: ${cleanQuery}`);
+        return null;
+      }
+    }
+
     // Tự động chuẩn hóa link Spotify nếu thiếu protocol (vd: en.spotify.com/... hoặc open.spotify.com/...)
     if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !cleanQuery.startsWith('http://') && !cleanQuery.startsWith('https://')) {
       cleanQuery = 'https://' + cleanQuery;
@@ -1160,6 +1227,11 @@ process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
  */
 function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false) {
   return new Promise((resolve, reject) => {
+    if (typeof targetQueryOrUrl === 'string' && (targetQueryOrUrl.startsWith('http://') || targetQueryOrUrl.startsWith('https://'))) {
+      if (!isSafeExternalUrl(targetQueryOrUrl)) {
+        return reject(new Error(`[Security Alert: SSRF Blocked] URL không an toàn: ${targetQueryOrUrl}`));
+      }
+    }
     const ytdlpOptions = {
       output: '-',
       format: 'bestaudio/best',
