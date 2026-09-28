@@ -884,11 +884,18 @@ module.exports = function createApiRouter(client) {
         case 'toggleFavorite': {
           const trackToFav = value || queue?.currentSong;
           if (trackToFav && trackToFav.title) {
+            if (trackToFav.is247 || trackToFav.requestedBy === 'Auto (24/7)' || trackToFav.requestedBy === 'Auto (24/7 Lofi)') {
+              return res.status(400).json({ success: false, error: 'Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích' });
+            }
             if (!trackToFav.url) {
               trackToFav.url = queue?.currentSong?.url || (trackToFav.searchQuery ? `https://www.youtube.com/results?search_query=${encodeURIComponent(trackToFav.searchQuery)}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(trackToFav.title)}`);
             }
-            const favRes = await favoriteManager.toggleFavorite(user.userId, trackToFav);
-            resultMessage = favRes.isAdded ? `Đã thêm "${trackToFav.title}" vào Yêu thích ❤️` : `Đã xóa "${trackToFav.title}" khỏi Yêu thích`;
+            try {
+              const favRes = await favoriteManager.toggleFavorite(user.userId, trackToFav);
+              resultMessage = favRes.isAdded ? `Đã thêm "${trackToFav.title}" vào Yêu thích ❤️` : `Đã xóa "${trackToFav.title}" khỏi Yêu thích`;
+            } catch (favErr) {
+              return res.status(400).json({ success: false, error: favErr.message });
+            }
           } else {
             resultMessage = 'Không có bài hát để yêu thích';
           }

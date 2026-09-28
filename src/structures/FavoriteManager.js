@@ -76,6 +76,10 @@ class FavoriteManager {
       throw new Error('Dữ liệu bài hát không hợp lệ');
     }
 
+    if (song.is247 || song.requestedBy === 'Auto (24/7)' || song.requestedBy === 'Auto (24/7 Lofi)') {
+      throw new Error('Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích');
+    }
+
     const title = String(song.title).trim();
     const url = song.url || (song.uri?.startsWith('http') ? song.uri : null) || (song.searchQuery ? `https://www.youtube.com/results?search_query=${encodeURIComponent(song.searchQuery)}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(title)}`);
     const duration = song.duration || '0:00';

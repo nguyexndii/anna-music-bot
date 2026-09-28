@@ -138,10 +138,22 @@ module.exports = {
       });
     }
 
-    // 2. Lệnh add <tên/link> -> Thêm bài hát thủ công
+    // 2. Lệnh add <tên/link> -> Thêm bài hát thủ công hoặc bài đang phát
     if (sub === 'add' || sub === 'a') {
+      const queue = musicManager.get(ctx.guild.id);
       let query = ctx.isInteraction ? (ctx.options.getString('song') || ctx.options.getString('query')) : args.slice(1).join(' ').trim();
+      
       if (!query) {
+        if (queue && queue.currentSong) {
+          if (queue.currentSong.is247 || queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.requestedBy === 'Auto (24/7 Lofi)') {
+            return ctx.reply({ embeds: [createErrorEmbed('❌ Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích! Hãy order một bài hát để thả tim nhé.')], flags: 64 });
+          }
+          const result = await favoriteManager.toggleFavorite(userId, queue.currentSong);
+          return ctx.reply({
+            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${formatMarkdownTitle(queue.currentSong.title, 60)}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài**`)],
+            flags: 64
+          });
+        }
         return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập tên bài hát hoặc link cần thêm! Ví dụ: `/favorite add Vũ Lạ Lùng`')] });
       }
 
@@ -152,11 +164,18 @@ module.exports = {
       }
 
       const track = tracks[0];
-      const result = await favoriteManager.toggleFavorite(userId, track);
+      if (track.is247 || track.requestedBy === 'Auto (24/7)' || track.requestedBy === 'Auto (24/7 Lofi)') {
+        return ctx.editReply({ embeds: [createErrorEmbed('❌ Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích!')] });
+      }
 
-      return ctx.editReply({
-        embeds: [createSuccessEmbed(`Đã thêm bài hát vào danh sách yêu thích trên MongoDB Atlas: [**${formatMarkdownTitle(track.title, 60)}**](${track.url})\nTổng cộng: **${result.total} bài**`)]
-      });
+      try {
+        const result = await favoriteManager.toggleFavorite(userId, track);
+        return ctx.editReply({
+          embeds: [createSuccessEmbed(`Đã thêm bài hát vào danh sách yêu thích trên MongoDB Atlas: [**${formatMarkdownTitle(track.title, 60)}**](${track.url})\nTổng cộng: **${result.total} bài**`)]
+        });
+      } catch (fErr) {
+        return ctx.editReply({ embeds: [createErrorEmbed(fErr.message)] });
+      }
     }
 
     // 3. Lệnh clear -> Xóa toàn bộ

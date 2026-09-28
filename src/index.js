@@ -1102,6 +1102,13 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [createErrorEmbed('Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!')], flags: 64 });
       }
 
+      if (queue.currentSong?.is247 || queue.currentSong?.requestedBy === 'Auto (24/7)' || queue.currentSong?.requestedBy === 'Auto (24/7 Lofi)') {
+        return interaction.reply({
+          embeds: [createErrorEmbed('❌ Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích! Hãy order một bài hát để thả tim nhé.')],
+          flags: 64
+        });
+      }
+
       try {
         const result = await favoriteManager.toggleFavorite(interaction.user.id, queue.currentSong);
         if (result.isAdded) {
