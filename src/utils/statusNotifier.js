@@ -57,6 +57,7 @@ async function sendAdminDM(client, adminId, { title, description, color, fields 
     await user.send({ embeds: [embed] }).catch((dmErr) => {
       console.warn(`[StatusNotifier] Không thể gửi DM tới ${adminId} (Có thể người dùng chặn DM từ server):`, dmErr.message);
     });
+    console.log(`[StatusNotifier] Đã gửi thành công tin nhắn DM ("${title}") tới Admin ID ${adminId}`);
   } catch (err) {
     console.warn('[StatusNotifier Alert Error]:', err.message);
   }
