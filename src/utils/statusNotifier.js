@@ -63,6 +63,79 @@ async function sendAdminDM(client, adminId, { title, description, color, fields 
   }
 }
 
+const ytdlp = require('yt-dlp-exec');
+const path = require('path');
+const fs = require('fs');
+
+let lastCookieAlertTime = 0;
+const COOKIE_ALERT_COOLDOWN = 6 * 60 * 60 * 1000; // 6 tiếng chống spam DM
+
+/**
+ * Gửi cảnh báo DM khi phát hiện Cookie YouTube bị hết hạn hoặc không khả dụng
+ */
+async function notifyCookieExpired(client, adminId, reason = 'Cookie không hợp lệ hoặc đã bị Google thu hồi') {
+  const now = Date.now();
+  if (now - lastCookieAlertTime < COOKIE_ALERT_COOLDOWN) {
+    return;
+  }
+  lastCookieAlertTime = now;
+
+  const vnTime = getVietnamTime();
+  const cleanReason = String(reason || 'Phiên đăng nhập đã hết hạn').slice(0, 300);
+
+  await sendAdminDM(client, adminId, {
+    title: '🍪 [Anna Music Bot] Cảnh Báo: Cookie YouTube Đã Hết Hạn!',
+    color: 0xe67e22, // Cam cảnh báo
+    description: 'Hệ thống kiểm tra phát hiện file **Cookie YouTube** trên VPS đã hết hạn hoặc bị Google chặn đăng nhập.',
+    fields: [
+      { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+      { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${cleanReason}\`\`\``, inline: false },
+      { name: '💡 Ảnh hưởng', value: 'Tính năng YouTube Mix, gợi ý bài hát cá nhân hóa và một số bài YouTube có thể bị chậm hoặc không phát được.', inline: false },
+      { name: '🛠️ Hướng dẫn cập nhật', value: '1. Mở trình duyệt chứa tài khoản clone.\n2. Dùng tiện ích xuất file cookie mới (đuôi `.txt`).\n3. Gửi file cookie mới cho Antigravity để nạp lại lên VPS chỉ trong 30 giây!', inline: false }
+    ]
+  });
+}
+
+/**
+ * Kiểm tra thực tế xem cookie YouTube trên VPS có còn hợp lệ hay không
+ */
+async function checkYouTubeCookieHealth(client, adminId) {
+  const cookiePath = process.env.YTDLP_COOKIES_FILE || '/root/anna-music-bot/youtube.cookies';
+  if (!fs.existsSync(cookiePath)) {
+    console.warn(`[Cookie Checker] Không tìm thấy file cookie tại: ${cookiePath}`);
+    await notifyCookieExpired(client, adminId, `Không tìm thấy file cookie tại đường dẫn: ${cookiePath}`);
+    return false;
+  }
+
+  try {
+    const res = await ytdlp('https://www.youtube.com/watch?v=kJQP7kiw5Fk&list=RDkJQP7kiw5Fk', {
+      dumpSingleJson: true,
+      flatPlaylist: true,
+      playlistEnd: 2,
+      cookies: cookiePath,
+      extractorArgs: 'youtube:player_client=android,mweb',
+      noWarnings: true
+    });
+
+    if (res && res.entries && res.entries.length > 0) {
+      console.log(`[Cookie Checker] Cookie YouTube đang hoạt động tốt (${res.entries.length} items verified)`);
+      return true;
+    } else {
+      throw new Error('YouTube Mix không trả về danh sách bài hát (Có thể cookie bị chặn)');
+    }
+  } catch (err) {
+    const errMsg = err.message || String(err);
+    console.warn('[Cookie Checker Warning]: Cookie YouTube kiểm tra thất bại:', errMsg);
+
+    // Kiểm tra các dấu hiệu cookie bị chết / hết hạn
+    const isCookieIssue = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookies|expired|private video|429/i.test(errMsg);
+    if (isCookieIssue) {
+      await notifyCookieExpired(client, adminId, errMsg);
+    }
+    return false;
+  }
+}
+
 /**
  * Khởi tạo bộ giám sát trạng thái và tự động thông báo qua DM
  * @param {import('discord.js').Client} client 
@@ -195,10 +268,23 @@ function initStatusNotifier(client, options = {}) {
       new Promise((resolve) => setTimeout(resolve, 2500))
     ]).catch(() => {});
   });
+
+  // 6. Lập lịch tự động kiểm tra sức khỏe Cookie YouTube
+  // Kiểm tra lần đầu sau 15 giây khi bot đã ổn định
+  setTimeout(() => {
+    checkYouTubeCookieHealth(client, adminId).catch(() => {});
+  }, 15000);
+
+  // Kiểm tra định kỳ mỗi 6 giờ
+  setInterval(() => {
+    checkYouTubeCookieHealth(client, adminId).catch(() => {});
+  }, 6 * 60 * 60 * 1000);
 }
 
 module.exports = {
   initStatusNotifier,
   sendAdminDM,
-  getVietnamTime
+  getVietnamTime,
+  checkYouTubeCookieHealth,
+  notifyCookieExpired
 };
