@@ -916,9 +916,20 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = []) {
       playlistEnd: 25,
       extractorArgs: YTDLP_EXTRACTOR_ARGS
     };
-    const cFile = getCookiesFile();
-    if (cFile) mixOpts.cookies = cFile;
-    const res = await ytdlp(mixUrl, mixOpts);
+
+    // Mặc định gọi ẩn danh (không cookie) để YouTube đề xuất chuẩn 100% theo vibe bài hát,
+    // tránh bị thuật toán "My Mix" của tài khoản cookie ép gu/lịch sử nhạc Việt vào bài quốc tế.
+    let res = null;
+    try {
+      res = await ytdlp(mixUrl, mixOpts);
+    } catch (anonErr) {
+      // Fallback: Nếu ẩn danh thất bại thì mới thử dùng cookie
+      const cFile = getCookiesFile();
+      if (cFile) {
+        mixOpts.cookies = cFile;
+        res = await ytdlp(mixUrl, mixOpts).catch(() => null);
+      }
+    }
 
     if (res && res.entries && res.entries.length > 0) {
       for (const entry of res.entries) {
