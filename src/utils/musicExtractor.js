@@ -1480,6 +1480,18 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
             : '';
           const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
           const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(trackTitle || '');
+          // Lọc từ khóa cốt lõi của bài hát để đảm bảo bài thay thế CÙNG BÀI HÁT,
+          // tránh trường hợp bài bị lỗi thuộc Album/EP thì YouTube trả về bài khác trong cùng Album (ví dụ: NU CEP bị đổi thành MỜI EM).
+          const songSegments = (rawTitle || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').split(/\s*[-–—|:]\s*/).filter(Boolean);
+          const songTitlePart = songSegments.length >= 2 ? songSegments.slice(1).join(' ') : (rawTitle || '');
+          const coreTitleWords = songTitlePart
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length >= 2 && !/^(official|music|video|audio|lyrics|mv|full|prod|feat|ft)$/i.test(w));
+
           const candidateVideos = ytsResults.videos.filter(v => {
             if (!v || !v.url) return false;
             if (targetId && v.videoId === targetId) return false;
@@ -1489,6 +1501,20 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
               const t = (v.title || '').toLowerCase();
               if (/\b(remix|mashup|vinahouse|bass\s*boosted|parody|karaoke|beat|slowed|speed\s*up)\b/i.test(t)) return false;
             }
+
+            // BẮT BUỘC: Bản thay thế phải chứa các từ khóa chính của tên bài hát (ít nhất 75% số từ)
+            if (coreTitleWords.length > 0) {
+              const normCand = (v.title || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9]/g, ' ');
+              const matchedWords = coreTitleWords.filter(w => normCand.includes(w));
+              if (matchedWords.length / coreTitleWords.length < 0.75) {
+                return false;
+              }
+            }
+
             return true;
           });
 
@@ -1600,6 +1626,10 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
             console.log(`[SoundCloud] Đang thử phát ứng viên: "${candidate.title}" (${candidate.duration}s)...`);
             const resource = await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true);
             console.log(`[SoundCloud] Phát thành công bản chuẩn: "${candidate.title}"`);
+            if (typeof trackItem === 'object' && trackItem !== null) {
+              trackItem.url = streamUrl;
+              trackItem.isSoundCloud = true;
+            }
             return resource;
           } catch (scStreamErr) {
             console.warn(`[SoundCloud Candidate DRM/Failed - thử tiếp]: "${candidate.title}" - ${scStreamErr.message.split('\n')[0]}`);
