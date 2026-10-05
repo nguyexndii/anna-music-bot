@@ -153,6 +153,7 @@ function initStatusNotifier(client, options = {}) {
 
   let isShuttingDown = false;
   let lastDisconnectAlert = 0;
+  let disconnectTime = 0; // Biến lưu thời gian bắt đầu rớt mạng
 
   // 1. Khi Bot đã sẵn sàng và Online
   client.once(Events.ClientReady, async () => {
@@ -182,35 +183,37 @@ function initStatusNotifier(client, options = {}) {
     }, 2000);
   });
 
-  // 2. Cảnh báo khi mất kết nối Gateway Discord (chống spam tối đa 1 tin / 30s)
+  // 2. Ghi nhận khi mất kết nối Gateway
   client.on(Events.ShardDisconnect, async (event, shardId) => {
-    const now = Date.now();
-    if (now - lastDisconnectAlert < 30000) return;
-    lastDisconnectAlert = now;
-
-    const vnTime = getVietnamTime();
-    await sendAdminDM(client, adminId, {
-      title: `⚠️ [${botName}] Mất Kết Nối Gateway Discord`,
-      color: 0xf39c12, // Orange
-      fields: [
-        { name: '⏰ Thời gian mất kết nối', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
-        { name: '🔍 Mã lỗi / Lý do', value: `Code: \`${event?.code || 'N/A'}\` | ${event?.reason || 'Không rõ'}`, inline: false },
-        { name: '🔄 Trạng thái', value: 'Bot đang tự động thử kết nối lại...', inline: false }
-      ]
-    });
+    disconnectTime = Date.now();
+    // Ẩn việc gửi DM ngay lúc này để tránh spam rớt mạng lặt vặt.
+    // Nếu rớt thật thì hàm bên dưới (ShardResume) sẽ báo kèm tổng thời gian sập.
   });
 
   // 3. Thông báo khi phục hồi phiên kết nối thành công (Shard Resume)
   client.on(Events.ShardResume, async (shardId, replayedEvents) => {
+    const now = Date.now();
+    const downtimeMs = disconnectTime > 0 ? (now - disconnectTime) : 0;
+    
+    // BỘ LỌC CHỐNG SPAM: Nếu rớt mạng dưới 15 giây (mạng chớp nháy/bảo trì siêu tốc), bỏ qua.
+    if (downtimeMs < 15000) {
+      console.log(`[StatusNotifier] Đã bỏ qua 1 tin nhắn spam rớt mạng (${Math.round(downtimeMs/1000)}s)`);
+      return; 
+    }
+
     const vnTime = getVietnamTime();
+    const downtimeStr = formatDuration(downtimeMs / 1000);
+    
     await sendAdminDM(client, adminId, {
       title: `🔄 [${botName}] Đã Khôi Phục Kết Nối Gateway`,
       color: 0x3498db, // Blue
+      description: `Hệ thống vừa bị gián đoạn mạng và đã tự động kết nối lại.`,
       fields: [
-        { name: '⏰ Thời gian', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
-        { name: '⚡ Sự kiện tái hiện', value: `\`${replayedEvents}\` events`, inline: true }
+        { name: '⏰ Khôi phục lúc', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+        { name: '⏳ Tổng thời gian sập', value: `\`${downtimeStr}\``, inline: true }
       ]
     });
+    disconnectTime = 0; // Reset
   });
 
   // 4. Xử lý Shutdown / Tắt Bot / Restart (SIGINT, SIGTERM)
