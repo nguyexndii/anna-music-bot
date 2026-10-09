@@ -91,7 +91,7 @@ async function notifyCookieExpired(client, adminId, reason = 'Cookie không hợ
       { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
       { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${cleanReason}\`\`\``, inline: false },
       { name: '💡 Ảnh hưởng', value: 'Tính năng YouTube Mix, gợi ý bài hát cá nhân hóa và một số bài YouTube có thể bị chậm hoặc không phát được.', inline: false },
-      { name: '🛠️ Hướng dẫn cập nhật', value: '1. Mở trình duyệt chứa tài khoản clone.\n2. Dùng tiện ích xuất file cookie mới (đuôi `.txt`).\n3. Gửi file cookie mới cho Antigravity để nạp lại lên VPS chỉ trong 30 giây!', inline: false }
+      { name: '🛠️ Hướng dẫn cập nhật', value: '1. Mở trình duyệt chứa tài khoản clone.\n2. Dùng tiện ích xuất file cookie mới (đuôi `.txt`).\n3. Upload đè file cookie mới lên VPS (`/root/anna-music-bot/youtube.cookies`) và restart bot.', inline: false }
     ]
   });
 }
