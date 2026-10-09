@@ -2,7 +2,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-// Tự động vá lỗi thư viện yt-search (tránh lỗi title.trim() undefined khi YouTube trả về playlist/mix không có tiêu đề)
+// Vá lỗi yt-search thiếu tiêu đề
 try {
   const ytSearchDist = path.join(__dirname, '../../node_modules/yt-search/dist/yt-search.js');
   if (fs.existsSync(ytSearchDist)) {
@@ -443,7 +443,7 @@ async function searchTrack(query, targetDurationSec = 0) {
       }
     }
 
-    // Tự động chuẩn hóa link Spotify nếu thiếu protocol (vd: en.spotify.com/... hoặc open.spotify.com/...)
+    // Tự động chuẩn hóa link Spotify nếu thiếu protocol
     if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !cleanQuery.startsWith('http://') && !cleanQuery.startsWith('https://')) {
       cleanQuery = 'https://' + cleanQuery;
     }
@@ -521,7 +521,7 @@ async function searchTrack(query, targetDurationSec = 0) {
           const artistName = trackData.artists?.[0]?.name || trackData.artist || '';
           const title = artistName ? `${trackData.name} - ${artistName}` : trackData.name;
           const spotifyDurSec = trackData.duration ? Math.round(trackData.duration / 1000) : (trackData.duration_ms ? Math.round(trackData.duration_ms / 1000) : 0);
-          // Ưu tiên tìm kiếm chuẩn theo thời lượng của Spotify để tránh MV có intro phim
+          // Ưu tiên tìm kiếm chuẩn theo thời lượng Spotify
           let results = await searchTrack(title, spotifyDurSec);
           if (!results || results.length === 0) {
             results = await searchTrack(`${title} Audio`, spotifyDurSec);
@@ -780,7 +780,7 @@ function extractSoundCloudTitleFromUrl(url) {
         }
 
         // Sắp xếp các ứng viên dựa trên độ khớp: Tên bài hát & Tác giả BẮT BUỘC ưu tiên số 1,
-        // sau đó kết hợp thời lượng bài hát (ngăn tuyệt đối việc nhận nhầm bài khác cùng độ dài như vụ 'nguyên xi' thay vì 'Truy Lùng')
+        // Kết hợp kiểm tra chặt chẽ thời lượng bài hát
         const scoredCandidates = candidateVideos.map(v => ({
           v,
           score: scoreCandidateVideo(v, query, targetDurationSec)
@@ -918,7 +918,7 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = []) {
     };
 
     // Mặc định gọi ẩn danh (không cookie) để YouTube đề xuất chuẩn 100% theo vibe bài hát,
-    // tránh bị thuật toán "My Mix" của tài khoản cookie ép gu/lịch sử nhạc Việt vào bài quốc tế.
+    // Bỏ qua cá nhân hóa để tăng độ chính xác.
     let res = null;
     try {
       res = await ytdlp(mixUrl, mixOpts);
@@ -1480,8 +1480,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
             : '';
           const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
           const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(trackTitle || '');
-          // Lọc từ khóa cốt lõi của bài hát để đảm bảo bài thay thế CÙNG BÀI HÁT,
-          // tránh trường hợp bài bị lỗi thuộc Album/EP thì YouTube trả về bài khác trong cùng Album (ví dụ: NU CEP bị đổi thành MỜI EM).
+          // Lọc từ khóa cốt lõi để đảm bảo bài thay thế đồng nhất.
           const songSegments = (rawTitle || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').split(/\s*[-–—|:]\s*/).filter(Boolean);
           const songTitlePart = songSegments.length >= 2 ? songSegments.slice(1).join(' ') : (rawTitle || '');
           const coreTitleWords = songTitlePart
@@ -1602,7 +1601,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
 
         // Sắp xếp ưu tiên:
         // 1. Đưa các bản karaoke/guide xuống sau bản vocal gốc nếu người dùng không yêu cầu karaoke
-        // 2. So khớp thời lượng: ưu tiên bài có độ dài gần nhất với bản gốc (tránh chọn trúng bản bị cắt xén intro/outro)
+        // 2. Ưu tiên bài có thời lượng gần nhất với bản gốc
         if (!userWantsRemix) {
           candidateTracks.sort((a, b) => {
             const aKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(a.title || '');

@@ -149,7 +149,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
           }
         }
       } else {
-        // Chưa biết chắc segment nào là ca sĩ: Thử cả 2 chiều s1-s2 và s2-s1, TUYỆT ĐỐI KHÔNG tìm q = 1 từ bare
+        // Thử cả 2 chiều s1-s2 và s2-s1
         const s1 = meaningfulSegments[0];
         const s2 = meaningfulSegments[1];
         const s1Artists = extractArtists(s1);
@@ -190,7 +190,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         }
       }
     } else {
-      // Chỉ có 1 segment: tiêu đề bài hát đơn (ví dụ "Khởi", "Bước Qua Nhau")
+      // Chỉ có 1 segment: tiêu đề bài hát đơn
       const allKnownArtists = [];
       if (cleanArt && cleanArt !== 'Unknown' && cleanArt !== 'YouTube Music') {
         allKnownArtists.push(cleanArt);
@@ -254,12 +254,12 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
         if (cWords.length === 0) return false;
 
         if (eWords.length === 1) {
-          // Bắt buộc candidate đúng 1 từ và khớp chính xác (ngăn "xa khơi" cho "khởi", "yêu xa" cho "yêu")
+          // Bắt buộc candidate đúng 1 từ và khớp chính xác
           return cWords.length === 1 && cWords[0] === eWords[0];
         }
 
         if (eWords.length === 2) {
-          // Bắt buộc candidate đúng 2 từ và khớp chính xác (ngăn "in love" cho "love game")
+          // Bắt buộc candidate đúng 2 từ và khớp chính xác
           return cWords.length === 2 && cWords[0] === eWords[0] && cWords[1] === eWords[1];
         }
 
@@ -337,7 +337,7 @@ function parseLrc(lrcString) {
   return result.length > 0 ? result : null;
 }
 
-// Bộ nhớ đệm lời bài hát (In-memory cache) tránh gọi lại nhiều lần gây tốn tài nguyên
+// Bộ nhớ đệm lời bài hát (In-memory cache)
 const lyricsMemoryCache = new Map();
 const MAX_LYRICS_CACHE = 200;
 
@@ -528,7 +528,7 @@ function findTrackInSubs(subsMap, context) {
 
   // Tiếng Anh (Mặc định cho Pop / US-UK / Quốc tế):
   // BẮT BUỘC chỉ chọn tiếng Anh (en, en-orig, en-US, en-GB, en-CA...).
-  // TUYỆT ĐỐI KHÔNG nhận ngôn ngữ dịch khác như tiếng Tây Ban Nha (es), Bồ Đào Nha, Pháp, v.v.
+  // Chỉ chấp nhận ngôn ngữ gốc
   const enKey = subKeys.find(k => k === 'en' || k === 'en-orig' || k === 'en-US' || k === 'en-GB' || k.startsWith('en-') || k.startsWith('en_') || k.startsWith('.en'));
   if (enKey && subsMap[enKey]?.length) return subsMap[enKey];
 
@@ -540,7 +540,7 @@ function selectBestSubtitleTrack(officialSubs, autoSubs, context = {}, allowAuto
   const officialTrack = findTrackInSubs(officialSubs, context);
   if (officialTrack) return { track: officialTrack, isOfficial: true };
 
-  // 2. Phụ đề tự động (Automatic Captions) - TUYỆT ĐỐI KHÔNG dùng làm lời bài hát (tránh từ ngữ thô tục / AI sai lệch)
+  // 2. Bỏ qua phụ đề tự động (Automatic Captions)
   // Chỉ cho phép dùng trong detectYouTubeIntroOffset khi allowAuto = true để căn nhịp mốc bắt đầu
   if (allowAuto) {
     const autoTrack = findTrackInSubs(autoSubs, context);
@@ -583,7 +583,7 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
 
     const isVN = isVietnameseTrack(context);
 
-    // Chỉ nhận phụ đề chính thức (info.subtitles), TUYỆT ĐỐI KHÔNG nhận auto captions làm lời nhạc
+    // Chỉ nhận phụ đề chính thức (info.subtitles)
     const selected = selectBestSubtitleTrack(info.subtitles, info.automatic_captions, context, false);
     if (!selected || !selected.track || !Array.isArray(selected.track) || selected.track.length === 0) {
       return null;
@@ -704,7 +704,7 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
 
     if (candidateLines.length === 0) return 0;
 
-    // Chỉ tìm trong 50 giây đầu của video để phát hiện đoạn intro skit/nói chuyện của MV, tránh bắt nhầm điệp khúc lặp lại ở giữa bài
+    // Quét giới hạn 50s đầu video để phát hiện intro
     const maxSearchMs = Math.min(50000, targetDurationSec > 0 ? targetDurationSec * 1000 : 50000);
     const searchEvents = events.filter(ev => (ev.tStartMs || 0) <= maxSearchMs && ev.segs && ev.segs.length > 0);
 
@@ -1001,7 +1001,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
 
   // 4. TẦNG 4: ĐỐI VỚI NHẠC KHÔNG PHẢI YOUTUBE (Spotify, SoundCloud, tìm theo tên...):
   // Nếu các kho lời chuẩn (LRCLIB, Syncedlyrics) đều không có, lúc này mới đi tìm video trên YouTube
-  // để trích xuất phụ đề CC CHÍNH THỨC do nghệ sĩ tải lên (TUYỆT ĐỐI KHÔNG nhận auto CC của YouTube).
+  // để trích xuất phụ đề CC chính thức.
   if (!isYouTube) {
     try {
       const searchQuery = `${cleanTitle(rawTitle)} ${cleanArtistName(artist)}`.trim();

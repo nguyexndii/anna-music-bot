@@ -130,7 +130,7 @@ module.exports = function createApiRouter(client) {
       return { name, avatar };
     }
 
-    // 3. Chuỗi dạng mention hoặc Snowflake ID (VD: <@123456789012345678> hoặc 123456789012345678)
+    // 3. Chuỗi dạng mention hoặc Snowflake ID
     if (typeof raw === 'string') {
       const match = raw.match(/^(?:<@!?)?(\d{17,20})>?$/);
       if (match) {
@@ -597,7 +597,7 @@ module.exports = function createApiRouter(client) {
       return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi thêm bài hát!' });
     }
 
-    // Nếu Bot ĐÃ Ở TRONG một kênh Voice (ví dụ phòng treo Lofi 24/7):
+    // Nếu Bot ĐÃ Ở TRONG một kênh Voice:
     // Bắt buộc User phải Ở CÙNG PHÒNG VOICE VỚI BOT!
     const botVoice = existingQueue?.voiceChannel || guild.members.me?.voice?.channel;
     if (botVoice && userVoice.id !== botVoice.id) {
