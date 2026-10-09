@@ -60,7 +60,7 @@ function extractFeatFromRaw(title) {
 
 function splitFeat(str) {
   if (!str) return null;
-  // Không dùng 'x' ở đây vì 'x' là ký hiệu kết hợp giữa các nghệ sĩ (Low G x tlinh), không phải tên bài
+  // Không dùng 'x' ở đây vì 'x' là ký hiệu kết hợp giữa các nghệ sĩ không phải tên bài
   const m = str.match(/^(.+?)\s+(?:ft\.?|feat\.?|cùng|với)\s+(.+)$/i);
   if (m) {
     return { titlePart: m[1].trim(), artistPart: m[2].trim() };
@@ -139,7 +139,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
             queries.push({ q: `${trackCand} ${artistSeg}`, expectedTrack: trackCand, expectedArtist: artistList });
           }
 
-          // Trường hợp trackCand có feat: e.g. "Love Game ft. tlinh"
+          // Trường hợp trackCand có feat
           const feat = splitFeat(trackCand);
           if (feat) {
             const featArtists = [...artistList, feat.artistPart];
@@ -163,7 +163,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         queries.push({ track: s1, artist: s2, expectedTrack: s1, expectedArtist: s2Artists });
         queries.push({ q: `${s1} ${s2}`, expectedTrack: s1, expectedArtist: s2Artists });
 
-        // Trường hợp s2 có feat: e.g. "Donald Gold - OBGTLH ft. Lil Shady"
+        // Trường hợp s2 có feat
         const feat2 = splitFeat(s2);
         if (feat2) {
           const exp = [s1, feat2.artistPart];
@@ -180,7 +180,7 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
         queries.push({ track: s2, artist: s1, expectedTrack: s2, expectedArtist: s1Artists });
         queries.push({ q: `${s2} ${s1}`, expectedTrack: s2, expectedArtist: s1Artists });
 
-        // Trường hợp s1 có feat: e.g. "OBGTLH ft. Lil Shady - Donald Gold"
+        // Trường hợp s1 có feat
         const feat1 = splitFeat(s1);
         if (feat1) {
           const exp = [s2, feat1.artistPart];
@@ -1043,7 +1043,7 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
     const targetDurationSec = durationMs ? Math.floor(durationMs / 1000) : 0;
     let cleanArt = cleanArtistName(artist);
 
-    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách (ví dụ "DONALD GOLD - ADAMN" hoặc "Bước Qua Nhau / Vũ.")
+    // Tách tên bài và ca sĩ nếu tiêu đề có dấu phân cách
     let cleanTitleOnly = primaryClean;
     const segs = primaryClean.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).filter(Boolean);
     if (segs.length >= 2) {
@@ -1054,16 +1054,15 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
       const s1IsArt = normArt && (normalizeStr(s1).includes(normArt) || normArt.includes(normalizeStr(s1)));
 
       if (s0IsArt) {
-        // segs[0] là ca sĩ (vd "DONALD GOLD - ADAMN"), segs[1] là tên bài hát
+        // segs[0] là ca sĩ, segs[1] là tên bài hát
         cleanTitleOnly = s1;
         cleanArt = cleanArtistName(s0);
       } else if (s1IsArt) {
-        // segs[1] là ca sĩ (vd "ADAMN - DONALD GOLD"), segs[0] là tên bài hát
+        // segs[1] là ca sĩ, segs[0] là tên bài hát
         cleanTitleOnly = s0;
         cleanArt = cleanArtistName(s1);
       } else {
         // Mặc định phần đầu (s0) là Tên bài hát, phần sau (s1) là Ca sĩ
-        // Khắc phục lỗi đảo ngược "Ta và Nàng - Đen ft. JGKiD" thành bài "Đen" của ca sĩ "Ta và Nàng"
         cleanTitleOnly = s0;
         if (!cleanArt || cleanArt === 'Unknown') {
           cleanArt = cleanArtistName(s1);
