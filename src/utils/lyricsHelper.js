@@ -1062,17 +1062,11 @@ async function fetchLyricsFallback(rawTitle, artist = '', durationMs = 0) {
         cleanTitleOnly = s0;
         cleanArt = cleanArtistName(s1);
       } else {
-        const feat2 = splitFeat(s1);
-        if (feat2) {
-          cleanTitleOnly = feat2.titlePart;
-          if (!cleanArt || cleanArt === 'Unknown') {
-            cleanArt = cleanArtistName(s0);
-          }
-        } else {
-          cleanTitleOnly = s0;
-          if (!cleanArt || cleanArt === 'Unknown') {
-            cleanArt = cleanArtistName(s1);
-          }
+        // Mặc định phần đầu (s0) là Tên bài hát, phần sau (s1) là Ca sĩ
+        // Khắc phục lỗi đảo ngược "Ta và Nàng - Đen ft. JGKiD" thành bài "Đen" của ca sĩ "Ta và Nàng"
+        cleanTitleOnly = s0;
+        if (!cleanArt || cleanArt === 'Unknown') {
+          cleanArt = cleanArtistName(s1);
         }
       }
     }
