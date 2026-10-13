@@ -19,7 +19,7 @@ module.exports = {
         .setName('status')
         .setDescription('Turn autoplay on or off')
         .setDescriptionLocalizations({
-          vi: 'Bật hoặc tắt chế độ tự động phát'
+          vi: 'Chọn: on (Bật), off (Tắt) hoặc layers (Cấu hình các tầng thuật toán gợi ý)'
         })
         .setRequired(false)
         .addChoices(

@@ -16,9 +16,9 @@ module.exports = {
     .addIntegerOption(opt =>
       opt
         .setName('level')
-        .setDescription('Volume level from 1 to 100')
+        .setDescription('Volume level from 1 to 100%')
         .setDescriptionLocalizations({
-          vi: 'Mức âm lượng từ 1 đến 100'
+          vi: 'Mức âm lượng mong muốn từ 1 đến 100% (ví dụ: 50 hoặc 80)'
         })
         .setMinValue(1)
         .setMaxValue(100)

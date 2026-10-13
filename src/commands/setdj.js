@@ -19,7 +19,7 @@ module.exports = {
         .setName('role')
         .setDescription('DJ Role to assign')
         .setDescriptionLocalizations({
-          vi: 'Vai trò DJ cho máy chủ'
+          vi: 'Chọn vai trò (Role) muốn phân quyền DJ điều khiển nhạc'
         })
         .setRequired(false)
     )
@@ -28,7 +28,7 @@ module.exports = {
         .setName('mode')
         .setDescription('Enable, disable, or reset DJ mode')
         .setDescriptionLocalizations({
-          vi: 'Bật, tắt hoặc hủy vai trò DJ'
+          vi: 'Chọn chế độ: on (Chỉ DJ được chỉnh nhạc), off (Tắt), reset (Hủy vai trò DJ)'
         })
         .setRequired(false)
         .addChoices(

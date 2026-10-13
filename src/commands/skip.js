@@ -6,13 +6,13 @@ const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
   name: 'skip',
-  aliases: ['s', 'sk', 'next'],
+  aliases: ['s', 'sk', 'next', 'fs', 'forceskip'],
   description: 'Skip current song',
   data: new SlashCommandBuilder()
     .setName('skip')
     .setDescription('Skip current song')
     .setDescriptionLocalizations({
-      vi: 'Bỏ qua bài hát hiện tại'
+      vi: 'Bỏ qua bài hát hiện tại (hỗ trợ lệnh tắt /s, /fs)'
     }),
   async execute(source, args) {
     const ctx = createContext(source, args);

@@ -20,7 +20,7 @@ module.exports = {
         .setName('status')
         .setDescription('Turn 24/7 mode on or off')
         .setDescriptionLocalizations({
-          vi: 'Bật hoặc tắt chế độ 24/7'
+          vi: 'Chọn trạng thái: on (Bật duy trì Voice 24/7 & phát Lofi thư giãn), off (Tắt)'
         })
         .setRequired(false)
         .addChoices(

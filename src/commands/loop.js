@@ -16,9 +16,9 @@ module.exports = {
     .addStringOption(opt =>
       opt
         .setName('mode')
-        .setDescription('Loop mode')
+        .setDescription('Loop mode (Off, Song, Queue)')
         .setDescriptionLocalizations({
-          vi: 'Chế độ lặp lại'
+          vi: 'Chọn chế độ lặp: Tắt (Off), Lặp 1 bài (Song), Lặp toàn bộ hàng chờ (Queue)'
         })
         .setRequired(false)
         .addChoices(

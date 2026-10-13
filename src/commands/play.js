@@ -21,9 +21,9 @@ module.exports = {
     .addStringOption(option =>
       option
         .setName('song')
-        .setDescription('Song title, artist name, or URL')
+        .setDescription('Song title, artist name, or YouTube/Spotify/SoundCloud URL')
         .setDescriptionLocalizations({
-          vi: 'Tên bài hát, ca sĩ hoặc link YouTube/Spotify'
+          vi: 'Tên bài hát, ca sĩ hoặc đường dẫn link YouTube/Spotify/SoundCloud (ví dụ: Vũ Lạ Lùng)'
         })
         .setRequired(true)
     ),

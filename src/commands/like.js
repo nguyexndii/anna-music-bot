@@ -13,27 +13,27 @@ const { createEmbed, createSuccessEmbed, createErrorEmbed, formatMarkdownTitle }
 const { createContext } = require('../utils/commandHelper');
 
 module.exports = {
-  name: 'favorite',
-  aliases: ['fav', 'yeuthich', 'like', 'likes'],
-  description: 'Manage and play your personal favorite songs list',
+  name: 'like',
+  aliases: ['fav', 'favorite', 'yeuthich', 'likes'],
+  description: 'Manage and play your personal liked songs list',
   data: new SlashCommandBuilder()
-    .setName('favorite')
-    .setDescription('Manage and play your personal favorite songs list')
+    .setName('like')
+    .setDescription('Manage and play your personal liked songs list')
     .setDescriptionLocalizations({
       vi: 'Quản lý và phát danh sách bài hát yêu thích cá nhân'
     })
     .addSubcommand(sub =>
       sub
         .setName('list')
-        .setDescription('View your favorite songs list')
+        .setDescription('View your liked songs list')
         .setDescriptionLocalizations({
-          vi: 'Xem danh sách bài hát yêu thích của bạn'
+          vi: 'Xem danh sách các bài hát bạn đã thích'
         })
     )
     .addSubcommand(sub =>
       sub
         .setName('play')
-        .setDescription('Play favorite songs into voice channel')
+        .setDescription('Play liked songs into voice channel')
         .setDescriptionLocalizations({
           vi: 'Phát bài hát yêu thích vào phòng Voice'
         })
@@ -42,7 +42,7 @@ module.exports = {
             .setName('index')
             .setDescription('Position number of the specific song to play (leave blank to play all)')
             .setDescriptionLocalizations({
-              vi: 'Số thứ tự bài hát muốn phát (để trống nếu muốn phát tất cả)'
+              vi: 'Số thứ tự bài hát muốn phát (ví dụ: 1, 2, 3... - để trống nếu muốn phát toàn bộ danh sách)'
             })
             .setMinValue(1)
             .setRequired(false)
@@ -51,45 +51,37 @@ module.exports = {
     .addSubcommand(sub =>
       sub
         .setName('add')
-        .setDescription('Add a song to your favorites')
+        .setDescription('Add a song to your liked songs list')
         .setDescriptionLocalizations({
           vi: 'Thêm bài hát vào danh sách yêu thích'
         })
         .addStringOption(opt =>
           opt
             .setName('song')
-            .setDescription('Song title or URL')
+            .setDescription('Song title, artist name, or YouTube/Spotify URL')
             .setDescriptionLocalizations({
-              vi: 'Tên bài hát hoặc link YouTube/Spotify'
+              vi: 'Tên bài hát, tên ca sĩ hoặc đường dẫn link YouTube/Spotify (ví dụ: Vũ Lạ Lùng)'
             })
-            .setRequired(true)
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
       sub
         .setName('remove')
-        .setDescription('Remove a song from favorites by position number')
+        .setDescription('Remove a song from liked list by its position number')
         .setDescriptionLocalizations({
           vi: 'Xóa bài hát khỏi danh sách yêu thích theo số thứ tự'
         })
         .addIntegerOption(opt =>
           opt
             .setName('index')
-            .setDescription('Position number to remove')
+            .setDescription('Position number of the song to remove (e.g. 1, 2, 3...)')
             .setDescriptionLocalizations({
-              vi: 'Số thứ tự bài hát cần xóa'
+              vi: 'Số thứ tự của bài hát cần xóa trong danh sách yêu thích (ví dụ: 1, 2, 3...)'
             })
             .setMinValue(1)
             .setRequired(true)
         )
-    )
-    .addSubcommand(sub =>
-      sub
-        .setName('clear')
-        .setDescription('Clear all favorite songs')
-        .setDescriptionLocalizations({
-          vi: 'Xóa toàn bộ danh sách bài hát yêu thích'
-        })
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
@@ -154,7 +146,7 @@ module.exports = {
             flags: 64
           });
         }
-        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập tên bài hát hoặc link cần thêm! Ví dụ: `/favorite add Vũ Lạ Lùng`')] });
+        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập tên bài hát hoặc link cần thêm! Ví dụ: `/like add Vũ Lạ Lùng`')] });
       }
 
       await ctx.deferReply();
@@ -178,17 +170,11 @@ module.exports = {
       }
     }
 
-    // 3. Lệnh clear -> Xóa toàn bộ
-    if (sub === 'clear') {
-      await favoriteManager.clearFavorites(userId);
-      return ctx.reply({ embeds: [createSuccessEmbed('Đã xóa sạch toàn bộ danh sách bài hát yêu thích của bạn!')], flags: 64 });
-    }
-
-    // 4. Lệnh remove <số thứ tự>
+    // 3. Lệnh remove <số thứ tự>
     if (sub === 'remove' || sub === 'xoa') {
       const idx = ctx.isInteraction ? ctx.options.getInteger('index') : parseInt(args[1], 10);
       if (isNaN(idx) || idx < 1) {
-        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/favorite remove 1`')], flags: 64 });
+        return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập số thứ tự bài cần xóa! Ví dụ: `/like remove 1`')], flags: 64 });
       }
 
       const result = await favoriteManager.removeFavorite(userId, idx - 1);
@@ -203,7 +189,7 @@ module.exports = {
       });
     }
 
-    // 5. Mặc định / list: Hiển thị Danh Sách Bài Hát Yêu Thích
+    // 4. Mặc định / list: Hiển thị Danh Sách Bài Hát Yêu Thích
     const favorites = await favoriteManager.getFavorites(userId);
 
     const embed = new EmbedBuilder()
@@ -214,7 +200,7 @@ module.exports = {
 
     if (!favorites || favorites.length === 0) {
       embed.setDescription(
-        'Danh sách yêu thích của bạn hiện đang trống!\n\n💡 **Cách thêm bài hát:**\n• Bấm nút **`♡`** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/favorite add <tên bài hát>`'
+        'Danh sách yêu thích của bạn hiện đang trống!\n\n💡 **Cách thêm bài hát:**\n• Bấm nút **`♡`** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/like add <tên bài hát>`'
       );
       return ctx.reply({ embeds: [embed], flags: 64 });
     }

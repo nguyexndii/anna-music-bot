@@ -15,17 +15,16 @@ function createHelpMenu(activeTab = 'music', isAdmin = false) {
       desc: [
         `**/play** (hoặc **/p**) \`[tên/link]\` — Phát bài hát hoặc Playlist (YouTube, Spotify, SoundCloud)`,
         `**/web** — Mở Web UI điều khiển âm nhạc trực quan, tìm kiếm & quản lý hàng chờ`,
-        `**/seek** \`<thời_gian>\` — Tua bài hát đến thời điểm (vd: \`/seek 1:30\` hoặc \`/seek 90\`)`,
         `**/pause** — Tạm dừng bài hát đang phát`,
         `**/resume** — Tiếp tục phát bài hát đang tạm dừng`,
-        `**/skip** (hoặc **/s**) — Bỏ qua bài hát hiện tại`,
+        `**/skip** (hoặc **/s**, **/fs**) — Bỏ qua bài hát hiện tại (hỗ trợ Force Skip nhanh)`,
         `**/stop** — Dừng phát nhạc và dọn dẹp hàng chờ`,
         `**/lyrics** (hoặc **/ly**) \`[tên_bài]\` — Xem lời bài hát đồng bộ (để trống để tự lấy bài đang phát)`,
-        `**/favorite** (hoặc **/fav**) — Quản lý & phát danh sách bài hát yêu thích cá nhân`,
+        `**/like** (hoặc **/fav**) — Quản lý & phát danh sách bài hát yêu thích cá nhân`,
         `**/join** — Mời bot tham gia kênh thoại của bạn`,
         `**/leave** — Cho bot rời khỏi kênh thoại`
       ].join('\n'),
-      footer: '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /q, /np, /vol, /fav, /ly, /mv, /h'
+      footer: '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h'
     },
     queue: {
       title: '📋 Hướng Dẫn Hàng Chờ • Queue Commands',
@@ -43,10 +42,9 @@ function createHelpMenu(activeTab = 'music', isAdmin = false) {
         `**/nowplaying** (hoặc **/np**) — Xem bài đang phát & bảng nút điều khiển tương tác`,
         `**/volume** (hoặc **/vol**) \`[1-100]\` — Điều chỉnh âm lượng phát nhạc của bot (1-100%)`,
         `**/loop** \`[chế_độ]\` — Đổi chế độ lặp: Tắt ➔ Lặp bài hiện tại ➔ Lặp hàng chờ`,
-        `**/crossfade** \`[giây: 0-10]\` — Bật hiệu ứng hòa âm fade in mượt mà khi chuyển bài`,
         `**/autoplay** \`[on/off]\` — Tự động tìm và phát bài tương tự khi hết nhạc`
       ].join('\n'),
-      footer: 'Điều chỉnh âm lượng, chế độ lặp và hiệu ứng chuyển bài'
+      footer: 'Điều chỉnh âm lượng, chế độ lặp và tự động phát'
     },
     utility: {
       title: '⚙️ Tiện Ích • Utility Commands',

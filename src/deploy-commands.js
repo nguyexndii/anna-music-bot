@@ -27,6 +27,13 @@ const SLASH_SHORTCUTS = [
       .setDescriptionLocalizations({ vi: 'Bỏ qua bài hát hiện tại (Lệnh tắt của /skip)' })
   },
   {
+    target: 'skip',
+    builder: () => new SlashCommandBuilder()
+      .setName('fs')
+      .setDescription('Force skip current song (Shortcut for /skip)')
+      .setDescriptionLocalizations({ vi: 'Bỏ qua bài hát hiện tại ngay lập tức (Lệnh tắt của /skip)' })
+  },
+  {
     target: 'queue',
     builder: () => new SlashCommandBuilder()
       .setName('q')
@@ -50,23 +57,23 @@ const SLASH_SHORTCUTS = [
         opt
           .setName('level')
           .setDescription('Volume level from 1 to 100')
-          .setDescriptionLocalizations({ vi: 'Mức âm lượng từ 1 đến 100' })
+          .setDescriptionLocalizations({ vi: 'Mức âm lượng mong muốn từ 1 đến 100% (ví dụ: 50 hoặc 80)' })
           .setMinValue(1)
           .setMaxValue(100)
           .setRequired(true)
       )
   },
   {
-    target: 'favorite',
+    target: 'like',
     builder: () => new SlashCommandBuilder()
       .setName('fav')
-      .setDescription('Manage & play favorite songs (Shortcut for /favorite)')
-      .setDescriptionLocalizations({ vi: 'Quản lý & phát bài yêu thích (Lệnh tắt của /favorite)' })
+      .setDescription('Manage & play liked songs (Shortcut for /like)')
+      .setDescriptionLocalizations({ vi: 'Quản lý & phát bài yêu thích (Lệnh tắt của /like)' })
       .addSubcommand(sub =>
         sub
           .setName('list')
           .setDescription('View favorites list')
-          .setDescriptionLocalizations({ vi: 'Xem danh sách yêu thích' })
+          .setDescriptionLocalizations({ vi: 'Xem danh sách các bài hát bạn đã thích' })
       )
       .addSubcommand(sub =>
         sub
@@ -77,7 +84,7 @@ const SLASH_SHORTCUTS = [
             opt
               .setName('index')
               .setDescription('Position number of the specific song to play (leave blank to play all)')
-              .setDescriptionLocalizations({ vi: 'Số thứ tự bài hát muốn phát (để trống nếu muốn phát tất cả)' })
+              .setDescriptionLocalizations({ vi: 'Số thứ tự bài hát muốn phát (ví dụ: 1, 2, 3... - để trống nếu muốn phát tất cả)' })
               .setMinValue(1)
               .setRequired(false)
           )
@@ -91,29 +98,23 @@ const SLASH_SHORTCUTS = [
             opt
               .setName('song')
               .setDescription('Song title or URL')
-              .setDescriptionLocalizations({ vi: 'Tên bài hát hoặc link YouTube/Spotify' })
-              .setRequired(true)
+              .setDescriptionLocalizations({ vi: 'Tên bài hát, tên ca sĩ hoặc đường dẫn link YouTube/Spotify (ví dụ: Vũ Lạ Lùng)' })
+              .setRequired(false)
           )
       )
       .addSubcommand(sub =>
         sub
           .setName('remove')
           .setDescription('Remove a song by position')
-          .setDescriptionLocalizations({ vi: 'Xóa bài khỏi yêu thích theo số thứ tự' })
+          .setDescriptionLocalizations({ vi: 'Xóa bài khỏi danh sách yêu thích theo số thứ tự' })
           .addIntegerOption(opt =>
             opt
               .setName('index')
               .setDescription('Position number')
-              .setDescriptionLocalizations({ vi: 'Số thứ tự' })
+              .setDescriptionLocalizations({ vi: 'Số thứ tự của bài hát cần xóa (ví dụ: 1, 2, 3...)' })
               .setMinValue(1)
               .setRequired(true)
           )
-      )
-      .addSubcommand(sub =>
-        sub
-          .setName('clear')
-          .setDescription('Clear all favorite songs')
-          .setDescriptionLocalizations({ vi: 'Xóa toàn bộ danh sách yêu thích' })
       )
   },
   {

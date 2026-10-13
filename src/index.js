@@ -1119,7 +1119,7 @@ client.on('interactionCreate', async (interaction) => {
         const result = await favoriteManager.toggleFavorite(interaction.user.id, queue.currentSong);
         if (result.isAdded) {
           return interaction.reply({
-            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${formatMarkdownTitle(queue.currentSong.title, 60)}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Dùng \`/favorite list\` để xem danh sách`)],
+            embeds: [createSuccessEmbed(`❤️ Đã thêm [**${formatMarkdownTitle(queue.currentSong.title, 60)}**](${queue.currentSong.url}) vào danh sách **Bài Hát Yêu Thích**\nTổng cộng: **${result.total} bài** • Dùng \`/like list\` (hoặc \`/fav list\`) để xem danh sách`)],
             flags: 64
           });
         } else {

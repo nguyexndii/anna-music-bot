@@ -19,7 +19,7 @@ module.exports = {
         .setName('channel')
         .setDescription('Voice channel to lock to')
         .setDescriptionLocalizations({
-          vi: 'Kênh Voice muốn khóa cố định'
+          vi: 'Chọn kênh Voice muốn khóa cố định bot vào đó'
         })
         .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
         .setRequired(false)
@@ -29,7 +29,7 @@ module.exports = {
         .setName('reset')
         .setDescription('Unlock voice channel restriction')
         .setDescriptionLocalizations({
-          vi: 'Hủy khóa kênh Voice'
+          vi: 'Chọn True nếu muốn hủy khóa kênh Voice'
         })
         .setRequired(false)
     ),

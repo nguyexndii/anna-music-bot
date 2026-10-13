@@ -19,7 +19,7 @@ module.exports = {
         .setName('channel')
         .setDescription('Text channel to send logs to')
         .setDescriptionLocalizations({
-          vi: 'Kênh văn bản muốn gửi nhật ký'
+          vi: 'Chọn kênh văn bản để ghi toàn bộ nhật ký voice & âm nhạc'
         })
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false)
@@ -29,7 +29,7 @@ module.exports = {
         .setName('reset')
         .setDescription('Turn off log channel')
         .setDescriptionLocalizations({
-          vi: 'Tắt kênh ghi nhật ký'
+          vi: 'Chọn True nếu muốn tắt kênh ghi nhật ký'
         })
         .setRequired(false)
     ),

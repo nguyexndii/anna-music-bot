@@ -19,7 +19,7 @@ module.exports = {
         .setName('channel')
         .setDescription('Text channel for music commands')
         .setDescriptionLocalizations({
-          vi: 'Kênh văn bản nhận lệnh'
+          vi: 'Chọn kênh văn bản muốn cố định làm kênh nhận lệnh nhạc duy nhất'
         })
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false)
@@ -29,7 +29,7 @@ module.exports = {
         .setName('reset')
         .setDescription('Reset channel restriction (allow all channels)')
         .setDescriptionLocalizations({
-          vi: 'Hủy khóa kênh (cho phép dùng mọi kênh)'
+          vi: 'Chọn True nếu muốn hủy khóa kênh, cho phép dùng ở mọi kênh'
         })
         .setRequired(false)
     ),

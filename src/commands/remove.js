@@ -20,7 +20,7 @@ module.exports = {
         .setName('position')
         .setDescription('Track position number to remove (starting from 1)')
         .setDescriptionLocalizations({
-          vi: 'Vị trí bài hát cần xóa (từ 1 đến tổng số bài)'
+          vi: 'Số thứ tự bài hát trong hàng chờ cần xóa (ví dụ: 1, 2, 3...)'
         })
         .setMinValue(1)
         .setRequired(true)

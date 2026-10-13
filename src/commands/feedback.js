@@ -18,7 +18,7 @@ module.exports = {
         .setName('message')
         .setDescription('Feedback message or bug report content')
         .setDescriptionLocalizations({
-          vi: 'Nội dung góp ý hoặc báo lỗi'
+          vi: 'Nhập nội dung ý kiến đóng góp, phản hồi hoặc mô tả lỗi bạn gặp phải'
         })
         .setRequired(true)
     ),
