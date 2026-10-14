@@ -282,6 +282,112 @@ function initStatusNotifier(client, options = {}) {
   setInterval(() => {
     checkYouTubeCookieHealth(client, adminId).catch(() => {});
   }, 6 * 60 * 60 * 1000);
+
+  // 7. Lập lịch tự động giám sát Web Player (/web) & Cloudflare Tunnel
+  // Kiểm tra lần đầu sau 20 giây, sau đó kiểm tra định kỳ mỗi 5 phút
+  setTimeout(() => {
+    checkWebPlayerHealth(client, adminId).catch(() => {});
+    checkTunnelUrlChange(client, adminId).catch(() => {});
+  }, 20000);
+
+  setInterval(() => {
+    checkWebPlayerHealth(client, adminId).catch(() => {});
+    checkTunnelUrlChange(client, adminId).catch(() => {});
+  }, 5 * 60 * 1000);
+}
+
+let isWebDown = false;
+let lastWebAlertTime = 0;
+const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nếu vẫn lỗi để tránh spam DM
+
+/**
+ * Kiểm tra trạng thái hoạt động thực tế của Web Player proxy
+ */
+async function checkWebPlayerHealth(client, adminId) {
+  const webHealthUrl = 'https://anna-music-bot-ui.pages.dev/api/health';
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    const res = await fetch(webHealthUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      if (isWebDown) {
+        isWebDown = false;
+        const vnTime = getVietnamTime();
+        await sendAdminDM(client, adminId, {
+          title: '🟢 [Anna Music Bot] Web Player Đã Khôi Phục Kết Nối!',
+          color: 0x2ecc71,
+          description: 'Giao diện **Web Player** (`/web`) đã kết nối thành công tới bot và hoạt động bình thường trở lại.',
+          fields: [
+            { name: '⏰ Thời gian khôi phục', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+            { name: '🌐 Địa chỉ Web', value: 'https://anna-music-bot-ui.pages.dev', inline: false }
+          ]
+        });
+      }
+      return true;
+    } else {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+  } catch (err) {
+    const now = Date.now();
+    if (!isWebDown || (now - lastWebAlertTime >= WEB_ALERT_COOLDOWN)) {
+      isWebDown = true;
+      lastWebAlertTime = now;
+      const vnTime = getVietnamTime();
+      await sendAdminDM(client, adminId, {
+        title: '⚠️ [Anna Music Bot] Cảnh Báo: Web Player (/web) Bị Mất Kết Nối!',
+        color: 0xe74c3c,
+        description: 'Hệ thống giám sát phát hiện trang điều khiển Web Player không thể kết nối tới bot (Lỗi 502 hoặc Timeout).',
+        fields: [
+          { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+          { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${err.message || String(err)}\`\`\``, inline: false },
+          { name: '💡 Nguyên nhân thường gặp', value: '1. Tiến trình Express server trên VPS bị dừng hoặc quá tải.\n2. Cloudflare Tunnel ngắt kết nối hoặc chưa cập nhật.', inline: false },
+          { name: '🛠️ Hướng dẫn xử lý', value: '1. Kiểm tra VPS: `pm2 list` và `pm2 logs anna-music-bot`\n2. Thử truy cập trực tiếp: `http://160.191.242.184:3000/health`', inline: false }
+        ]
+      });
+    }
+    return false;
+  }
+}
+
+let currentKnownTunnelUrl = '';
+
+/**
+ * Theo dõi và thông báo khi Cloudflare Tunnel trên VPS đổi subdomain ngẫu nhiên
+ */
+async function checkTunnelUrlChange(client, adminId) {
+  const tunnelLogPath = process.platform === 'linux' ? '/root/.pm2/logs/anna-tunnel-error.log' : null;
+  if (!tunnelLogPath || !fs.existsSync(tunnelLogPath)) return;
+
+  try {
+    const content = fs.readFileSync(tunnelLogPath, 'utf8');
+    const matches = [...content.matchAll(/https:\/\/([a-z0-9-]+)\.trycloudflare\.com/g)];
+    if (matches && matches.length > 0) {
+      const latestUrl = matches[matches.length - 1][0];
+      if (!currentKnownTunnelUrl) {
+        currentKnownTunnelUrl = latestUrl;
+      } else if (currentKnownTunnelUrl !== latestUrl) {
+        const oldUrl = currentKnownTunnelUrl;
+        currentKnownTunnelUrl = latestUrl;
+        const vnTime = getVietnamTime();
+
+        await sendAdminDM(client, adminId, {
+          title: '🔄 [Anna Music Bot] Cloudflare Tunnel Vừa Cấp URL Mới!',
+          color: 0x3498db,
+          description: 'Tiến trình `anna-tunnel` trên VPS vừa khởi động lại hoặc Cloudflare đã cấp phát một subdomain mới.',
+          fields: [
+            { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+            { name: '🌐 URL Tunnel mới', value: `\`${latestUrl}\``, inline: false },
+            { name: '⏮️ URL cũ', value: `\`${oldUrl}\``, inline: false },
+            { name: '💡 Tình trạng', value: 'Hệ thống đã có fallback IP VPS trực tiếp (`http://160.191.242.184:3000`), bạn không cần làm gì nếu Web Player vẫn đang chạy bình thường.', inline: false }
+          ]
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Tunnel Checker Warning]:', err.message);
+  }
 }
 
 module.exports = {
@@ -289,5 +395,7 @@ module.exports = {
   sendAdminDM,
   getVietnamTime,
   checkYouTubeCookieHealth,
-  notifyCookieExpired
+  notifyCookieExpired,
+  checkWebPlayerHealth,
+  checkTunnelUrlChange
 };
