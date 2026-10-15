@@ -220,43 +220,6 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    // Chỉ kích hoạt Master PIN khi được cấu hình rõ ràng trong file .env (Không dùng mã mặc định để tránh lỗ hổng bảo mật trên Production)
-    const masterPin = process.env.ADMIN_MASTER_PIN;
-    if (masterPin && String(token).trim() === String(masterPin).trim()) {
-      failedLoginMap.delete(clientIp);
-      const guild = client.guilds.cache.first();
-      if (!guild) {
-        return res.status(503).json({ success: false, error: 'Bot hiện chưa tham gia máy chủ nào.' });
-      }
-      const adminId = config.adminId || guild.ownerId || 'admin';
-      const member = guild.members.cache.get(adminId) || (await guild.members.fetch(adminId).catch(() => null));
-      const userVoiceChannel = member?.voice?.channel || guild.members.me?.voice?.channel;
-      const botVoiceChannel = guild.members.me?.voice?.channel;
-
-      const userPayload = {
-        userId: adminId,
-        username: member ? member.user.username : 'Admin',
-        displayName: member ? (member.displayName || member.user.username) : 'Administrator',
-        avatar: member ? member.user.displayAvatarURL() : client.user.displayAvatarURL(),
-        guildId: guild.id,
-        guildName: guild.name,
-        guildIcon: guild.iconURL(),
-        isAdmin: true,
-        isInVoice: true,
-        isSameVoice: true,
-        userVoice: userVoiceChannel ? { id: userVoiceChannel.id, name: userVoiceChannel.name } : { id: 'admin-voice', name: 'Kênh Voice Admin' },
-        botVoice: botVoiceChannel ? { id: botVoiceChannel.id, name: botVoiceChannel.name } : (userVoiceChannel ? { id: userVoiceChannel.id, name: userVoiceChannel.name } : { id: 'admin-voice', name: 'Kênh Voice Admin' }),
-        timestamp: Date.now()
-      };
-
-      const sessionToken = createSessionToken(userPayload, 72);
-      return res.json({
-        success: true,
-        token: sessionToken,
-        user: userPayload
-      });
-    }
-
     const user = verifyWebToken(token, true);
     if (!user) {
       const currentFailCount = (attemptData?.count || 0) + 1;
