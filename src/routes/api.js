@@ -220,8 +220,9 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    const masterPin = process.env.ADMIN_MASTER_PIN || '888888';
-    if (String(token).trim() === String(masterPin).trim()) {
+    // Chỉ kích hoạt Master PIN khi được cấu hình rõ ràng trong file .env (Không dùng mã mặc định để tránh lỗ hổng bảo mật trên Production)
+    const masterPin = process.env.ADMIN_MASTER_PIN;
+    if (masterPin && String(token).trim() === String(masterPin).trim()) {
       failedLoginMap.delete(clientIp);
       const guild = client.guilds.cache.first();
       if (!guild) {
