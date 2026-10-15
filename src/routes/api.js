@@ -210,7 +210,7 @@ module.exports = function createApiRouter(client) {
 
     const forwardedFor = req.headers['x-forwarded-for'];
     const firstForwardedIp = typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : null;
-    const clientIp = req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || firstForwardedIp || req.ip || req.socket.remoteAddress || 'unknown-ip';
+    const clientIp = req.headers['x-real-client-ip'] || req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || firstForwardedIp || req.ip || req.socket.remoteAddress || 'unknown-ip';
     const attemptData = failedLoginMap.get(clientIp);
 
     // Kiểm tra xem IP này có đang bị tạm khóa hay không

@@ -343,7 +343,7 @@ async function checkWebPlayerHealth(client, adminId) {
           { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
           { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${err.message || String(err)}\`\`\``, inline: false },
           { name: '💡 Nguyên nhân thường gặp', value: '1. Tiến trình Express server trên VPS bị dừng hoặc quá tải.\n2. Cloudflare Tunnel ngắt kết nối hoặc chưa cập nhật.', inline: false },
-          { name: '🛠️ Hướng dẫn xử lý', value: '1. Kiểm tra VPS: `pm2 list` và `pm2 logs anna-music-bot`\n2. Thử truy cập trực tiếp: `http://160.191.242.184:3000/health`', inline: false }
+          { name: '🛠️ Hướng dẫn xử lý', value: `1. Kiểm tra VPS: \`pm2 list\` và \`pm2 logs anna-music-bot\`\n2. Thử truy cập trực tiếp: \`${process.env.VPS_HEALTH_URL || 'trực tiếp trên VPS (cổng 3000)/health'}\``, inline: false }
         ]
       });
     }
@@ -380,7 +380,7 @@ async function checkTunnelUrlChange(client, adminId) {
             { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
             { name: '🌐 URL Tunnel mới', value: `\`${latestUrl}\``, inline: false },
             { name: '⏮️ URL cũ', value: `\`${oldUrl}\``, inline: false },
-            { name: '💡 Tình trạng', value: 'Hệ thống đã có fallback IP VPS trực tiếp (`http://160.191.242.184:3000`), bạn không cần làm gì nếu Web Player vẫn đang chạy bình thường.', inline: false }
+            { name: '💡 Tình trạng', value: 'Hệ thống đã có fallback cấu hình VPS trực tiếp, bạn không cần làm gì nếu Web Player vẫn đang chạy bình thường.', inline: false }
           ]
         });
       }

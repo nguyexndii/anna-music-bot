@@ -100,7 +100,7 @@ function writeToEventLogFile(action, details = {}) {
     }
 
     const line = `[${timeStr}] [${action}] ${summary}\n`;
-    fs.appendFileSync(EVENT_LOG_FILE, line, 'utf8');
+    fs.promises.appendFile(EVENT_LOG_FILE, line, 'utf8').catch(() => {});
   } catch (err) {
     // Tránh gián đoạn bot
   }

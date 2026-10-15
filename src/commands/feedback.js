@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createContext } = require('../utils/commandHelper');
-
-const FEEDBACK_CHANNEL_ID = '1543117987148603473';
+const config = require('../config');
+const FEEDBACK_CHANNEL_ID = config.feedbackChannelId;
 
 module.exports = {
   name: 'feedback',

@@ -1,7 +1,8 @@
 const settingsManager = require('../structures/SettingsManager');
 
+const config = require('../config');
 // Danh sách các kênh Voice ưu tiên (Bao gồm kênh Staff)
-const STAFF_VOICE_CHANNELS = ['1447095306079698984'];
+const STAFF_VOICE_CHANNELS = config.staffVoiceChannels;
 
 /**
  * Kiểm tra xem người dùng có quyền sử dụng lệnh âm nhạc không (Dựa trên Role DJ và quyền Admin)
