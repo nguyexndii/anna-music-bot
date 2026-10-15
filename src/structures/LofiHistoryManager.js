@@ -30,15 +30,16 @@ class LofiHistoryManager {
   }
 
   _save() {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        await fs.promises.mkdir(DATA_DIR, { recursive: true });
+        const data = Object.fromEntries(this.historyMap.entries());
+        await fs.promises.writeFile(LOFI_HISTORY_FILE, JSON.stringify(data, null, 2), 'utf8');
+      } catch (e) {
+        console.warn('[LofiHistoryManager] Không thể lưu file lofi_history.json:', e.message);
       }
-      const data = Object.fromEntries(this.historyMap.entries());
-      fs.writeFileSync(LOFI_HISTORY_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.warn('[LofiHistoryManager] Không thể lưu file lofi_history.json:', e.message);
-    }
+    }, 300);
   }
 
   getHistory(guildId) {

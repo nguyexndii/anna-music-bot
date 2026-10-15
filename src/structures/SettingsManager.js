@@ -64,15 +64,16 @@ class SettingsManager {
   }
 
   _save() {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        await fs.promises.mkdir(DATA_DIR, { recursive: true });
+        const data = Object.fromEntries(this.settings.entries());
+        await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
+      } catch (e) {
+        console.error('[SettingsManager] Lỗi khi lưu cài đặt:', e);
       }
-      const data = Object.fromEntries(this.settings.entries());
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[SettingsManager] Lỗi khi lưu cài đặt:', e);
-    }
+    }, 300);
   }
 
   get(guildId) {

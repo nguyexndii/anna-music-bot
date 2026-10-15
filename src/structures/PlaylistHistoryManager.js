@@ -79,15 +79,20 @@ class PlaylistHistoryManager {
   }
 
   _saveToFile() {
-    try {
-      const obj = {};
-      for (const [guildId, list] of this.cache.entries()) {
-        obj[guildId] = list;
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        const dir = path.dirname(this.filePath);
+        await fs.promises.mkdir(dir, { recursive: true });
+        const obj = {};
+        for (const [guildId, list] of this.cache.entries()) {
+          obj[guildId] = list;
+        }
+        await fs.promises.writeFile(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
+      } catch (e) {
+        console.error('[PlaylistHistoryManager] Không thể lưu playlists.json:', e.message);
       }
-      fs.writeFileSync(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[PlaylistHistoryManager] Không thể lưu playlists.json:', e.message);
-    }
+    }, 300);
   }
 
   async addPlaylist(guildId, playlistData) {

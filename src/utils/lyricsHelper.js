@@ -1,6 +1,18 @@
 const fetch = globalThis.fetch || require('node-fetch');
 const ytdlp = require('yt-dlp-exec');
 
+function isSafeYouTubeUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.startsWith('-')) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const allowedHosts = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'];
+    return allowedHosts.includes(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 function normalizeStr(str) {
   if (!str) return '';
   return str
@@ -555,9 +567,7 @@ function selectBestSubtitleTrack(officialSubs, autoSubs, context = {}, allowAuto
  * TUYỆT ĐỐI KHÔNG nhận phụ đề tự động (AI speech-to-text) để tránh từ ngữ thô tục và sai lệch.
  */
 async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey = null, userSavedOffsetMs = 0) {
-  if (!url || typeof url !== 'string' || (!url.includes('youtube.com') && !url.includes('youtu.be'))) {
-    return null;
-  }
+  if (!isSafeYouTubeUrl(url)) return null;
   try {
     let info = getCachedYtdlpInfo(url);
     if (!info) {
@@ -663,7 +673,7 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
  * Tự động tìm mốc bắt đầu hát từ YouTube Captions khi MV có đoạn intro thoại (như phim ngắn 15-45s)
  */
 async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
-  if (!url || !syncedLyrics || syncedLyrics.length === 0) return 0;
+  if (!isSafeYouTubeUrl(url) || !syncedLyrics || syncedLyrics.length === 0) return 0;
   try {
     let info = getCachedYtdlpInfo(url);
     if (!info) {

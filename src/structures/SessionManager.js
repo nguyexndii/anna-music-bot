@@ -29,15 +29,16 @@ class SessionManager {
   }
 
   _saveLocal() {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        await fs.promises.mkdir(DATA_DIR, { recursive: true });
+        const data = Object.fromEntries(this.cache.entries());
+        await fs.promises.writeFile(SESSIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+      } catch (e) {
+        console.warn('[Save Local Warning]:', e.message);
       }
-      const data = Object.fromEntries(this.cache.entries());
-      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.warn('[SessionManager] Không thể lưu file local sessions:', e.message);
-    }
+    }, 300);
   }
 
   async saveSession(guildId, data) {

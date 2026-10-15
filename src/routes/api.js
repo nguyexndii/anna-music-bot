@@ -208,7 +208,9 @@ module.exports = function createApiRouter(client) {
       return res.status(400).json({ success: false, error: 'Vui lòng cung cấp mã PIN hoặc Token' });
     }
 
-    const clientIp = req.ip || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const firstForwardedIp = typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : null;
+    const clientIp = req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || firstForwardedIp || req.ip || req.socket.remoteAddress || 'unknown-ip';
     const attemptData = failedLoginMap.get(clientIp);
 
     // Kiểm tra xem IP này có đang bị tạm khóa hay không
@@ -639,6 +641,33 @@ module.exports = function createApiRouter(client) {
     }
 
     try {
+      // Bổ sung xử lý khi req.body.tracks là một mảng bài hát (ví dụ: Phát tất cả bài yêu thích):
+      if (Array.isArray(req.body.tracks) && req.body.tracks.length > 0) {
+        const queue = client.musicManager.getOrCreate(guild, textChannel, voiceChannel);
+        const validTracks = req.body.tracks.slice(0, 100);
+        const requesterObj = {
+          id: user.userId,
+          displayName: user.displayName || user.username,
+          username: user.username,
+          avatar: user.avatar
+        };
+        const userMention = user.userId ? `<@${user.userId}>` : (user.displayName || user.username);
+        for (const t of validTracks) {
+          t.requestedBy = userMention;
+          t.requestedByName = user.displayName || user.username;
+          t.requestedByAvatar = user.avatar;
+          t.requestedById = user.userId;
+        }
+        await queue.addSongs(validTracks, requesterObj);
+        return res.json({
+          success: true,
+          isPlaylist: true,
+          addedCount: validTracks.length,
+          track: validTracks[0],
+          message: `Đã thêm ${validTracks.length} bài hát vào hàng chờ!`
+        });
+      }
+
       let rawResults = null;
       let requestedUrl = query || track?.url;
 

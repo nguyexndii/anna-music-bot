@@ -34,15 +34,20 @@ class FavoriteManager {
   }
 
   _saveToFile() {
-    try {
-      const obj = {};
-      for (const [userId, songs] of this.fallbackData.entries()) {
-        obj[userId] = songs;
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        const dir = path.dirname(this.filePath);
+        await fs.promises.mkdir(dir, { recursive: true });
+        const obj = {};
+        for (const [userId, songs] of this.fallbackData.entries()) {
+          obj[userId] = songs;
+        }
+        await fs.promises.writeFile(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
+      } catch (e) {
+        console.error('[FavoriteManager] Không thể lưu favorites.json:', e.message);
       }
-      fs.writeFileSync(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[FavoriteManager] Không thể lưu favorites.json:', e.message);
-    }
+    }, 300);
   }
 
   /**

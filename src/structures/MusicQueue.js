@@ -846,13 +846,6 @@ class MusicQueue {
     }
   }
 
-  get isPlaying() {
-    return this.player?.state?.status === AudioPlayerStatus.Playing;
-  }
-
-  get isPaused() {
-    return this.paused || this.player?.state?.status === AudioPlayerStatus.Paused;
-  }
 
   get currentTrack() {
     return this.currentSong;
