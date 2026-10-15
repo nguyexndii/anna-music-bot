@@ -97,7 +97,7 @@ app.use(express.json());
 app.use('/api', createApiRouter(client));
 app.use(express.static(path.join(__dirname, '../public')));
 
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.status(200).json({
     status: 'OK',
     uptime: process.uptime(),
