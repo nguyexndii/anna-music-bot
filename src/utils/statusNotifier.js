@@ -32,18 +32,18 @@ function formatDuration(seconds) {
   return parts.length > 0 ? parts.join(' ') : '0 giây';
 }
 
+const config = require('../config');
+const ERROR_LOG_CHANNEL_ID = process.env.ERROR_LOG_CHANNEL_ID || config.errorLogChannelId || '1547449482835394640';
+
 /**
- * Gửi tin nhắn Embed DM an toàn tới User ID của Admin
+ * Gửi thông báo / cảnh báo lỗi tới Kênh Log (1547449482835394640) kèm tag Admin
  */
 async function sendAdminDM(client, adminId, { title, description, color, fields }) {
-  if (!client || !adminId) return;
-  try {
-    const user = await client.users.fetch(adminId).catch(() => null);
-    if (!user) {
-      console.warn(`[StatusNotifier] Không thể tìm thấy Discord User ID ${adminId}`);
-      return;
-    }
+  if (!client) return;
+  const targetAdminId = adminId || config.adminId || '875358286487097395';
+  const targetChannelId = ERROR_LOG_CHANNEL_ID;
 
+  try {
     const embed = new EmbedBuilder()
       .setTitle(title)
       .setDescription(description || null)
@@ -54,10 +54,24 @@ async function sendAdminDM(client, adminId, { title, description, color, fields 
       embed.addFields(fields);
     }
 
-    await user.send({ embeds: [embed] }).catch((dmErr) => {
-      console.warn(`[StatusNotifier] Không thể gửi DM tới ${adminId} (Có thể người dùng chặn DM từ server):`, dmErr.message);
-    });
-    console.log(`[StatusNotifier] Đã gửi thành công tin nhắn DM ("${title}") tới Admin ID ${adminId}`);
+    // Gửi trực tiếp vào Kênh Log 1547449482835394640 kèm tag Admin để Admin nhận thông báo
+    let channel = client.channels.cache.get(targetChannelId)
+      || await client.channels.fetch(targetChannelId).catch(() => null);
+
+    if (channel && channel.isTextBased && channel.isTextBased()) {
+      const mentionText = targetAdminId ? `<@${targetAdminId}>` : '';
+      await channel.send({
+        content: mentionText || undefined,
+        embeds: [embed],
+        allowedMentions: targetAdminId ? { users: [targetAdminId] } : { parse: [] }
+      }).catch((sendErr) => {
+        console.warn(`[StatusNotifier] Không thể gửi vào kênh log ${targetChannelId}:`, sendErr.message);
+      });
+      console.log(`[StatusNotifier] Đã gửi thông báo ("${title}") tới kênh log ${targetChannelId} và tag Admin ID ${targetAdminId}`);
+      return;
+    }
+
+    console.warn(`[StatusNotifier] Kênh log ${targetChannelId} không khả dụng hoặc bot không có quyền truy cập.`);
   } catch (err) {
     console.warn('[StatusNotifier Alert Error]:', err.message);
   }
@@ -68,10 +82,10 @@ const path = require('path');
 const fs = require('fs');
 
 let lastCookieAlertTime = 0;
-const COOKIE_ALERT_COOLDOWN = 6 * 60 * 60 * 1000; // 6 tiếng chống spam DM
+const COOKIE_ALERT_COOLDOWN = 6 * 60 * 60 * 1000; // 6 tiếng chống spam kênh log
 
 /**
- * Gửi cảnh báo DM khi phát hiện Cookie YouTube bị hết hạn hoặc không khả dụng
+ * Gửi cảnh báo khi phát hiện Cookie YouTube bị hết hạn hoặc không khả dụng
  */
 async function notifyCookieExpired(client, adminId, reason = 'Cookie không hợp lệ hoặc đã bị Google thu hồi') {
   const now = Date.now();
@@ -137,10 +151,10 @@ async function checkYouTubeCookieHealth(client, adminId) {
 }
 
 /**
- * Khởi tạo bộ giám sát trạng thái và tự động thông báo qua DM
+ * Khởi tạo bộ giám sát trạng thái và tự động thông báo qua Kênh Log Lỗi
  * @param {import('discord.js').Client} client 
  * @param {Object} options 
- * @param {string} options.adminId ID tài khoản nhận DM
+ * @param {string} options.adminId ID tài khoản Admin để tag thông báo
  * @param {string} options.botName Tên định danh của bot
  * @param {string} options.platform Nền tảng hosting (vd: VPS Ubuntu, Discloud)
  */
@@ -186,7 +200,7 @@ function initStatusNotifier(client, options = {}) {
   // 2. Ghi nhận khi mất kết nối Gateway
   client.on(Events.ShardDisconnect, async (event, shardId) => {
     disconnectTime = Date.now();
-    // Ẩn việc gửi DM ngay lúc này để tránh spam rớt mạng lặt vặt.
+    // Tạm hoãn thông báo ngay lúc này để tránh spam rớt mạng lặt vặt.
     // Nếu rớt thật thì hàm bên dưới (ShardResume) sẽ báo kèm tổng thời gian sập.
   });
 
@@ -220,7 +234,7 @@ function initStatusNotifier(client, options = {}) {
   const handleShutdown = async (signal) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`[StatusNotifier] Nhận tín hiệu ${signal}, đang gửi thông báo DM ngắt kết nối...`);
+    console.log(`[StatusNotifier] Nhận tín hiệu ${signal}, đang gửi thông báo ngắt kết nối vào kênh log...`);
 
     const vnTime = getVietnamTime();
     const uptimeStr = formatDuration(process.uptime());
@@ -236,7 +250,7 @@ function initStatusNotifier(client, options = {}) {
       ]
     });
 
-    // Chờ tối đa 2.5s để gửi DM xong trước khi tiến trình tắt hoàn toàn
+    // Chờ tối đa 2.5s để gửi thông báo xong trước khi tiến trình tắt hoàn toàn
     await Promise.race([
       sendPromise,
       new Promise((resolve) => setTimeout(resolve, 2500))
@@ -298,7 +312,7 @@ function initStatusNotifier(client, options = {}) {
 
 let isWebDown = false;
 let lastWebAlertTime = 0;
-const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nếu vẫn lỗi để tránh spam DM
+const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nếu vẫn lỗi để tránh spam kênh log
 
 /**
  * Kiểm tra trạng thái hoạt động thực tế của Web Player proxy

@@ -19,6 +19,7 @@ module.exports = {
   mongoUri: cleanEnv(process.env.MONGODB_URI),
   webJwtSecret: cleanEnv(process.env.WEB_JWT_SECRET || process.env.WEB_TOKEN_SECRET),
   adminId: cleanEnv(process.env.ADMIN_USER_ID, '875358286487097395'),
+  errorLogChannelId: cleanEnv(process.env.ERROR_LOG_CHANNEL_ID, '1547449482835394640'),
   feedbackChannelId: cleanEnv(process.env.FEEDBACK_CHANNEL_ID, '1543117987148603473'),
   staffVoiceChannels: cleanEnv(process.env.STAFF_VOICE_CHANNELS, '1447095306079698984').split(',').map(s => s.trim()).filter(Boolean),
   webUrl: (() => {

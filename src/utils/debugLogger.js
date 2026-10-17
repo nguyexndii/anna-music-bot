@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
+const config = require('../config');
 
 const LOGS_DIR = path.join(__dirname, '../../logs');
 const EVENT_LOG_FILE = path.join(LOGS_DIR, 'events.log');
@@ -325,11 +326,21 @@ async function processLogQueue() {
       }
 
       if (targetChannel && targetChannel.isTextBased && targetChannel.isTextBased()) {
-        await targetChannel.send({
-          embeds: [item.embed],
-          flags: 4096,
-          allowedMentions: { parse: [] }
-        }).catch((sendErr) => {
+        const adminId = config?.adminId || '875358286487097395';
+        const messagePayload = {
+          embeds: [item.embed]
+        };
+
+        if (item.isErrorAction) {
+          messagePayload.content = `<@${adminId}>`;
+          messagePayload.allowedMentions = { users: [adminId] };
+          // Bỏ flags 4096 để Admin nhận ping thông báo khi có lỗi
+        } else {
+          messagePayload.flags = 4096;
+          messagePayload.allowedMentions = { parse: [] };
+        }
+
+        await targetChannel.send(messagePayload).catch((sendErr) => {
           console.warn('[LogChannel Send Warning]:', sendErr.message);
         });
       }
@@ -385,6 +396,7 @@ function logAction(action, details = {}) {
 
     if (isErrorAction) {
       targetChannelId = guildSettings?.errorLogChannelId
+        || config.errorLogChannelId
         || (guildId === '1389834422773219338' ? '1547449482835394640' : null)
         || guildSettings?.logChannelId;
     } else if (isRoomAction) {
@@ -461,7 +473,12 @@ function logAction(action, details = {}) {
     embed.setDescription(desc.trim());
 
     // Thêm vào hàng đợi gửi log an toàn
-    logQueue.push({ logChannelId: targetChannelId, targetChannel: logChannel || null, embed });
+    logQueue.push({
+      logChannelId: targetChannelId,
+      targetChannel: logChannel || null,
+      embed,
+      isErrorAction: Boolean(isErrorAction)
+    });
     processLogQueue();
 
   } catch (err) {
