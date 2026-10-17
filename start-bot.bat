@@ -1,6 +1,6 @@
 @echo off
 title Anna Music Bot 24/7
-cd /d "d:\VSCode\anna-music-bot"
+cd /d "%~dp0"
 echo ========================================
 echo    DANG KHOI DONG ANNA MUSIC BOT 24/7
 echo ========================================

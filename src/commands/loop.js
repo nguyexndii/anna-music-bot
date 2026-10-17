@@ -1,5 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
+const settingsManager = require('../structures/SettingsManager');
+const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 
@@ -29,9 +31,20 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+
+    if (!hasMusicPermission(ctx.member)) {
+      const guildSettings = settingsManager.get(ctx.guild.id);
+      const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
+      return ctx.reply({ embeds: [createErrorEmbed(`Bạn cần có vai trò ${roleText} để đổi chế độ lặp.`)] });
+    }
+
     const queue = musicManager.get(ctx.guild.id);
     if (!queue) {
       return ctx.reply({ embeds: [createErrorEmbed('Bot hiện không ở trong kênh Voice!')] });
+    }
+
+    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
+      return ctx.reply({ embeds: [createErrorEmbed('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!')] });
     }
 
     const modeOpt = ctx.options.getString('mode');

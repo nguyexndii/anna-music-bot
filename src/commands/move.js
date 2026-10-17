@@ -1,5 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
+const settingsManager = require('../structures/SettingsManager');
+const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 
@@ -35,10 +37,27 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+
+    if (!hasMusicPermission(ctx.member)) {
+      const guildSettings = settingsManager.get(ctx.guild.id);
+      const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
+      return ctx.reply({
+        embeds: [createErrorEmbed(`Bạn cần có vai trò ${roleText} để di chuyển thứ tự bài hát.`)],
+        flags: 64
+      });
+    }
+
     const queue = musicManager.get(ctx.guild.id);
 
     if (!queue || queue.songs.length === 0) {
       return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ âm nhạc hiện đang trống!')] });
+    }
+
+    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
+      return ctx.reply({
+        embeds: [createErrorEmbed('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!')],
+        flags: 64
+      });
     }
 
     const fromPos = ctx.options.getInteger('from');

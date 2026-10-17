@@ -69,7 +69,7 @@ DISCORD_TOKEN=your_discord_bot_token
 DISCORD_CLIENT_ID=your_client_id
 MONGODB_URI=your_mongodb_connection_string
 PORT=3005
-WEB_TOKEN_SECRET=your_hmac_sha256_secret_key
+WEB_JWT_SECRET=your_hmac_sha256_secret_key # hoặc WEB_TOKEN_SECRET
 DEFAULT_247_STREAM=https://www.youtube.com/watch?v=jfKfPfyJRdk
 
 # Tùy chọn: Last.fm API Key cho Autoplay đa tầng
