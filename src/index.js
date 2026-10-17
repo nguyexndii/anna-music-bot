@@ -481,6 +481,36 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
 
+  // -1. Xử lý Autocomplete cho Slash Commands (Gợi ý bài hát siêu tốc độ qua Worker Thread)
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName === 'play') {
+      const focusedOption = interaction.options.getFocused(true);
+      if (focusedOption.name === 'song') {
+        const query = focusedOption.value?.trim();
+        if (!query || query.length < 2 || query.startsWith('http')) {
+          return interaction.respond([]).catch(() => {});
+        }
+        try {
+          const { searchMultipleTracks } = require('./utils/musicExtractor');
+          const results = await searchMultipleTracks(query, 8, 'all');
+          const choices = (results || []).slice(0, 8).map(track => {
+            const artistPart = track.artist ? ` - ${track.artist}` : '';
+            const durPart = track.duration ? ` [${track.duration}]` : '';
+            const fullLabel = `${track.title}${artistPart}${durPart}`;
+            return {
+              name: fullLabel.length > 100 ? fullLabel.slice(0, 97) + '...' : fullLabel,
+              value: (track.url || track.title).slice(0, 100)
+            };
+          });
+          return interaction.respond(choices).catch(() => {});
+        } catch (autoErr) {
+          return interaction.respond([]).catch(() => {});
+        }
+      }
+    }
+    return;
+  }
+
   // 0. Xử lý Slash Commands (Chat Input)
   if (interaction.isChatInputCommand()) {
     const commandName = interaction.commandName;

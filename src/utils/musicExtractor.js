@@ -33,6 +33,7 @@ const { PassThrough } = require('stream');
 const { createAudioResource, StreamType } = require('@discordjs/voice');
 const fetch = globalThis.fetch || require('node-fetch');
 const spotifyUrlInfo = require('spotify-url-info')(fetch);
+const { executeSearch } = require('./searchService');
 
 // Đường dẫn file cookies YouTube (Netscape format). Cài trong .env: YTDLP_COOKIES_FILE=/root/anna-music-bot/youtube.cookies
 // File này giúp yt-dlp xác thực để bypass kiểm tra bot của YouTube trên Datacenter IP
@@ -776,57 +777,19 @@ function extractSoundCloudTitleFromUrl(url) {
       }
     }
 
-    // 6. Tìm kiếm YouTube cho từ khóa (Tự động ưu tiên bản Audio / Lyric Video chuẩn nhịp nếu user không ghi rõ 'mv')
+    // 6. Tìm kiếm YouTube cho từ khóa qua Worker Thread + InnerTube API (Lag Event Loop = 0ms)
     try {
-      const userWantsRemix = /\b(remix|mix|mashup|vinahouse|cover|speed\s*up|slowed|nightcore|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi)\b/i.test(query);
-      const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(query);
-      const isExplicitMv = /\bmv\b|\bvideo\b|\bm\/v\b/i.test(query);
-      const r = await yts(query);
-      if (r && r.videos && r.videos.length > 0) {
-        let candidateVideos = r.videos;
-        if (!userWantsRemix) {
-          const cleanFiltered = candidateVideos.filter(v => {
-            const t = (v.title || '').toLowerCase();
-            if (v.seconds > 600) return false;
-            if (!userWantsLive && isLiveStageVideo(v.title)) return false;
-            return !/\b(remix|mashup|vinahouse|bass\s*boosted|speed\s*up|slowed|nightcore|cover|parody|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi\s*ver|tiktok)/i.test(t);
-          });
-          if (cleanFiltered.length > 0) {
-            candidateVideos = cleanFiltered;
-          }
-        } else if (!userWantsLive) {
-          const nonLive = candidateVideos.filter(v => !isLiveStageVideo(v.title));
-          if (nonLive.length > 0) {
-            candidateVideos = nonLive;
-          }
-        }
-
-        // Sắp xếp các ứng viên dựa trên độ khớp: Tên bài hát & Tác giả BẮT BUỘC ưu tiên số 1,
-        // Kết hợp kiểm tra chặt chẽ thời lượng bài hát
-        const scoredCandidates = candidateVideos.map(v => ({
-          v,
-          score: scoreCandidateVideo(v, query, targetDurationSec)
-        }));
-        scoredCandidates.sort((a, b) => b.score - a.score);
-
-        const best = scoredCandidates[0]?.v || candidateVideos[0];
-        return [{
-          title: best.title,
-          url: best.url,
-          duration: best.timestamp || (best.seconds ? `${Math.floor(best.seconds / 60)}:${String(best.seconds % 60).padStart(2, '0')}` : '3:30'),
-          seconds: best.seconds || 0,
-          thumbnail: best.thumbnail || `https://i.ytimg.com/vi/${best.videoId}/hqdefault.jpg`,
-          artist: best.author?.name || 'YouTube',
-          isLive: Boolean(best.live)
-        }];
+      const results = await executeSearch(cleanQuery, 5, 'official');
+      if (results && results.length > 0) {
+        return [results[0]];
       }
-    } catch (ytsErr) {
-      console.warn('[searchTrack yt-search error, fallback play-dl]:', ytsErr.message);
+    } catch (workerSearchErr) {
+      console.warn('[searchTrack executeSearch worker error, fallback play-dl]:', workerSearchErr.message);
     }
 
-    // Fallback qua play-dl nếu yt-search lỗi
+    // Fallback nhẹ qua play-dl nếu worker gặp sự cố
     try {
-      const searchResults = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+      const searchResults = await play.search(cleanQuery, { limit: 1, source: { youtube: 'video' } });
       if (searchResults && searchResults.length > 0) {
         const track = searchResults[0];
         return [{
@@ -839,38 +802,6 @@ function extractSoundCloudTitleFromUrl(url) {
         }];
       }
     } catch (pErr) {}
-
-    // Fallback: yt-dlp search nếu play-dl gặp lỗi
-    try {
-      const sOpts = {
-        dumpSingleJson: true,
-        noWarnings: true,
-        flatPlaylist: true,
-        extractorArgs: YTDLP_EXTRACTOR_ARGS
-      };
-      const cFile = getCookiesFile();
-      if (cFile) sOpts.cookies = cFile;
-      const res = await ytdlp(`ytsearch3:${query}`, sOpts);
-
-      if (res && res.entries && res.entries.length > 0) {
-        const scoredEntries = res.entries.map(e => ({
-          e,
-          score: scoreCandidateVideo(e, query, targetDurationSec)
-        })).sort((a, b) => b.score - a.score);
-        const bestEntry = scoredEntries[0]?.e || res.entries[0];
-        const url = bestEntry.url || `https://www.youtube.com/watch?v=${bestEntry.id}`;
-        return [{
-          title: bestEntry.title,
-          url: url,
-          duration: bestEntry.duration ? `${Math.floor(bestEntry.duration / 60)}:${String(bestEntry.duration % 60).padStart(2, '0')}` : '3:30',
-          thumbnail: resolveBestThumbnail(bestEntry),
-          artist: bestEntry.uploader || bestEntry.channel || 'YouTube',
-          isLive: false
-        }];
-      }
-    } catch (ytErr) {
-      console.warn('[yt-dlp keyword search fallback error]:', ytErr.message);
-    }
 
     return null;
   } catch (error) {
@@ -1372,7 +1303,7 @@ function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds 
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 512 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 20 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1666,10 +1597,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) 
 }
 
 /**
- * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web
- */
-/**
- * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web (Siêu tốc độ)
+ * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web & Discord Autocomplete (Siêu tốc độ qua Worker Thread)
  */
 async function searchMultipleTracks(query, limit = 20, mode = 'official') {
   if (!query || typeof query !== 'string' || !query.trim()) return [];
@@ -1680,145 +1608,12 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
     return directRes || [];
   }
 
-  // Helper chạy tác vụ với timeout an toàn, tránh treo Node.js Event Loop
-  const withTimeout = (promise, ms) => Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Search timeout (${ms}ms)`)), ms))
-  ]);
-
-  // 1. Ưu tiên cao nhất: yt-search (Lấy cả Playlists/Albums và Videos đầy đủ)
   try {
-    const isPlaylistQuery = /\balbum\b|\bplaylist\b|\btuyển tập\b|\bdanh sách phát\b/i.test(query);
-    const r = await withTimeout(yts(query), 4000);
-    if (r) {
-      const playlistResults = (r.playlists || []).slice(0, isPlaylistQuery ? 8 : 4).map(p => ({
-        title: p.title,
-        url: p.url,
-        duration: p.videoCount ? `${p.videoCount} bài` : 'Playlist',
-        thumbnail: p.thumbnail || DEFAULT_FALLBACK_THUMB,
-        artist: p.author?.name || 'YouTube Playlist',
-        isPlaylist: true,
-        itemCount: p.videoCount,
-        isLive: false
-      }));
-
-      let rawVideos = r.videos || [];
-      const userWantsRemix = /\b(remix|mix|mashup|vinahouse|cover|speed\s*up|slowed|nightcore|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi)\b/i.test(query);
-
-      if (mode === 'official' && !userWantsRemix) {
-        const remixPattern = /\b(remix|mashup|vinahouse|bass\s*boosted|speed\s*up|slowed|nightcore|cover|parody|karaoke|beat|liên\s*khúc|nonstop|dj\b|lofi\s*ver|tiktok)/i;
-        const cleanOfficialVideos = rawVideos.filter(v => {
-          const title = (v.title || '').toLowerCase();
-          if (v.seconds > 600) return false; // Loại bỏ video dài > 10 phút (1 hour mix, compilation)
-          if (remixPattern.test(title)) return false; // Lọc sạch remix, cover, vinahouse, v.v.
-          return true;
-        });
-
-        // Nếu có các bản thu chuẩn, chỉ hiển thị bản thu chuẩn
-        if (cleanOfficialVideos.length >= 2) {
-          rawVideos = cleanOfficialVideos;
-        } else if (cleanOfficialVideos.length > 0) {
-          // Đưa các bản thu chuẩn lên đầu danh sách
-          const cleanIds = new Set(cleanOfficialVideos.map(v => v.videoId));
-          rawVideos = [...cleanOfficialVideos, ...rawVideos.filter(v => !cleanIds.has(v.videoId))];
-        }
-
-        const qWords = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
-        rawVideos = rawVideos.map(v => {
-          let score = 0;
-          const title = (v.title || '').toLowerCase();
-          const author = (v.author?.name || '').toLowerCase();
-
-          // Khớp từ khóa tìm kiếm
-          const matchedWords = qWords.filter(w => title.includes(w) || author.includes(w));
-          score += (matchedWords.length / Math.max(1, qWords.length)) * 100;
-
-          // Điểm cộng kênh chính chủ và bản thu chuẩn
-          if (author.includes('topic') || author.includes('official') || author.includes('records') || author.includes('vevo')) score += 40;
-          // Ưu tiên mạnh bản audio
-          if (title.includes('official audio') || title.includes('(audio)') || title.includes('audio version')) score += 50;
-          if (title.includes('audio') || title.includes('bản thu')) score += 25;
-          if (title.includes('lyric video') || title.includes('lyrics')) score += 15;
-
-          // Phạt nhẹ MV nếu đã có bản audio (để bản audio/bản thu chuẩn xếp trên MV)
-          if (title.includes('official music video') || title.includes('official mv') || title.includes('official video') || title.includes('(mv)') || title.includes('[mv]')) {
-            score -= 10;
-          }
-
-          return { ...v, score };
-        }).sort((a, b) => b.score - a.score);
-      }
-
-      const videoResults = rawVideos.map(v => ({
-        title: v.title,
-        url: v.url,
-        duration: v.timestamp || (v.seconds ? `${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, '0')}` : '3:30'),
-        thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-        artist: v.author?.name || 'YouTube',
-        isPlaylist: false,
-        isLive: Boolean(v.live)
-      }));
-
-      // Nếu từ khóa chứa 'album' hoặc 'playlist' -> Ưu tiên playlist lên đầu!
-      const combined = isPlaylistQuery
-        ? [...playlistResults, ...videoResults]
-        : (playlistResults.length > 0 ? [playlistResults[0], ...videoResults, ...playlistResults.slice(1)] : videoResults);
-
-      if (combined.length > 0) {
-        return combined.slice(0, Math.min(limit, 25));
-      }
-    }
-  } catch (ytsErr) {
-    console.warn('[searchMultipleTracks yt-search notice]:', ytsErr.message);
+    return await executeSearch(query, limit, mode);
+  } catch (err) {
+    console.warn('[searchMultipleTracks worker error]:', err.message);
+    return [];
   }
-
-  // 2. Fallback nhẹ qua play-dl (không spawn process nặng)
-  try {
-    const searchResults = await withTimeout(
-      play.search(query, { limit: Math.min(limit, 15), source: { youtube: 'video' } }),
-      3000
-    );
-    if (searchResults && searchResults.length > 0) {
-      return searchResults.map(track => ({
-        title: track.title,
-        url: track.url,
-        duration: track.durationRaw || '3:30',
-        thumbnail: resolveBestThumbnail(track),
-        artist: track.channel?.name || 'YouTube',
-        isLive: Boolean(track.live)
-      }));
-    }
-  } catch (err) {}
-
-  // 3. Fallback an toàn qua yt-dlp nếu cả yt-search và play-dl đều không trả về kết quả
-  try {
-    const smOpts = {
-      dumpSingleJson: true,
-      noWarnings: true,
-      flatPlaylist: true,
-      extractorArgs: YTDLP_EXTRACTOR_ARGS
-    };
-    const cFile = getCookiesFile();
-    if (cFile) smOpts.cookies = cFile;
-    const ytRes = await withTimeout(
-      ytdlp(`ytsearch${Math.min(limit, 15)}:${query}`, smOpts),
-      4500
-    );
-    if (ytRes && ytRes.entries && Array.isArray(ytRes.entries) && ytRes.entries.length > 0) {
-      return ytRes.entries.map(e => ({
-        title: e.title,
-        url: e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : null),
-        duration: e.duration ? `${Math.floor(e.duration / 60)}:${String(e.duration % 60).padStart(2, '0')}` : '3:30',
-        thumbnail: resolveBestThumbnail(e),
-        artist: e.uploader || e.channel || 'YouTube',
-        isLive: false
-      })).filter(t => t.url);
-    }
-  } catch (ytErr) {
-    console.warn('[searchMultipleTracks yt-dlp fallback notice]:', ytErr.message);
-  }
-
-  return [];
 }
 
 module.exports = {

@@ -26,6 +26,7 @@ module.exports = {
           vi: 'Tên bài hát, ca sĩ hoặc đường dẫn link YouTube/Spotify/SoundCloud (ví dụ: Vũ Lạ Lùng)'
         })
         .setRequired(true)
+        .setAutocomplete(true)
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
