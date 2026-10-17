@@ -1,5 +1,22 @@
+const fs = require('fs');
+const path = require('path');
 const fetch = globalThis.fetch || require('node-fetch');
 const ytdlp = require('yt-dlp-exec');
+
+function getYouTubeCookiePath() {
+  const envCookie = process.env.YTDLP_COOKIES_FILE;
+  if (envCookie && fs.existsSync(envCookie)) return envCookie;
+  const candidates = [
+    path.join(__dirname, '../../youtube.cookies'),
+    path.join(__dirname, '../../cookies.txt'),
+    path.join(process.cwd(), 'youtube.cookies'),
+    path.join(process.cwd(), 'cookies.txt')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
 
 function isSafeYouTubeUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.startsWith('-')) return false;
@@ -571,14 +588,19 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
   try {
     let info = getCachedYtdlpInfo(url);
     if (!info) {
+      const cookiePath = getYouTubeCookiePath();
+      const ytdlpArgs = {
+        dumpSingleJson: true,
+        skipDownload: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        youtubeSkipDashManifest: true,
+        extractorArgs: 'youtube:player_client=android,mweb'
+      };
+      if (cookiePath) ytdlpArgs.cookies = cookiePath;
+
       info = await Promise.race([
-        ytdlp(url, {
-          dumpSingleJson: true,
-          skipDownload: true,
-          noWarnings: true,
-          preferFreeFormats: true,
-          youtubeSkipDashManifest: true
-        }),
+        ytdlp(url, ytdlpArgs),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
       ]);
       if (info) setCachedYtdlpInfo(url, info);
@@ -677,14 +699,19 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
   try {
     let info = getCachedYtdlpInfo(url);
     if (!info) {
+      const cookiePath = getYouTubeCookiePath();
+      const ytdlpArgs = {
+        dumpSingleJson: true,
+        skipDownload: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        youtubeSkipDashManifest: true,
+        extractorArgs: 'youtube:player_client=android,mweb'
+      };
+      if (cookiePath) ytdlpArgs.cookies = cookiePath;
+
       info = await Promise.race([
-        ytdlp(url, {
-          dumpSingleJson: true,
-          skipDownload: true,
-          noWarnings: true,
-          preferFreeFormats: true,
-          youtubeSkipDashManifest: true
-        }),
+        ytdlp(url, ytdlpArgs),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
       ]);
       if (info) setCachedYtdlpInfo(url, info);
@@ -750,7 +777,9 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
       }
 
       if (bestMatchTime !== null && bestScore >= Math.min(2, targetWords.length)) {
-        const offset = bestMatchTime - targetLine.time;
+        // Nếu MV vào hát lúc bestMatchTime (ví dụ 25s) mà LRCLIB ghi targetLine.time (ví dụ 10s):
+        // effectiveTime = currentProgress + offset => 10s = 25s + offset => offset = 10s - 25s = -15s!
+        const offset = targetLine.time - bestMatchTime;
         detectedOffsets.push(offset);
       }
     }
@@ -758,8 +787,8 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec) {
     if (detectedOffsets.length > 0) {
       detectedOffsets.sort((a, b) => a - b);
       const medianOffset = detectedOffsets[Math.floor(detectedOffsets.length / 2)];
-      // Giới hạn độ lệch intro thực tế: từ -8s đến tối đa +45s (hỗ trợ cả các MV có intro kịch bản thoại dài như Maroon 5 Animals)
-      if (Math.abs(medianOffset) >= 600 && medianOffset >= -8000 && medianOffset <= 45000) {
+      // Giới hạn độ lệch intro thực tế: từ -45s đến tối đa +8s (âm nghĩa là MV có intro dài, hát trễ hơn LRCLIB)
+      if (Math.abs(medianOffset) >= 600 && medianOffset >= -45000 && medianOffset <= 8000) {
         console.log(`[Lyrics Auto-Offset] Phát hiện lệch nhịp intro/outro MV dài ${(medianOffset / 1000).toFixed(2)}s, đã tự động căn nhịp!`);
         return medianOffset;
       }
@@ -775,12 +804,10 @@ async function buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurat
 
   // Nếu bài đang phát từ link YouTube:
   // Tự động tìm mốc bắt đầu hát từ YouTube Captions để căn chỉnh nhịp chuẩn 100% với video!
+  // Lưu ý quan trọng: KHÔNG cộng dồn detectedOffset vào parsed.line.time (tránh lỗi double-offset triệt tiêu với frontend)
   if (targetUrl && (targetUrl.includes('youtube.com') || targetUrl.includes('youtu.be')) && targetDurationSec > 0) {
     const detectedOffset = await detectYouTubeIntroOffset(targetUrl, parsed, targetDurationSec);
     if (detectedOffset !== 0) {
-      for (const line of parsed) {
-        line.time += detectedOffset;
-      }
       autoOffsetMs = detectedOffset;
     }
   }
@@ -889,7 +916,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
               const firstLineMs = getFirstLineTimestampMs(match.syncedLyrics);
               const isLateStart = firstLineMs > 25000;
               const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
-              const isMvMismatch = isLateStart && durDiff > 8;
+              const isMvMismatch = isLateStart && durDiff > 5;
 
               if (!isMvMismatch) {
                 if (match.syncedLyrics && match.syncedLyrics.trim().length > 10) {
@@ -927,7 +954,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
             // Sắp xếp kết quả:
             // 1. Ưu tiên bài hợp lệ cả tên lẫn ca sĩ (isValidMatch)
             // 2. Ưu tiên bài KHÔNG BỊ TRỄ INTRO (>25s) nếu đối chiếu với audio thông thường
-            // 3. Khi có targetDurationSec > 0: ưu tiên |match.duration - targetDurationSec| <= 8s lên trước
+            // 3. Khi có targetDurationSec > 0: ưu tiên |match.duration - targetDurationSec| <= 5s lên trước
             results.sort((a, b) => {
               const aValid = isValidMatch(a, item.expectedTrack || item.track, item.expectedArtist || item.artist);
               const bValid = isValidMatch(b, item.expectedTrack || item.track, item.expectedArtist || item.artist);
@@ -943,8 +970,8 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
                 const aDiff = typeof a.duration === 'number' ? Math.abs(a.duration - targetDurationSec) : 9999;
                 const bDiff = typeof b.duration === 'number' ? Math.abs(b.duration - targetDurationSec) : 9999;
 
-                // Nếu cả hai bản đều gần thời lượng (<= 8s), ưu tiên bản không trễ intro
-                if (aDiff <= 8 && bDiff <= 8) {
+                // Nếu cả hai bản đều gần thời lượng (<= 5s), ưu tiên bản không trễ intro
+                if (aDiff <= 5 && bDiff <= 5) {
                   if (!aLate && bLate) return -1;
                   if (aLate && !bLate) return 1;
                 }
@@ -965,8 +992,8 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
                 if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
                   const firstLineMs = getFirstLineTimestampMs(match.syncedLyrics);
                   const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
-                  // Nếu câu đầu tiên > 25s trong khi thời lượng bị lệch > 8s, bỏ qua bản MV để tìm bản studio phía sau
-                  if (firstLineMs > 25000 && durDiff > 8) {
+                  // Nếu câu đầu tiên > 25s trong khi thời lượng bị lệch > 5s, bỏ qua bản MV để tìm bản studio phía sau
+                  if (firstLineMs > 25000 && durDiff > 5) {
                     continue;
                   }
 

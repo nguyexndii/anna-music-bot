@@ -92,14 +92,19 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
       }
     }
 
-    // 3. Điểm Kênh Chính Chủ & Uy Tín
+    // 3. Điểm Kênh Chính Chủ & Uy Tín (Ưu tiên Studio Master / Topic +45 điểm so với MV +15 điểm)
     const isTopic = artistLower.includes('- topic') || artistLower.includes('topic');
     const isOfficialChannel = isTopic || artistLower.includes('official') || artistLower.includes('vevo') || Boolean(t.isOfficial);
     if (isOfficialChannel) {
       score += 35;
     }
-    if (/\b(official music video|official mv|official audio|official lyric video|official video)\b/i.test(titleLower)) {
-      score += 25;
+    const isStudioMaster = isTopic || /\b(official audio|official lyric video|lyric video|visualizer|audio)\b/i.test(titleLower);
+    const isMusicVideo = /\b(official music video|official mv|official video)\b/i.test(titleLower);
+
+    if (isStudioMaster) {
+      score += 45; // Ưu tiên bản thu âm phòng thu / Topic / Lyric video không có intro thoại
+    } else if (isMusicVideo) {
+      score += 15; // MV ca nhạc thường có đoạn intro/outro kịch bản dài
     }
 
     // 4. Điểm Thời Lượng Chuẩn Âm Nhạc (1p30s – 7p)
