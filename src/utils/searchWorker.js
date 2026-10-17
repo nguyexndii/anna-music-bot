@@ -233,11 +233,17 @@ async function searchWithInnerTube(query, locale = 'vi') {
       const isOfficial = Boolean(vr.ownerBadges?.some(b => b.metadataBadgeRenderer?.style?.includes('OFFICIAL') || b.metadataBadgeRenderer?.style?.includes('VERIFIED')));
       const viewCountText = vr.viewCountText?.simpleText || vr.shortViewCountText?.simpleText || '';
 
+      const rawTitle = title || '';
+      const rawArtist = artist || 'YouTube';
+      const cleanTitle = rawTitle.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+      const cleanArtist = rawArtist.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+      const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (vr.videoId ? `Bài hát không tên (${vr.videoId})` : 'Bài hát không tên'));
+
       tracks.push({
-        title: title.trim(),
+        title: safeTitle,
         url: `https://www.youtube.com/watch?v=${vr.videoId}`,
         videoId: vr.videoId,
-        artist: artist.trim(),
+        artist: cleanArtist || 'YouTube',
         duration,
         thumbnail,
         isLive,
@@ -257,17 +263,25 @@ async function searchWithYtSearch(query) {
   if (!yts) return [];
   const r = await yts(query);
   if (!r || !r.videos || r.videos.length === 0) return [];
-  return r.videos.map(v => ({
-    title: v.title,
-    url: v.url,
-    videoId: v.videoId,
-    duration: v.timestamp || (v.seconds ? `${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, '0')}` : '3:30'),
-    thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-    artist: v.author?.name || 'YouTube',
-    isLive: Boolean(v.live),
-    isOfficial: Boolean((v.author?.name || '').toLowerCase().includes('topic') || (v.author?.name || '').toLowerCase().includes('official')),
-    viewCountText: v.views ? `${v.views} views` : ''
-  }));
+  return r.videos.map(v => {
+    const rawTitle = v.title || '';
+    const rawArtist = v.author?.name || 'YouTube';
+    const cleanTitle = rawTitle.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+    const cleanArtist = rawArtist.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+    const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (v.videoId ? `Bài hát không tên (${v.videoId})` : 'Bài hát không tên'));
+
+    return {
+      title: safeTitle,
+      url: v.url,
+      videoId: v.videoId,
+      duration: v.timestamp || (v.seconds ? `${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, '0')}` : '3:30'),
+      thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+      artist: cleanArtist || 'YouTube',
+      isLive: Boolean(v.live),
+      isOfficial: Boolean((cleanArtist || '').toLowerCase().includes('topic') || (cleanArtist || '').toLowerCase().includes('official')),
+      viewCountText: v.views ? `${v.views} views` : ''
+    };
+  });
 }
 
 /**

@@ -43,17 +43,20 @@ function parseDurationToMs(durationStr) {
 
 /**
  * Chuẩn hóa tên bài hát để chèn an toàn vào cú pháp Markdown link của Discord: [Title](URL)
+ * - Loại bỏ sạch toàn bộ các ký tự vô hình/zero-width space để tránh rỗng link
  * - Đổi dấu ngoặc vuông '[' và ']' thành '(' và ')' để không phá vỡ cặp ngoặc link Markdown
  * - Đổi ký tự backtick ` thành ' để không làm vỡ khối inline code
  * - Cắt ngắn độ dài an toàn và thêm '...' nếu vượt quá maxLength
  */
 function formatMarkdownTitle(title, maxLength = 55) {
-  if (!title) return 'Không rõ tiêu đề';
+  if (!title) return 'Bài hát không tên';
   let clean = String(title)
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '')
     .replace(/\[/g, '(')
     .replace(/\]/g, ')')
     .replace(/`/g, "'")
     .trim();
+  if (!clean) return 'Bài hát không tên';
   if (maxLength && clean.length > maxLength) {
     clean = clean.slice(0, maxLength).trim() + '...';
   }
@@ -154,8 +157,9 @@ const EMOJI_TAG = {
  */
 function createNowPlayingBanner(song, queue) {
   const is247Mode = Boolean(song && (song.requestedBy === 'Auto (24/7)' || song.is247));
-  const curTitle = song?.title || 'Nhạc nền Lofi 24/7';
-  const songTitle = is247Mode ? `${EMOJI_TAG.infinity} ${curTitle}` : (song?.title || 'Đang phát nhạc');
+  const rawTitle = String(song?.title || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+  const curTitle = rawTitle || (is247Mode ? 'Nhạc nền Lofi 24/7' : 'Bài hát không tên');
+  const songTitle = is247Mode ? `${EMOJI_TAG.infinity} ${curTitle}` : curTitle;
 
   const content = `Now playing: **${songTitle}**`;
 

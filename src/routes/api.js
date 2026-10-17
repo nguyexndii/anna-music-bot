@@ -52,10 +52,11 @@ module.exports = function createApiRouter(client) {
     return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
   }
 
-  // Helper làm sạch chuỗi văn bản Discord để tránh mention lạm dụng (@everyone, <@...>)
+  // Helper làm sạch chuỗi văn bản Discord, loại bỏ ký tự vô hình/zero-width và tránh mention lạm dụng
   function sanitizeDiscordText(str, maxLength = 200) {
     if (typeof str !== 'string') return '';
     return str
+      .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '')
       .replace(/@(everyone|here)/gi, '$1')
       .replace(/<@!?(\d+)>/g, '')
       .replace(/<@&(\d+)>/g, '')
@@ -102,7 +103,7 @@ module.exports = function createApiRouter(client) {
     }
     const data = {
       history: (historyManager.getRecent ? historyManager.getRecent(guildId, 50) : (historyManager.getHistory(guildId) || []).slice(0, 50)) || [],
-      topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 8) : []) || [],
+      topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 16) : []) || [],
       recentPlaylists: (playlistHistoryManager.getPlaylists ? playlistHistoryManager.getPlaylists(guildId, 50) : []) || []
     };
     guildStatsCache.set(guildId, { time: now, data });
@@ -858,8 +859,15 @@ module.exports = function createApiRouter(client) {
       const targetTrack = rawResults[0];
       const memberAvatar = member.displayAvatarURL ? member.displayAvatarURL({ dynamic: true }) : user.avatar;
       const userMention = `<@${member.id}>`;
-      targetTrack.title = sanitizeDiscordText(targetTrack.title, 200) || 'Unknown Track';
-      targetTrack.artist = sanitizeDiscordText(targetTrack.artist, 100) || 'Unknown Artist';
+
+      // Làm sạch ký tự vô hình/zero-width và chuẩn hóa tiêu đề
+      const cleanTitle = sanitizeDiscordText(targetTrack.title, 200);
+      const cleanArtist = sanitizeDiscordText(targetTrack.artist, 100);
+      const videoIdMatch = (targetTrack.url || '').match(/(?:v=|\/vi\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      const fallbackId = videoIdMatch ? videoIdMatch[1] : null;
+
+      targetTrack.title = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (fallbackId ? `Bài hát không tên (${fallbackId})` : 'Bài hát không tên'));
+      targetTrack.artist = cleanArtist || 'YouTube';
       targetTrack.thumbnail = sanitizeThumbnailUrl(targetTrack.thumbnail);
       targetTrack.is247 = false;
       targetTrack.requestedBy = userMention;
@@ -883,6 +891,7 @@ module.exports = function createApiRouter(client) {
 
         if (notifyChannel?.isTextBased?.()) {
           const { EmbedBuilder } = require('discord.js');
+          const safeMarkdownTitle = targetTrack.title.replace(/\[/g, '(').replace(/\]/g, ')');
           const notifEmbed = new EmbedBuilder()
             .setColor('#5865F2')
             .setAuthor({
@@ -891,8 +900,8 @@ module.exports = function createApiRouter(client) {
             })
             .setDescription(
               isFirst
-                ? `▶️ Đang phát: **[${targetTrack.title}](${targetTrack.url})**`
-                : `📥 Đã thêm vào hàng chờ: **[${targetTrack.title}](${targetTrack.url})**`
+                ? `▶️ Đang phát: **[${safeMarkdownTitle}](${targetTrack.url})**`
+                : `📥 Đã thêm vào hàng chờ: **[${safeMarkdownTitle}](${targetTrack.url})**`
             )
             .setThumbnail(targetTrack.thumbnail || null)
             .setFooter({ text: 'Anna Music Web Player' });

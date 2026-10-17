@@ -730,15 +730,21 @@ function extractSoundCloudTitleFromUrl(url) {
           ]).catch(() => null);
 
           const [oembedData, ytsData] = await Promise.all([oEmbedPromise, ytsPromise]);
-          const resolvedTitle = ytsData?.title || oembedData?.title;
+          const rawTitle = ytsData?.title || oembedData?.title || '';
+          const rawArtist = oembedData?.author_name || ytsData?.author?.name || 'YouTube';
+          const cleanTitle = String(rawTitle).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+          const cleanArtist = String(rawArtist).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
 
-          if (resolvedTitle) {
+          const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (videoId ? `Bài hát không tên (${videoId})` : 'Bài hát không tên'));
+          const safeArtist = cleanArtist || 'YouTube';
+
+          if (rawTitle || safeTitle) {
             return [{
-              title: resolvedTitle,
+              title: safeTitle,
               url: videoUrl,
               duration: ytsData?.timestamp || (ytsData?.seconds ? `${Math.floor(ytsData.seconds / 60)}:${String(ytsData.seconds % 60).padStart(2, '0')}` : '3:30'),
               thumbnail: defaultThumb,
-              artist: oembedData?.author_name || ytsData?.author?.name || 'YouTube',
+              artist: safeArtist,
               isLive: Boolean(ytsData?.live)
             }];
           }
@@ -758,11 +764,14 @@ function extractSoundCloudTitleFromUrl(url) {
         const cFile = getCookiesFile();
         if (cFile) infoOpts.cookies = cFile;
         const info = await ytdlp(query, infoOpts);
+        const cleanInfoTitle = String(info.title || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+        const cleanInfoUploader = String(info.uploader || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
         return [{
-          title: info.title || 'Audio Stream',
+          title: cleanInfoTitle || (cleanInfoUploader ? `${cleanInfoUploader} - Audio` : (info.id ? `Bài hát không tên (${info.id})` : 'Audio Stream')),
           url: info.webpage_url || query,
           duration: info.duration ? `${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}` : 'Live Stream',
           thumbnail: info.thumbnail || null,
+          artist: cleanInfoUploader || 'YouTube',
           isLive: Boolean(info.is_live)
         }];
       } catch (err) {

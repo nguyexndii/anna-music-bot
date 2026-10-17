@@ -5,9 +5,16 @@ const GuildHistory = require('../database/models/GuildHistory');
 const DATA_DIR = path.join(__dirname, '../../data');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 
+const INVISIBLE_REGEX = /[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g;
+
+function cleanInvisibleChars(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str.replace(INVISIBLE_REGEX, '').trim();
+}
+
 function getKeywords(str) {
   if (!str) return [];
-  const clean = str
+  const clean = cleanInvisibleChars(str)
     .toLowerCase()
     .replace(/\[.*?\]|\(.*?\)/g, '')
     .replace(/official|music|video|audio|lyrics|mv|hd|4k|m\/v|remix|bản gốc|full|topic/gi, '')
@@ -18,14 +25,112 @@ function getKeywords(str) {
 
 function extractVideoId(url) {
   if (!url || typeof url !== 'string') return null;
-  const match = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/v\/)([\w-]{11})/);
+  const match = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/|\/v\/)([\w-]{11})/);
   return match ? match[1] : null;
+}
+
+/**
+ * Tạo khóa định danh chuẩn xác cho bài hát (YouTube Video ID hoặc Normalized Title)
+ */
+function getTrackKey(song) {
+  if (!song) return '';
+  const url = typeof song === 'object' ? song.url : (typeof song === 'string' && song.startsWith('http') ? song : '');
+  const vid = extractVideoId(url);
+  if (vid) {
+    return `yt_${vid}`;
+  }
+
+  const rawTitle = typeof song === 'object' ? (song.title || song.name || '') : song;
+  const clean = cleanInvisibleChars(rawTitle)
+    .toLowerCase()
+    .replace(/\[.*?\]|\(.*?\)/g, '')
+    .replace(/official|music|video|audio|lyrics|mv|hd|4k|m\/v|remix|bản gốc|full|topic/gi, '')
+    .replace(/[^a-zA-Z0-9\u00C0-\u1EF9]/g, '')
+    .trim();
+
+  return `title_${clean || 'unknown'}`;
+}
+
+/**
+ * Kiểm tra xem bài hát có phải nhạc Lofi 24/7 nền hay không
+ */
+function isLofiTrack(song) {
+  if (!song) return false;
+  if (song.is247 || song.requestedBy === 'Auto (24/7)') return true;
+  if (typeof song.requestedBy === 'string' && song.requestedBy.includes('24/7')) return true;
+  const title = (song.title || '').toLowerCase();
+  return /lofi hip hop radio|beats to relax|chillhop|lofi radio|lofi girl/i.test(title);
 }
 
 class HistoryManager {
   constructor() {
     this.cache = new Map();
+    this._mongoTimers = new Map();
     this._loadLocal();
+  }
+
+  /**
+   * Tự động tổng hợp bảng trackStats từ mảng history cũ
+   */
+  _migrateStatsFromHistory(historyList) {
+    if (!Array.isArray(historyList) || historyList.length === 0) return [];
+    const statsMap = new Map();
+
+    for (const item of historyList) {
+      if (!item || !item.title || isLofiTrack(item)) continue;
+      const key = getTrackKey(item);
+      if (!key) continue;
+
+      const playedAt = item.playedAt ? new Date(item.playedAt) : new Date();
+      if (statsMap.has(key)) {
+        const entry = statsMap.get(key);
+        entry.playCount = (entry.playCount || 1) + 1;
+        if (!entry.thumbnail && item.thumbnail) entry.thumbnail = item.thumbnail;
+        if (playedAt > entry.lastPlayedAt) entry.lastPlayedAt = playedAt;
+        if (playedAt < entry.firstPlayedAt) entry.firstPlayedAt = playedAt;
+      } else {
+        statsMap.set(key, {
+          trackKey: key,
+          title: cleanInvisibleChars(item.title) || 'Bài hát không tên',
+          url: item.url || '',
+          artist: item.artist && item.artist !== 'Unknown' ? item.artist : 'YouTube Music',
+          thumbnail: item.thumbnail || null,
+          duration: item.duration || '0:00',
+          playCount: 1,
+          firstPlayedAt: playedAt,
+          lastPlayedAt: playedAt
+        });
+      }
+    }
+
+    const arr = Array.from(statsMap.values());
+    arr.sort((a, b) => (b.playCount || 1) - (a.playCount || 1));
+    return arr.slice(0, 200);
+  }
+
+  /**
+   * Lấy cấu trúc dữ liệu của Guild (Đảm bảo có đủ 2 mảng history và trackStats)
+   */
+  _getGuildData(guildId) {
+    if (!this.cache.has(guildId)) {
+      this.cache.set(guildId, { history: [], trackStats: [] });
+    }
+    const val = this.cache.get(guildId);
+
+    // Xử lý tương thích ngược nếu cache đang là mảng phẳng kiểu cũ
+    if (Array.isArray(val)) {
+      const migrated = {
+        history: val,
+        trackStats: this._migrateStatsFromHistory(val)
+      };
+      this.cache.set(guildId, migrated);
+      return migrated;
+    }
+
+    if (!Array.isArray(val.history)) val.history = [];
+    if (!Array.isArray(val.trackStats)) val.trackStats = [];
+
+    return val;
   }
 
   _loadLocal() {
@@ -36,8 +141,31 @@ class HistoryManager {
       if (fs.existsSync(HISTORY_FILE)) {
         const raw = fs.readFileSync(HISTORY_FILE, 'utf8');
         const data = JSON.parse(raw);
-        for (const [guildId, history] of Object.entries(data)) {
-          this.cache.set(guildId, history);
+        let needsResave = false;
+
+        for (const [guildId, val] of Object.entries(data)) {
+          if (Array.isArray(val)) {
+            // Định dạng cũ: Array history
+            const migrated = {
+              history: val,
+              trackStats: this._migrateStatsFromHistory(val)
+            };
+            this.cache.set(guildId, migrated);
+            needsResave = true;
+          } else if (typeof val === 'object' && val !== null) {
+            // Định dạng mới: { history, trackStats }
+            const history = Array.isArray(val.history) ? val.history : [];
+            let trackStats = Array.isArray(val.trackStats) ? val.trackStats : [];
+            if (trackStats.length === 0 && history.length > 0) {
+              trackStats = this._migrateStatsFromHistory(history);
+              needsResave = true;
+            }
+            this.cache.set(guildId, { history, trackStats });
+          }
+        }
+
+        if (needsResave) {
+          this._saveLocal();
         }
       }
     } catch (e) {
@@ -55,90 +183,177 @@ class HistoryManager {
       } catch (e) {
         console.warn('[HistoryManager] Không thể lưu file local:', e.message);
       }
-    }, 300);
+    }, 400);
   }
 
-  async addSong(guildId, song) {
+  _syncMongo(guildId) {
+    if (this._mongoTimers.has(guildId)) {
+      clearTimeout(this._mongoTimers.get(guildId));
+    }
+
+    const timer = setTimeout(async () => {
+      this._mongoTimers.delete(guildId);
+      try {
+        const data = this._getGuildData(guildId);
+        await GuildHistory.findOneAndUpdate(
+          { guildId },
+          {
+            guildId,
+            history: data.history,
+            trackStats: data.trackStats,
+            updatedAt: new Date()
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
+      } catch (dbErr) {
+        // Bỏ qua lỗi DB nếu offline / không có mạng
+      }
+    }, 1500);
+
+    this._mongoTimers.set(guildId, timer);
+  }
+
+  /**
+   * 1. Ghi nhận bài hát vào danh sách "Nghe gần đây" (Gọi ngay khi bài hát bắt đầu phát)
+   */
+  async addRecentHistory(guildId, song) {
     if (!guildId || !song || !song.title) return;
+    if (isLofiTrack(song)) return;
 
-    // Bỏ qua nhạc 24/7 Lofi nền do bot tự phát (Không lưu vào lịch sử và bảng xếp hạng)
-    if (
-      song.is247 ||
-      song.requestedBy === 'Auto (24/7)' ||
-      /lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(song.title) ||
-      /lofi girl/i.test(song.artist || '')
-    ) {
-      return;
-    }
+    const data = this._getGuildData(guildId);
+    const trackKey = getTrackKey(song);
+    const cleanTitle = cleanInvisibleChars(song.title);
+    if (!cleanTitle) return;
 
-    if (!this.cache.has(guildId)) {
-      this.cache.set(guildId, []);
-    }
-
-    const list = this.cache.get(guildId);
     let thumbnail = song.thumbnail;
     if (!thumbnail && song.url) {
-      const match = song.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-      if (match && match[1]) {
-        thumbnail = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+      const vid = extractVideoId(song.url);
+      if (vid) {
+        thumbnail = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
       }
     }
 
     const item = {
-      title: song.title,
+      title: cleanTitle,
       url: song.url || null,
       thumbnail: thumbnail || null,
-      artist: song.artist && song.artist !== 'Unknown' 
-        ? song.artist 
-        : (song.title.includes(' - ') ? song.title.split(' - ')[0].trim() : 'YouTube Music'),
+      artist: song.artist && song.artist !== 'Unknown'
+        ? cleanInvisibleChars(song.artist)
+        : (cleanTitle.includes(' - ') ? cleanTitle.split(' - ')[0].trim() : 'YouTube Music'),
       duration: song.duration || '0:00',
       playedAt: new Date()
     };
 
-    // Kiểm tra không lặp liên tiếp
-    if (list.length > 0 && list[0].title === item.title) {
-      list[0] = item;
-    } else {
-      list.unshift(item);
+    // Khử trùng lặp: Nếu bài hát đã có trong history, xóa vị trí cũ để đẩy lên đầu
+    const existingIndex = data.history.findIndex(h => h && (getTrackKey(h) === trackKey || (h.url && song.url && h.url === song.url)));
+    if (existingIndex !== -1) {
+      data.history.splice(existingIndex, 1);
     }
 
-    // Giữ tối đa 50 bài hát gần nhất
-    if (list.length > 50) {
-      list.length = 50;
+    data.history.unshift(item);
+
+    // Giữ tối đa 40 bài hát gần nhất
+    if (data.history.length > 40) {
+      data.history.length = 40;
     }
 
     this._saveLocal();
+    this._syncMongo(guildId);
+  }
 
-    // Lưu vào MongoDB Atlas ngầm
-    try {
-      await GuildHistory.findOneAndUpdate(
-        { guildId },
-        { guildId, history: list, updatedAt: new Date() },
-        { upsert: true, returnDocument: 'after' }
-      );
-    } catch (dbErr) {
-      // Bỏ qua lỗi DB nếu offline
+  /**
+   * 2. Chỉ cộng lượt phát cho Bảng xếp hạng khi bài hát thực sự được nghe (sau 25 giây)
+   */
+  async incrementPlayCount(guildId, song) {
+    if (!guildId || !song || !song.title) return;
+    if (isLofiTrack(song)) return;
+
+    const data = this._getGuildData(guildId);
+    const trackKey = getTrackKey(song);
+    if (!trackKey) return;
+
+    const cleanTitle = cleanInvisibleChars(song.title);
+    if (!cleanTitle) return;
+
+    let thumbnail = song.thumbnail;
+    if (!thumbnail && song.url) {
+      const vid = extractVideoId(song.url);
+      if (vid) {
+        thumbnail = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+      }
     }
+
+    const artist = song.artist && song.artist !== 'Unknown'
+      ? cleanInvisibleChars(song.artist)
+      : (cleanTitle.includes(' - ') ? cleanTitle.split(' - ')[0].trim() : 'YouTube Music');
+
+    const now = new Date();
+    const existing = data.trackStats.find(t => t && t.trackKey === trackKey);
+
+    if (existing) {
+      existing.playCount = (existing.playCount || 1) + 1;
+      existing.lastPlayedAt = now;
+      if (!existing.thumbnail && thumbnail) existing.thumbnail = thumbnail;
+      if ((!existing.artist || existing.artist === 'YouTube Music') && artist) existing.artist = artist;
+      if ((!existing.duration || existing.duration === '0:00') && song.duration) existing.duration = song.duration;
+      if (song.url && (!existing.url || !existing.url.startsWith('http'))) existing.url = song.url;
+    } else {
+      data.trackStats.push({
+        trackKey,
+        title: cleanTitle,
+        url: song.url || '',
+        artist,
+        thumbnail: thumbnail || null,
+        duration: song.duration || '0:00',
+        playCount: 1,
+        firstPlayedAt: now,
+        lastPlayedAt: now
+      });
+    }
+
+    // Nếu vượt quá 200 bài, chỉ cắt bỏ các bài có playCount === 1 cũ nhất
+    if (data.trackStats.length > 200) {
+      data.trackStats.sort((a, b) => {
+        const countA = a.playCount || 1;
+        const countB = b.playCount || 1;
+        if (countB !== countA) {
+          return countB - countA;
+        }
+        return new Date(b.lastPlayedAt || 0).getTime() - new Date(a.lastPlayedAt || 0).getTime();
+      });
+      data.trackStats.length = 200;
+    }
+
+    this._saveLocal();
+    this._syncMongo(guildId);
   }
 
+  /**
+   * Giữ tương thích ngược với các caller cũ gọi addSong
+   */
+  async addSong(guildId, song) {
+    return this.addRecentHistory(guildId, song);
+  }
+
+  /**
+   * Lấy toàn bộ danh sách lịch sử gần đây của máy chủ
+   */
   getHistory(guildId) {
-    const rawList = this.cache.get(guildId) || [];
-    // Lọc bỏ nhạc Lofi 24/7 nếu trước đây từng bị lưu nhầm
-    return rawList.filter(item => 
-      item && 
-      item.title && 
-      !/lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(item.title)
-    );
+    const data = this._getGuildData(guildId);
+    return data.history.filter(item => item && item.title && !isLofiTrack(item));
   }
 
+  /**
+   * Lấy danh sách Nghe gần đây có giới hạn số lượng
+   */
   getRecent(guildId, limit = 10) {
     const list = this.getHistory(guildId);
     return list.slice(0, limit).map(item => {
       let thumb = item.thumbnail;
       if (!thumb && item.url) {
-        const match = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-        if (match && match[1]) {
-          thumb = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+        const vid = extractVideoId(item.url);
+        if (vid) {
+          thumb = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
         }
       }
       return {
@@ -152,33 +367,39 @@ class HistoryManager {
   }
 
   /**
-   * Thống kê Top bài hát được nghe nhiều nhất của Server (Loại trừ 100% nhạc Lofi 24/7)
+   * Lấy bảng xếp hạng "Phổ biến trong máy chủ" (Top bài hát nghe nhiều nhất)
+   * - Chỉ lấy các bài có playCount >= 2
+   * - Sắp xếp theo playCount giảm dần, sau đó theo lastPlayedAt mới nhất
+   * - Nếu không có bài nào >= 2 lượt nghe -> Trả về mảng rỗng [] để UI ẩn khối này
    */
-  getTopTracks(guildId, limit = 6) {
-    const list = this.getHistory(guildId);
-    if (!list || list.length === 0) return [];
+  getTopTracks(guildId, limit = 16) {
+    const data = this._getGuildData(guildId);
+    const stats = data.trackStats || [];
+    if (!Array.isArray(stats) || stats.length === 0) return [];
 
-    const counts = new Map();
-    for (const item of list) {
-      if (!item || !item.title) continue;
-      // Bỏ qua lofi nền
-      if (/lofi hip hop radio|beats to relax|chillhop|lofi radio/i.test(item.title)) continue;
+    // Chỉ lọc các bài hát có playCount >= 2 và không phải Lofi 24/7
+    const popular = stats.filter(t => t && t.title && (t.playCount || 0) >= 2 && !isLofiTrack(t));
 
-      const key = item.title.toLowerCase().trim();
-      if (!counts.has(key)) {
-        counts.set(key, { ...item, count: 1 });
-      } else {
-        counts.get(key).count += 1;
-      }
+    // Fallback: Nếu máy chủ chưa có bài nào đạt >= 2 lượt nghe -> ẩn khối phổ biến
+    if (popular.length === 0) {
+      return [];
     }
 
-    const sorted = Array.from(counts.values()).sort((a, b) => b.count - a.count);
-    return sorted.slice(0, limit).map(item => {
+    popular.sort((a, b) => {
+      const countA = a.playCount || 0;
+      const countB = b.playCount || 0;
+      if (countB !== countA) {
+        return countB - countA;
+      }
+      return new Date(b.lastPlayedAt || 0).getTime() - new Date(a.lastPlayedAt || 0).getTime();
+    });
+
+    return popular.slice(0, limit).map(item => {
       let thumb = item.thumbnail;
       if (!thumb && item.url) {
-        const match = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-        if (match && match[1]) {
-          thumb = `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+        const vid = extractVideoId(item.url);
+        if (vid) {
+          thumb = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
         }
       }
       return {
@@ -192,13 +413,13 @@ class HistoryManager {
   }
 
   /**
-   * Kiểm tra xem bài hát này có nằm trong các bài gần nhất không (mặc định 25 bài)
+   * Kiểm tra xem bài hát có nằm trong các bài gần nhất không (chống lặp autoplay)
    */
   isRecentlyPlayed(guildId, trackOrTitle, limit = 25) {
     if (!guildId || !trackOrTitle) return false;
 
-    const list = this.cache.get(guildId) || [];
-    const recent = list.slice(0, limit);
+    const data = this._getGuildData(guildId);
+    const recent = data.history.slice(0, limit);
 
     const checkTitle = typeof trackOrTitle === 'string' ? trackOrTitle : (trackOrTitle.title || '');
     const checkUrl = typeof trackOrTitle === 'object' ? trackOrTitle.url : (typeof trackOrTitle === 'string' && trackOrTitle.startsWith('http') ? trackOrTitle : null);
@@ -237,5 +458,6 @@ class HistoryManager {
 const historyManagerInstance = new HistoryManager();
 historyManagerInstance.getKeywords = getKeywords;
 historyManagerInstance.extractVideoId = extractVideoId;
+historyManagerInstance.getTrackKey = getTrackKey;
 
 module.exports = historyManagerInstance;

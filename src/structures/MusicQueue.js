@@ -76,6 +76,7 @@ class MusicQueue {
     this.emptyRoomTimeout = null;
     this.idle247Timeout = null;
     this.crossfadeTimer = null;
+    this._playCountTimer = null;
     this.nowPlayingMessage = null;
     this._isPrefetching = false;
     this._isPlayingNext = false;
@@ -92,6 +93,13 @@ class MusicQueue {
 
   get isPaused() {
     return this.paused || this.player?.state?.status === AudioPlayerStatus.Paused;
+  }
+
+  clearPlayCountTimer() {
+    if (this._playCountTimer) {
+      clearTimeout(this._playCountTimer);
+      this._playCountTimer = null;
+    }
   }
 
   clearPreloadTimer() {
@@ -392,12 +400,13 @@ class MusicQueue {
       });
     }
 
+    this.clearPlayCountTimer();
+
     if (!wasPrevious && lastSong && !lastSong.is247 && lastSong.requestedBy !== 'Auto (24/7)') {
       this.lastUserTrack = lastSong;
       this.history.push(lastSong.url);
       if (this.history.length > 50) this.history.shift();
-      await historyManager.addSong(this.guild.id, lastSong);
-      
+
       this.previousSongs.push(lastSong);
       if (this.previousSongs.length > 5) this.previousSongs.shift();
     }
@@ -754,8 +763,17 @@ class MusicQueue {
         thumbnail: 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg'
       };
     }
-    const safeTitle = (song.title || song.name || song.rawSongName || (song.url ? `Bài hát #${idx + 1}` : 'Bài hát không tên')).trim();
-    song.title = safeTitle || `Bài hát #${idx + 1}`;
+    const rawTitle = String(song.title || song.name || song.rawSongName || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+    const rawArtist = String(song.artist || song.uploader || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+
+    let safeTitle = rawTitle;
+    if (!safeTitle) {
+      const vidMatch = String(song.url || song.searchQuery || '').match(/(?:v=|\/vi\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      const vidId = vidMatch ? vidMatch[1] : null;
+      safeTitle = (rawArtist && rawArtist !== 'YouTube') ? `${rawArtist} - Audio` : (vidId ? `Bài hát không tên (${vidId})` : `Bài hát #${idx + 1}`);
+    }
+    song.title = safeTitle;
+    song.artist = rawArtist || 'YouTube';
     if (!song.url && song.searchQuery) {
       song.url = `https://www.youtube.com/results?search_query=${encodeURIComponent(song.searchQuery)}`;
     }
@@ -980,13 +998,26 @@ class MusicQueue {
         this.currentSong.seekPosition = 0;
         logMemoryUsage(`Track Start: ${(this.currentSong.title || '').slice(0, 25)}`);
 
-        // Ghi nhận ngay vào lịch sử bài hát khi bắt đầu phát!
+        // Ghi nhận ngay vào danh sách "Nghe gần đây" khi bắt đầu phát!
         if (!this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
           if (!this.history.includes(this.currentSong.url)) {
             this.history.unshift(this.currentSong.url);
             if (this.history.length > 50) this.history.pop();
           }
-          historyManager.addSong(this.guild.id, this.currentSong).catch(() => {});
+          historyManager.addRecentHistory(this.guild.id, this.currentSong).catch(() => {});
+
+          // Đặt bộ hẹn giờ xác nhận lượt nghe (25s hoặc 1/3 bài nếu < 60s) để tính vào "Phổ biến trong máy chủ"
+          this.clearPlayCountTimer();
+          const durSec = parseDurationToSeconds(this.currentSong.duration);
+          const waitMs = (durSec > 0 && durSec < 60) ? Math.max(5000, Math.floor((durSec / 3) * 1000)) : 25000;
+          const songToRecord = this.currentSong;
+
+          this._playCountTimer = setTimeout(() => {
+            if (this.currentSong === songToRecord && !this.isDestroyed && !this.isStopped && !songToRecord._playCountRecorded) {
+              songToRecord._playCountRecorded = true;
+              historyManager.incrementPlayCount(this.guild.id, songToRecord).catch(() => {});
+            }
+          }, waitMs);
         }
 
         const requesterName = this.currentSong.requestedByName ||
@@ -1296,6 +1327,7 @@ class MusicQueue {
 
   stop() {
     this.isStopped = true;
+    this.clearPlayCountTimer();
     this.clearCrossfadeTimer();
     this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
@@ -1402,6 +1434,7 @@ class MusicQueue {
     }
 
     // Dọn bài hát hiện tại
+    this.clearPlayCountTimer();
     this.currentSong = null;
     this._cleanupResource(this.currentResource);
     this.currentResource = null;
@@ -1520,6 +1553,7 @@ class MusicQueue {
   destroy() {
     this.isDestroyed = true;
     this.isStopped = true;
+    this.clearPlayCountTimer();
     this.clearCrossfadeTimer();
     this.clearPreloadTimer();
     this.clearDisconnectTimer();
