@@ -45,9 +45,9 @@ module.exports = function createApiRouter(client) {
     next();
   });
 
-  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy header cf-connecting-ip của Cloudflare hoặc req.ip trực tiếp)
+  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy header cf-connecting-ip của Cloudflare hoặc x-real-client-ip hoặc req.ip trực tiếp)
   function getClientIp(req) {
-    const cfIp = req.headers['cf-connecting-ip'];
+    const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-real-client-ip'];
     if (cfIp && typeof cfIp === 'string') return cfIp.trim();
     return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
   }
