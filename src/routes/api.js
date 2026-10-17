@@ -32,7 +32,7 @@ module.exports = function createApiRouter(client) {
       return cached.data;
     }
     const data = {
-      history: (historyManager.getRecent ? historyManager.getRecent(guildId, 30) : (historyManager.getHistory(guildId) || []).slice(0, 30)) || [],
+      history: (historyManager.getRecent ? historyManager.getRecent(guildId, 50) : (historyManager.getHistory(guildId) || []).slice(0, 50)) || [],
       topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 8) : []) || [],
       recentPlaylists: (playlistHistoryManager.getPlaylists ? playlistHistoryManager.getPlaylists(guildId, 50) : []) || []
     };
