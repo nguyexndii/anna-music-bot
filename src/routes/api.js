@@ -1,8 +1,9 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
-const { verifyWebToken, createSessionToken } = require('../utils/tokenHelper');
-const { searchMultipleTracks, searchTrack } = require('../utils/musicExtractor');
+const { verifyWebToken, createSessionToken, getPinAttemptStatus, recordPinFailure, clearPinFailures } = require('../utils/tokenHelper');
+const { searchMultipleTracks, searchTrack, validateAndSanitizeMusicUrl } = require('../utils/musicExtractor');
+const { hasMusicPermission, hasManagerPermission, isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const { getLyrics } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
 const favoriteManager = require('../structures/FavoriteManager');
@@ -15,6 +16,74 @@ const ytdlp = require('yt-dlp-exec');
 module.exports = function createApiRouter(client) {
   const router = express.Router();
   router.use(express.json());
+
+  // Cấu hình CORS siết chặt: Whitelist các domain được chỉ định hoặc Pages.dev
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim().replace(/\/$/, ''))
+    : [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:3000',
+        'https://anna-music-bot-ui.pages.dev'
+      ];
+
+  router.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      const isAllowed = allowedOrigins.includes(origin) || /^https:\/\/[a-z0-9-]+\.anna-music-bot-ui\.pages\.dev$/i.test(origin);
+      if (isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy header cf-connecting-ip của Cloudflare hoặc req.ip trực tiếp)
+  function getClientIp(req) {
+    const cfIp = req.headers['cf-connecting-ip'];
+    if (cfIp && typeof cfIp === 'string') return cfIp.trim();
+    return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
+  }
+
+  // Helper làm sạch chuỗi văn bản Discord để tránh mention lạm dụng (@everyone, <@...>)
+  function sanitizeDiscordText(str, maxLength = 200) {
+    if (typeof str !== 'string') return '';
+    return str
+      .replace(/@(everyone|here)/gi, '$1')
+      .replace(/<@!?(\d+)>/g, '')
+      .replace(/<@&(\d+)>/g, '')
+      .replace(/<#(\d+)>/g, '')
+      .slice(0, maxLength)
+      .trim();
+  }
+
+  // Helper lọc domain ảnh thumbnail an toàn (tránh SSRF và injection)
+  function sanitizeThumbnailUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+      const parsed = new URL(url);
+      const allowedHosts = [
+        'i.ytimg.com',
+        'img.youtube.com',
+        'i.scdn.co',
+        'mosaic.scdn.co',
+        'i1.sndcdn.com',
+        'cdn.discordapp.com',
+        'anna-music-bot-ui.pages.dev'
+      ];
+      if (parsed.protocol === 'https:' && allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+        return url;
+      }
+    } catch (e) {}
+    return null;
+  }
 
   // Search in-memory cache & In-flight request deduplication
   const searchCache = new Map();
@@ -167,82 +236,86 @@ module.exports = function createApiRouter(client) {
     next();
   };
 
-  // Middleware ngăn chặn IDOR: Đảm bảo User chỉ được truy cập vào dữ liệu của máy chủ họ đã xác thực
-  const requireSameGuild = (req, res, next) => {
+  // Middleware ngăn chặn IDOR & Xác thực thành viên máy chủ theo thời gian thực
+  const requireGuildMember = async (req, res, next) => {
     const targetGuildId = req.params.guildId;
     const user = req.user;
     if (!targetGuildId || !user) {
       return res.status(401).json({ success: false, error: 'Chưa xác thực hoặc thiếu ID máy chủ' });
     }
-    // Chủ bot (Super Admin) luôn có toàn quyền kiểm tra mọi máy chủ
+    const guild = client.guilds.cache.get(targetGuildId);
+    if (!guild) {
+      return res.status(404).json({ success: false, error: 'Không tìm thấy máy chủ' });
+    }
+
+    // Chủ bot (Super Admin) luôn có quyền hỗ trợ quản trị
     if (config.adminId && user.userId === config.adminId) {
+      req.guild = guild;
+      req.member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
       return next();
     }
-    // Thành viên chỉ được thao tác trên đúng máy chủ được cấp token
-    if (user.guildId !== targetGuildId) {
+
+    // Chặn IDOR: Thành viên chỉ được thao tác trên đúng máy chủ được cấp token
+    if (String(user.guildId) !== String(targetGuildId)) {
       return res.status(403).json({
         success: false,
         code: 'CROSS_GUILD_FORBIDDEN',
         error: 'Quyền bị từ chối: Phiên đăng nhập của bạn không thuộc máy chủ này!'
       });
     }
+
+    // Kiểm tra thực tế xem User có còn là thành viên của Discord Server hay không
+    const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
+    if (!member) {
+      return res.status(403).json({
+        success: false,
+        code: 'NOT_GUILD_MEMBER',
+        error: 'Quyền bị từ chối: Bạn không còn là thành viên của máy chủ này!'
+      });
+    }
+
+    req.guild = guild;
+    req.member = member;
     next();
   };
+  const requireSameGuild = requireGuildMember;
 
-  // Bản đồ ghi nhận số lần nhập sai mã PIN để chống Brute-force vét cạn
-  const failedLoginMap = new Map();
-  // Định kỳ dọn dẹp các IP đã hết hạn khóa sau mỗi 10 phút
-  setInterval(() => {
-    const now = Date.now();
-    for (const [ip, data] of failedLoginMap.entries()) {
-      if (data.lockedUntil && data.lockedUntil < now) {
-        failedLoginMap.delete(ip);
-      }
-    }
-  }, 10 * 60 * 1000);
-
-  // 1. Xác thực Token & PIN từ Discord (Có cơ chế chống Brute-force 5 lần sai khóa 15 phút)
+  // 1. Xác thực Token & PIN từ Discord (Có cơ chế chống Brute-force 5 lần sai khóa 5 phút & hủy PIN)
   router.post('/auth/verify', authVerifyLimiter, async (req, res) => {
     const { token } = req.body;
     if (!token) {
       return res.status(400).json({ success: false, error: 'Vui lòng cung cấp mã PIN hoặc Token' });
     }
 
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const firstForwardedIp = typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : null;
-    const clientIp = req.headers['x-real-client-ip'] || req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || firstForwardedIp || req.ip || req.socket.remoteAddress || 'unknown-ip';
-    const attemptData = failedLoginMap.get(clientIp);
+    const clientIp = getClientIp(req);
+    const attemptStatus = getPinAttemptStatus(clientIp);
 
     // Kiểm tra xem IP này có đang bị tạm khóa hay không
-    if (attemptData && attemptData.lockedUntil > Date.now()) {
-      const waitMinutes = Math.ceil((attemptData.lockedUntil - Date.now()) / 60000);
+    if (attemptStatus && attemptStatus.locked) {
       return res.status(429).json({
         success: false,
-        error: `Bạn đã nhập sai mã PIN quá 5 lần. IP tạm thời bị khóa trong ${waitMinutes} phút để đảm bảo an toàn.`
+        error: `Bạn đã nhập sai mã PIN quá 5 lần. IP tạm thời bị khóa trong ${attemptStatus.remainingMinutes} phút để đảm bảo an toàn.`
       });
     }
 
     const user = verifyWebToken(token, true);
     if (!user) {
-      const currentFailCount = (attemptData?.count || 0) + 1;
-      if (currentFailCount >= 5) {
-        failedLoginMap.set(clientIp, { count: currentFailCount, lockedUntil: Date.now() + 15 * 60 * 1000 });
+      const failInfo = recordPinFailure(clientIp, token);
+      if (failInfo.locked) {
         return res.status(429).json({
           success: false,
-          error: 'Bạn đã nhập sai mã PIN quá 5 lần liên tiếp. Tài khoản bị tạm khóa 15 phút!'
+          error: 'Bạn đã nhập sai mã PIN quá 5 lần liên tiếp. Tài khoản bị tạm khóa 5 phút!'
         });
       }
 
-      failedLoginMap.set(clientIp, { count: currentFailCount, lockedUntil: 0 });
-      const remainingAttempts = 5 - currentFailCount;
       return res.status(401).json({
         success: false,
-        error: `Mã PIN không chính xác hoặc đã hết hạn. Bạn còn ${remainingAttempts} lần thử.`
+        error: `Mã PIN không chính xác hoặc đã hết hạn. Bạn còn ${failInfo.remainingAttempts} lần thử.`
       });
     }
 
     // Đăng nhập thành công -> Xóa lịch sử nhập sai của IP
-    failedLoginMap.delete(clientIp);
+    clearPinFailures(clientIp);
 
     const guild = client.guilds.cache.get(user.guildId);
     if (!guild) {
@@ -285,11 +358,12 @@ module.exports = function createApiRouter(client) {
 
   // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp, Rate-limited 30 req/phút)
   router.get('/search', searchLimiter, async (req, res) => {
-    const query = req.query.q?.trim();
-    const limit = parseInt(req.query.limit, 10) || 20;
+    let query = (req.query.q || '').slice(0, 150).trim();
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 20, 50));
     const mode = req.query.mode || 'official';
 
-    if (!query || query.length < 2) {
+    // Chặn Argument Injection và kiểm tra độ dài tối thiểu
+    if (!query || query.length < 2 || query.startsWith('-')) {
       return res.json({ success: true, results: [] });
     }
 
@@ -592,8 +666,17 @@ module.exports = function createApiRouter(client) {
       textChannel = guild.channels.cache.find(c => c.isTextBased?.() && c.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) || null;
     }
 
+    // Kiểm tra quyền DJ nếu máy chủ bật chế độ djOnly
+    if (guildSettings.djOnly && !hasMusicPermission(req.member)) {
+      return res.status(403).json({
+        success: false,
+        code: 'DJ_ONLY_REQUIRED',
+        error: 'Máy chủ đang bật chế độ DJ Only. Bạn cần có vai trò DJ để phát nhạc!'
+      });
+    }
+
     // Kiểm tra User có thực sự đang ở trong kênh Voice trên Discord hay không
-    const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
+    const member = req.member || guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
     const userVoice = member?.voice?.channel;
     if (!userVoice) {
       return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi thêm bài hát!' });
@@ -645,18 +728,23 @@ module.exports = function createApiRouter(client) {
       if (Array.isArray(req.body.tracks) && req.body.tracks.length > 0) {
         const queue = client.musicManager.getOrCreate(guild, textChannel, voiceChannel);
         const validTracks = req.body.tracks.slice(0, 100);
+        const memberAvatar = member.displayAvatarURL ? member.displayAvatarURL({ dynamic: true }) : user.avatar;
         const requesterObj = {
-          id: user.userId,
-          displayName: user.displayName || user.username,
-          username: user.username,
-          avatar: user.avatar
+          id: member.id,
+          displayName: member.displayName || user.username,
+          username: member.user?.username || user.username,
+          avatar: memberAvatar
         };
-        const userMention = user.userId ? `<@${user.userId}>` : (user.displayName || user.username);
+        const userMention = `<@${member.id}>`;
         for (const t of validTracks) {
+          t.title = sanitizeDiscordText(t.title, 200) || 'Unknown Track';
+          t.artist = sanitizeDiscordText(t.artist, 100) || 'Unknown Artist';
+          t.thumbnail = sanitizeThumbnailUrl(t.thumbnail);
+          t.is247 = false;
           t.requestedBy = userMention;
-          t.requestedByName = user.displayName || user.username;
-          t.requestedByAvatar = user.avatar;
-          t.requestedById = user.userId;
+          t.requestedByName = member.displayName || user.username;
+          t.requestedByAvatar = memberAvatar;
+          t.requestedById = member.id;
         }
         await queue.addSongs(validTracks, requesterObj);
         return res.json({
@@ -669,7 +757,16 @@ module.exports = function createApiRouter(client) {
       }
 
       let rawResults = null;
-      let requestedUrl = query || track?.url;
+      let requestedUrl = (query || track?.url || '').trim();
+
+      // Kiểm tra URL an toàn chống SSRF
+      if (requestedUrl.startsWith('http://') || requestedUrl.startsWith('https://')) {
+        const safeUrl = validateAndSanitizeMusicUrl(requestedUrl);
+        if (!safeUrl) {
+          return res.status(400).json({ success: false, error: 'Đường dẫn liên kết không được hỗ trợ hoặc không an toàn' });
+        }
+        requestedUrl = safeUrl;
+      }
 
       if (track && track.url && track.title && !track.isPlaylist) {
         rawResults = [track];
@@ -691,29 +788,35 @@ module.exports = function createApiRouter(client) {
 
       // XỬ LÝ NẠP TOÀN BỘ PLAYLIST
       if (isPlaylist) {
-        const userMention = user.userId ? `<@${user.userId}>` : (user.displayName || user.username);
+        rawResults = rawResults.slice(0, 100);
+        const memberAvatar = member.displayAvatarURL ? member.displayAvatarURL({ dynamic: true }) : user.avatar;
+        const userMention = `<@${member.id}>`;
         for (const t of rawResults) {
+          t.title = sanitizeDiscordText(t.title, 200) || 'Unknown Track';
+          t.artist = sanitizeDiscordText(t.artist, 100) || 'Unknown Artist';
+          t.thumbnail = sanitizeThumbnailUrl(t.thumbnail);
+          t.is247 = false;
           t.requestedBy = userMention;
-          t.requestedByName = user.displayName || user.username;
-          t.requestedByAvatar = user.avatar;
-          t.requestedById = user.userId;
+          t.requestedByName = member.displayName || user.username;
+          t.requestedByAvatar = memberAvatar;
+          t.requestedById = member.id;
         }
 
         await queue.addSongs(rawResults, {
-          id: user.userId,
-          displayName: user.displayName || user.username,
-          username: user.username,
-          avatar: user.avatar
+          id: member.id,
+          displayName: member.displayName || user.username,
+          username: member.user?.username || user.username,
+          avatar: memberAvatar
         });
 
         // Lưu vào PlaylistHistoryManager
         playlistHistoryManager.addPlaylist(guildId, {
           url: requestedUrl,
-          title: rawResults[0]?.playlistTitle || `Danh sách phát (${rawResults.length} bài)`,
+          title: sanitizeDiscordText(rawResults[0]?.playlistTitle || `Danh sách phát (${rawResults.length} bài)`, 200),
           trackCount: rawResults.length,
-          thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
-          addedBy: user.displayName || user.username,
-          addedByAvatar: user.avatar || null,
+          thumbnail: sanitizeThumbnailUrl(rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail) || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
+          addedBy: member.displayName || user.username,
+          addedByAvatar: memberAvatar,
           tracks: rawResults
         });
         guildStatsCache.delete(guildId);
@@ -730,8 +833,8 @@ module.exports = function createApiRouter(client) {
             const notifEmbed = new EmbedBuilder()
               .setColor('#5865F2')
               .setAuthor({
-                name: `${user.displayName || user.username} vừa thêm Playlist từ Web 📂`,
-                iconURL: user.avatar || undefined
+                name: `${member.displayName || user.username} vừa thêm Playlist từ Web 📂`,
+                iconURL: memberAvatar || undefined
               })
               .setDescription(`📥 Đã thêm toàn bộ **${rawResults.length} bài hát** từ Playlist vào hàng chờ!`)
               .setThumbnail(rawResults[0]?.thumbnail || null)
@@ -753,17 +856,22 @@ module.exports = function createApiRouter(client) {
 
       // XỬ LÝ 1 BÀI HÁT ĐƠN LẺ
       const targetTrack = rawResults[0];
-      const userMention = user.userId ? `<@${user.userId}>` : (user.displayName || user.username);
+      const memberAvatar = member.displayAvatarURL ? member.displayAvatarURL({ dynamic: true }) : user.avatar;
+      const userMention = `<@${member.id}>`;
+      targetTrack.title = sanitizeDiscordText(targetTrack.title, 200) || 'Unknown Track';
+      targetTrack.artist = sanitizeDiscordText(targetTrack.artist, 100) || 'Unknown Artist';
+      targetTrack.thumbnail = sanitizeThumbnailUrl(targetTrack.thumbnail);
+      targetTrack.is247 = false;
       targetTrack.requestedBy = userMention;
-      targetTrack.requestedByName = user.displayName || user.username;
-      targetTrack.requestedByAvatar = user.avatar;
-      targetTrack.requestedById = user.userId;
+      targetTrack.requestedByName = member.displayName || user.username;
+      targetTrack.requestedByAvatar = memberAvatar;
+      targetTrack.requestedById = member.id;
 
       await queue.addSong(targetTrack, {
-        id: user.userId,
-        displayName: user.displayName || user.username,
-        username: user.username,
-        avatar: user.avatar
+        id: member.id,
+        displayName: member.displayName || user.username,
+        username: member.user?.username || user.username,
+        avatar: memberAvatar
       });
 
       // Gửi thông báo vào kênh nhạc đã cấu hình
@@ -817,9 +925,17 @@ module.exports = function createApiRouter(client) {
   let isExtractingPlaylist = false;
   router.get('/guilds/:guildId/playlist-info', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
-    const url = req.query.url?.trim();
-    if (!url) {
-      return res.status(400).json({ success: false, error: 'Thiếu đường dẫn playlist' });
+    let url = req.query.url?.trim();
+    if (!url || url.startsWith('-')) {
+      return res.status(400).json({ success: false, error: 'Thiếu đường dẫn playlist hoặc đường dẫn không hợp lệ' });
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const safeUrl = validateAndSanitizeMusicUrl(url);
+      if (!safeUrl) {
+        return res.status(400).json({ success: false, error: 'Đường dẫn danh sách phát không an toàn hoặc không được hỗ trợ' });
+      }
+      url = safeUrl;
     }
 
     // 1. Kiểm tra cache trong PlaylistHistoryManager
@@ -838,16 +954,17 @@ module.exports = function createApiRouter(client) {
 
     isExtractingPlaylist = true;
     try {
-      const rawResults = await searchTrack(url);
+      let rawResults = await searchTrack(url);
       if (!rawResults || rawResults.length === 0) {
         return res.status(404).json({ success: false, error: 'Không tìm thấy bài hát trong danh sách phát này' });
       }
 
+      rawResults = rawResults.slice(0, 100);
       const playlistData = {
         url,
-        title: rawResults[0]?.playlistTitle || (rawResults.length > 1 ? `Danh sách phát (${rawResults.length} bài)` : (rawResults[0]?.title || 'Playlist')),
+        title: sanitizeDiscordText(rawResults[0]?.playlistTitle || (rawResults.length > 1 ? `Danh sách phát (${rawResults.length} bài)` : (rawResults[0]?.title || 'Playlist')), 200),
         trackCount: rawResults.length,
-        thumbnail: rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
+        thumbnail: sanitizeThumbnailUrl(rawResults[0]?.playlistThumbnail || rawResults[0]?.thumbnail) || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
         addedBy: req.user?.displayName || req.user?.username || 'Web User',
         addedByAvatar: req.user?.avatar || null,
         tracks: rawResults
@@ -875,9 +992,11 @@ module.exports = function createApiRouter(client) {
     const user = req.user;
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
-    if (!queue && action !== 'toggle247' && action !== 'toggleAutoplay' && action !== 'switchTo247' && action !== 'resetTo247' && action !== 'toggleLofiMode') {
+    if (!queue && action !== 'toggle247' && action !== 'toggleAutoplay' && action !== 'switchTo247' && action !== 'resetTo247' && action !== 'toggleLofiMode' && action !== 'playFavorites') {
       return res.status(400).json({ success: false, error: 'Hiện không có bài hát nào đang phát trong máy chủ này' });
     }
+
+    const guildSettings = settingsManager.get(guildId);
 
     // 🔒 KIỂM TRA PHÂN QUYỀN ADMIN CHO CÁC THAO TÁC CÀI ĐẶT SERVER (24/7, Autoplay, LogChannel, Settings)
     const serverSettingActions = ['toggle247', 'set247', 'toggleAutoplay', 'setAutoplay', 'setLogChannel', 'settings', 'updateSettings'];
@@ -891,11 +1010,19 @@ module.exports = function createApiRouter(client) {
         });
       }
     } else if (action !== 'toggleFavorite') {
-      const guild = client.guilds.cache.get(guildId);
-      const member = guild?.members?.cache.get(user.userId) || await guild?.members?.fetch(user.userId).catch(() => null);
-      const userVoice = member?.voice?.channel;
+      // Kiểm tra quyền DJ nếu server đang bật chế độ DJ Only
+      const musicControlActions = ['skip', 'previous', 'pause', 'resume', 'stop', 'seek', 'shuffle', 'loop', 'volume', 'clear', 'remove', 'removeBatch', 'move', 'playNow', 'playFavorites'];
+      if (guildSettings.djOnly && musicControlActions.includes(action) && !hasMusicPermission(req.member)) {
+        return res.status(403).json({
+          success: false,
+          code: 'DJ_ONLY_REQUIRED',
+          error: 'Máy chủ đang bật chế độ DJ Only. Bạn cần có vai trò DJ để điều khiển âm nhạc!'
+        });
+      }
+
+      const userVoice = req.member?.voice?.channel;
       const isAdmin = await checkIsAdmin(guildId, user.userId);
-      const botVoice = queue?.voiceChannel || guild?.members?.me?.voice?.channel;
+      const botVoice = queue?.voiceChannel || req.guild?.members?.me?.voice?.channel;
 
       if (!userVoice && !isAdmin) {
         return res.status(400).json({
@@ -1007,6 +1134,56 @@ module.exports = function createApiRouter(client) {
           } else {
             resultMessage = 'Không có bài hát để yêu thích';
           }
+          break;
+        }
+        case 'playFavorites': {
+          const userVoice = req.member?.voice?.channel;
+          if (!userVoice) {
+            return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi phát bài hát!' });
+          }
+          const favorites = await favoriteManager.getFavorites(user.userId);
+          if (!favorites || favorites.length === 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'Bạn chưa có bài hát nào trong danh sách Yêu thích ❤️'
+            });
+          }
+          const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
+          let textChannel = queue?.textChannel;
+          if (!textChannel) {
+            if (guildSettings.musicChannelId) {
+              const ch = req.guild.channels.cache.get(guildSettings.musicChannelId);
+              if (ch?.isTextBased?.() && ch.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) {
+                textChannel = ch;
+              }
+            }
+            if (!textChannel) {
+              textChannel = req.guild.channels.cache.find(c => c.isTextBased?.() && c.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) || null;
+            }
+          }
+          const voiceChannel = queue?.voiceChannel || userVoice;
+          const targetQueue = client.musicManager.getOrCreate(req.guild, textChannel, voiceChannel);
+          const memberAvatar = req.member.displayAvatarURL ? req.member.displayAvatarURL({ dynamic: true }) : user.avatar;
+          const validTracks = favorites.slice(0, 100).map(fav => ({
+            title: sanitizeDiscordText(fav.title, 200) || 'Unknown Track',
+            artist: sanitizeDiscordText(fav.artist, 100) || 'Unknown Artist',
+            url: fav.url,
+            thumbnail: sanitizeThumbnailUrl(fav.thumbnail),
+            duration: fav.duration || '3:30',
+            is247: false,
+            requestedBy: `<@${req.member.id}>`,
+            requestedByName: req.member.displayName || user.username,
+            requestedByAvatar: memberAvatar,
+            requestedById: req.member.id
+          }));
+          const requesterObj = {
+            id: req.member.id,
+            displayName: req.member.displayName || user.username,
+            username: req.member.user?.username || user.username,
+            avatar: memberAvatar
+          };
+          await targetQueue.addSongs(validTracks, requesterObj);
+          resultMessage = `Đã nạp toàn bộ ${validTracks.length} bài hát yêu thích vào hàng chờ ❤️`;
           break;
         }
         case 'clear':
@@ -1228,7 +1405,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 6. Lấy Lời bài hát (Karaoke Lyrics)
-  router.get('/guilds/:guildId/lyrics', async (req, res) => {
+  router.get('/guilds/:guildId/lyrics', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
     const currentTrack = queue?.currentSong || queue?.currentTrack;

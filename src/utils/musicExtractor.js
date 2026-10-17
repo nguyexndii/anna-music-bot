@@ -367,62 +367,77 @@ async function enrichSpotifyTracksWithThumbnails(tracks, defaultCover) {
   return tracks;
 }
 
+const ALLOWED_MUSIC_HOSTNAMES = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'music.youtube.com',
+  'youtu.be',
+  'open.spotify.com',
+  'spotify.com',
+  'soundcloud.com',
+  'm.soundcloud.com',
+  'on.soundcloud.com'
+]);
+
+/**
+ * Kiểm tra và chuẩn hóa URL âm nhạc: Chống Argument Injection, Whitelist Hostname HTTPS và Chặn SSRF
+ * @param {string} rawUrl
+ * @returns {string|null} URL hợp lệ hoặc null
+ */
+function validateAndSanitizeMusicUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  // 1. Chống Argument Injection vào yt-dlp / ffmpeg CLI
+  if (trimmed.startsWith('-')) return null;
+
+  // 2. Nếu là URL có protocol
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      const parsed = new URL(trimmed);
+      // Bắt buộc giao thức HTTPS bảo mật
+      if (parsed.protocol !== 'https:') return null;
+
+      const hostname = parsed.hostname.toLowerCase().trim();
+
+      // Chặn các IP nội bộ / private / loopback
+      if (
+        hostname === 'localhost' ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        hostname === '::1' ||
+        hostname === '[::1]' ||
+        hostname === '0.0.0.0' ||
+        hostname === '0' ||
+        /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^169\.254\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+      ) {
+        return null;
+      }
+
+      // Whitelist domain âm nhạc tin cậy
+      const isAllowed = ALLOWED_MUSIC_HOSTNAMES.has(hostname) ||
+        Array.from(ALLOWED_MUSIC_HOSTNAMES).some(h => hostname.endsWith('.' + h));
+      if (!isAllowed) return null;
+
+      return trimmed;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Kiểm tra xem một URL có an toàn để trích xuất âm thanh không (Ngăn chặn tấn công SSRF)
  * Chặn: localhost, private IPv4/IPv6, link-local, cloud metadata service (169.254.169.254)
  */
 function isSafeExternalUrl(urlStr) {
-  if (!urlStr || typeof urlStr !== 'string') return false;
-  try {
-    const parsed = new URL(urlStr);
-    const protocol = parsed.protocol.toLowerCase();
-    if (protocol !== 'http:' && protocol !== 'https:') {
-      return false;
-    }
-    const hostname = parsed.hostname.toLowerCase().trim();
-
-    // Chặn localhost, local domain
-    if (hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
-      return false;
-    }
-
-    // Chặn IPv6 loopback & link-local
-    if (hostname === '::1' || hostname === '[::1]' || hostname.startsWith('fe80:')) {
-      return false;
-    }
-
-    // Chặn IPv4 loopback (127.0.0.0/8)
-    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      return false;
-    }
-
-    // Chặn Cloud Metadata IP (169.254.169.254) & Link-local (169.254.0.0/16)
-    if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      return false;
-    }
-
-    // Chặn Private Network IPv4:
-    // 10.0.0.0/8
-    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      return false;
-    }
-    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
-    if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      return false;
-    }
-    // 192.168.0.0/16
-    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      return false;
-    }
-    // 0.0.0.0
-    if (hostname === '0.0.0.0' || hostname === '0') {
-      return false;
-    }
-
-    return true;
-  } catch (e) {
-    return false;
-  }
+  return Boolean(validateAndSanitizeMusicUrl(urlStr));
 }
 
 /**
@@ -434,13 +449,20 @@ async function searchTrack(query, targetDurationSec = 0) {
     if (!query || typeof query !== 'string') return null;
 
     let cleanQuery = query.trim();
+    // Chống Argument Injection: chặn chuỗi bắt đầu bằng dấu trừ
+    if (cleanQuery.startsWith('-')) return null;
+
+    // Giới hạn độ dài từ khóa tìm kiếm tối đa 150 ký tự
+    cleanQuery = cleanQuery.slice(0, 150).trim();
 
     // Kiểm tra an toàn bảo mật SSRF cho đường dẫn URL ngoại vi
     if (cleanQuery.startsWith('http://') || cleanQuery.startsWith('https://')) {
-      if (!isSafeExternalUrl(cleanQuery)) {
-        console.warn(`[Security Alert: SSRF Blocked] URL không an toàn bị từ chối: ${cleanQuery}`);
+      const sanitizedUrl = validateAndSanitizeMusicUrl(cleanQuery);
+      if (!sanitizedUrl) {
+        console.warn(`[Security Alert: SSRF / Invalid Hostname Blocked] URL không an toàn bị từ chối: ${cleanQuery}`);
         return null;
       }
+      cleanQuery = sanitizedUrl;
     }
 
     // Tự động chuẩn hóa link Spotify nếu thiếu protocol
@@ -1800,6 +1822,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
 }
 
 module.exports = {
+  validateAndSanitizeMusicUrl,
   searchTrack,
   searchMultipleTracks,
   getYoutubeMix,

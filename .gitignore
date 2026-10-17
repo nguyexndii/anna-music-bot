@@ -18,3 +18,5 @@ __pycache__/
 *.pyc
 lyrics-service/venv/
 *-watch.html
+vps_credentials.json
+vps_*.json

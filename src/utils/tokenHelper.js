@@ -156,8 +156,61 @@ function verifyWebToken(tokenOrPin, consume = false) {
   return null;
 }
 
+// Quản lý số lần nhập sai PIN để chống Brute-force vét cạn 6 chữ số
+const failedPinAttempts = new Map();
+
+// Tự động dọn dẹp các IP đã hết hạn khóa sau mỗi 5 phút
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of failedPinAttempts.entries()) {
+    if (data.lockedUntil && data.lockedUntil < now) {
+      failedPinAttempts.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+
+function getPinAttemptStatus(ip) {
+  const cleanIp = String(ip || 'unknown').trim();
+  const data = failedPinAttempts.get(cleanIp);
+  const now = Date.now();
+  if (data && data.lockedUntil > now) {
+    const remainingMinutes = Math.ceil((data.lockedUntil - now) / 60000);
+    return { locked: true, remainingMinutes };
+  }
+  return { locked: false, count: data?.count || 0 };
+}
+
+function recordPinFailure(ip, inputPin) {
+  const cleanIp = String(ip || 'unknown').trim();
+  const cleanPin = String(inputPin || '').trim();
+  const now = Date.now();
+  const current = failedPinAttempts.get(cleanIp);
+  const currentCount = (current && current.lockedUntil <= now ? 0 : (current?.count || 0)) + 1;
+
+  if (currentCount >= 5) {
+    // Khóa IP trong 5 phút
+    failedPinAttempts.set(cleanIp, { count: currentCount, lockedUntil: now + 5 * 60 * 1000 });
+    // Nếu mã PIN này có trong store, tiêu hủy luôn để chống tiếp tục vét cạn
+    if (cleanPin && tokenStore.has(cleanPin)) {
+      tokenStore.delete(cleanPin);
+    }
+    return { locked: true, remainingMinutes: 5, remainingAttempts: 0 };
+  }
+
+  failedPinAttempts.set(cleanIp, { count: currentCount, lockedUntil: 0 });
+  return { locked: false, remainingAttempts: 5 - currentCount };
+}
+
+function clearPinFailures(ip) {
+  const cleanIp = String(ip || 'unknown').trim();
+  failedPinAttempts.delete(cleanIp);
+}
+
 module.exports = {
   generateWebToken,
   createSessionToken,
-  verifyWebToken
+  verifyWebToken,
+  getPinAttemptStatus,
+  recordPinFailure,
+  clearPinFailures
 };
