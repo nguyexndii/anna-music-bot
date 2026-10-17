@@ -73,17 +73,34 @@ async function callGemini(prompt, temperature = 0.3) {
 /**
  * DJ AI gợi ý bài hát tiếp theo cho Autoplay (Khóa chuẩn ngôn ngữ, phong cách và vibe)
  */
-async function getGeminiRecommendation(lastSongTitle, history = []) {
+async function getGeminiRecommendation(lastSong, history = [], targetRegion = null) {
+  const songTitle = typeof lastSong === 'object' ? (lastSong.title || '') : String(lastSong || '');
+  const songArtist = typeof lastSong === 'object' ? (lastSong.artist || '') : '';
   const historyTitles = Array.isArray(history) ? history.map(h => typeof h === 'object' ? h.title : h).filter(Boolean).slice(0, 20) : [];
-  const prompt = `Bạn là một DJ AI và chuyên gia thẩm âm hàng đầu. Người nghe vừa nghe xong bài hát: "${lastSongTitle}".
+
+  let regionInstruction = '';
+  if (targetRegion === 'VI') {
+    regionInstruction = `\n- BẮT BUỘC 100% BÀI TIẾP THEO LÀ NHẠC VIỆT NAM (V-Pop, V-Indie, V-Rap, Ballad Việt, Vinahouse...) do NGHỆ SĨ VIỆT NAM thể hiện (Vũ, Madihu, Grey D, Chillies, HIEUTHUHAI, MCK, Hoàng Dũng...). TUYỆT ĐỐI CẤM nhạc ngoại!`;
+  } else if (targetRegion === 'KR') {
+    regionInstruction = `\n- BẮT BUỘC 100% BÀI TIẾP THEO LÀ K-POP TIẾNG HÀN (NewJeans, BTS, BLACKPINK, IVE, aespa, IU, Taeyeon, TXT...). TUYỆT ĐỐI CẤM nhảy sang nhạc Việt hay nhạc khác!`;
+  } else if (targetRegion === 'JP') {
+    regionInstruction = `\n- BẮT BUỘC 100% BÀI TIẾP THEO LÀ J-POP TIẾNG NHẬT (Yoasobi, Ado, Kenshi Yonezu, Eve, Fujii Kaze...). TUYỆT ĐỐI CẤM nhảy sang nhạc Việt!`;
+  } else if (targetRegion === 'CN') {
+    regionInstruction = `\n- BẮT BUỘC 100% BÀI TIẾP THEO LÀ C-POP / NHẠC HOA TIẾNG TRUNG (Jay Chou, JJ Lin, G.E.M., Tiết Chi Khiêm...). TUYỆT ĐỐI CẤM nhảy sang nhạc Việt!`;
+  } else if (targetRegion === 'INTL') {
+    regionInstruction = `\n- BẮT BUỘC 100% BÀI TIẾP THEO LÀ NHẠC QUỐC TẾ / US-UK TIẾNG ANH (Taylor Swift, The Weeknd, Bruno Mars, Ed Sheeran, Ariana Grande, Billie Eilish, Post Malone, Dua Lipa, Charlie Puth...). TUYỆT ĐỐI CẤM GỢI Ý NHẠC VIỆT NAM, CA SĨ VIỆT NAM HOẶC BÀI CÓ LỜI TIẾNG VIỆT! Mọi gợi ý bài Việt Nam ở đây đều là SAI NGHIÊM TRỌNG!`;
+  }
+
+  const prompt = `Bạn là một DJ AI và chuyên gia thẩm âm hàng đầu thế giới. Người nghe vừa nghe xong bài hát: "${songTitle}"${songArtist ? ` của nghệ sĩ: "${songArtist}"` : ''}.
+VÙNG QUỐC GIA/NGÔN NGỮ ĐÃ XÁC ĐỊNH CHO PHIÊN NÀY: ${targetRegion || 'Tự động theo bài'}.
 DANH SÁCH 20 BÀI HÁT VỪA PHÁT GẦN ĐÂY: ${JSON.stringify(historyTitles)}.
 Hãy phân tích và gợi ý 1 BÀI HÁT TIẾP THEO HOÀN HẢO NHẤT theo các nguyên tắc sống còn sau:
 
-1. KHÓA CHẶT 100% NGÔN NGỮ & QUỐC GIA (STRICT CULTURE/LANGUAGE LOCK - TUYỆT ĐỐI KHÔNG ĐƯỢC SAI LỆCH):
-- NẾU BÀI VỪA NGHE LÀ NHẠC VIỆT (V-Pop, V-Indie, V-Rap, V-R&B, Ballad Việt, Vinahouse, Remix Việt...): BẮT BUỘC 100% bài tiếp theo PHẢI LÀ BÀI HÁT TIẾNG VIỆT do NGHỆ SĨ VIỆT NAM thể hiện (ví dụ: Vũ, Madihu, Grey D, Wren Evans, Chillies, Hoàng Dũng, MCK, HIEUTHUHAI, Suni Hạ Linh, Da LAB, MONO, Soobin...). TUYỆT ĐỐI CẤM nhảy sang K-Pop (BLACKPINK, BTS, NewJeans, ILLIT...), US-UK hay C-Pop!
-- NẾU BÀI VỪA NGHE LÀ K-POP (Tiếng Hàn): BẮT BUỘC 100% bài tiếp theo là K-POP tiếng Hàn cùng vibe.
-- NẾU BÀI VỪA NGHE LÀ US-UK (Tiếng Anh): BẮT BUỘC 100% bài tiếp theo là US-UK tiếng Anh cùng vibe.
-- NẾU BÀI VỪA NGHE LÀ NHẠC HOA / C-POP: BẮT BUỘC 100% bài tiếp theo là C-Pop tiếng Trung cùng vibe.
+1. KHÓA CHẶT 100% NGÔN NGỮ & QUỐC GIA (STRICT REGION/CULTURE LOCK - TUYỆT ĐỐI KHÔNG ĐƯỢC SAI LỆCH):${regionInstruction || `
+- Nếu bài vừa nghe là NHẠC VIỆT: 100% bài tiếp theo PHẢI LÀ NHẠC VIỆT NAM do nghệ sĩ Việt Nam thể hiện. Tuyệt đối cấm nhạc ngoại!
+- Nếu bài vừa nghe là NHẠC QUỐC TẾ / US-UK (Tiếng Anh): 100% bài tiếp theo PHẢI LÀ NHẠC US-UK TIẾNG ANH. Tuyệt đối cấm nhạc Việt Nam!
+- Nếu bài vừa nghe là K-POP: 100% bài tiếp theo là K-POP tiếng Hàn.
+- Nếu bài vừa nghe là C-POP: 100% bài tiếp theo là C-POP tiếng Trung.`}
 
 2. ĐỒNG BỘ PHONG CÁCH, TEMPO & VIBE (THÔNG MINH THEO THỂ LOẠI):
 - NẾU BÀI VỪA NGHE LÀ REMIX / VINAHOUSE / DANCE / EDM / NONSTOP / NHẠC QUẨY: BẮT BUỘC bài tiếp theo PHẢI LÀ BẢN REMIX / VINAHOUSE / QUẨY cực sung cùng năng lượng tương tự!

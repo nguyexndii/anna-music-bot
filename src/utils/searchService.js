@@ -74,13 +74,29 @@ function initWorker() {
     worker = new Worker(workerScript);
 
     worker.on('message', (msg) => {
-      const { id, results, error } = msg;
+      const { id, results, alternateResults, alternateMode, query: workerQuery, limit: workerLimit, locale: workerLocale, error } = msg;
       const callback = pendingCallbacks.get(id);
       if (callback) {
         pendingCallbacks.delete(id);
         if (error) {
           callback.resolve([]);
         } else {
+          // Lưu song song cả 2 chế độ vào bộ nhớ đệm RAM để đổi mode tức thì 0ms
+          if (workerQuery) {
+            const cleanQ = workerQuery.toLowerCase().trim();
+            const curMode = callback.mode || 'official';
+            const lim = workerLimit || 20;
+            const loc = workerLocale || 'vi';
+
+            if (Array.isArray(results) && results.length > 0) {
+              setCachedResults(`${cleanQ}|${curMode}|${lim}`, results);
+              setCachedResults(`${cleanQ}|${curMode}|${lim}|${loc}`, results);
+            }
+            if (Array.isArray(alternateResults) && alternateResults.length > 0 && alternateMode) {
+              setCachedResults(`${cleanQ}|${alternateMode}|${lim}`, alternateResults);
+              setCachedResults(`${cleanQ}|${alternateMode}|${lim}|${loc}`, alternateResults);
+            }
+          }
           callback.resolve(results || []);
         }
       }
@@ -115,7 +131,7 @@ initWorker();
 /**
  * Gửi yêu cầu tìm kiếm sang Worker Thread
  */
-function sendToWorker(query, limit, mode) {
+function sendToWorker(query, limit, mode, locale = 'vi') {
   return new Promise((resolve) => {
     if (!worker) {
       initWorker();
@@ -133,6 +149,7 @@ function sendToWorker(query, limit, mode) {
     }, 6500);
 
     pendingCallbacks.set(taskId, {
+      mode,
       resolve: (results) => {
         clearTimeout(timeout);
         resolve(results);
@@ -140,7 +157,7 @@ function sendToWorker(query, limit, mode) {
     });
 
     try {
-      worker.postMessage({ id: taskId, query, limit, mode });
+      worker.postMessage({ id: taskId, query, limit, mode, locale });
     } catch (e) {
       clearTimeout(timeout);
       pendingCallbacks.delete(taskId);
@@ -152,23 +169,24 @@ function sendToWorker(query, limit, mode) {
 /**
  * Hàm điều phối Tìm kiếm chính: Kiểm tra Cache -> Gộp Request -> Hàng đợi Concurrency -> Worker Thread
  */
-async function executeSearch(query, limit = 20, mode = 'official') {
+async function executeSearch(query, limit = 20, mode = 'official', locale = 'vi') {
   if (!query || typeof query !== 'string') return [];
   const cleanQuery = query.trim().slice(0, 150);
   if (cleanQuery.length < 2 || cleanQuery.startsWith('-')) return [];
 
-  const cacheKey = `${cleanQuery.toLowerCase()}|${mode}|${limit}`;
+  const cacheKeyWithLocale = `${cleanQuery.toLowerCase()}|${mode}|${limit}|${locale}`;
+  const cacheKeyGeneric = `${cleanQuery.toLowerCase()}|${mode}|${limit}`;
 
   // 1. Kiểm tra RAM Cache (0ms)
-  const cached = getCachedResults(cacheKey);
+  const cached = getCachedResults(cacheKeyWithLocale) || getCachedResults(cacheKeyGeneric);
   if (cached) {
     return cached;
   }
 
   // 2. Request Coalescing (dùng chung Promise nếu đang có truy vấn giống hệt chạy)
-  if (inFlightSearches.has(cacheKey)) {
+  if (inFlightSearches.has(cacheKeyWithLocale)) {
     try {
-      return await inFlightSearches.get(cacheKey);
+      return await inFlightSearches.get(cacheKeyWithLocale);
     } catch (e) {
       return [];
     }
@@ -177,17 +195,18 @@ async function executeSearch(query, limit = 20, mode = 'official') {
   // 3. Thực thi qua Concurrency Limiter & Worker Thread
   const searchPromise = (async () => {
     try {
-      const results = await enqueueSearch(() => sendToWorker(cleanQuery, limit, mode));
+      const results = await enqueueSearch(() => sendToWorker(cleanQuery, limit, mode, locale));
       if (Array.isArray(results) && results.length > 0) {
-        setCachedResults(cacheKey, results);
+        setCachedResults(cacheKeyWithLocale, results);
+        setCachedResults(cacheKeyGeneric, results);
       }
       return results || [];
     } finally {
-      inFlightSearches.delete(cacheKey);
+      inFlightSearches.delete(cacheKeyWithLocale);
     }
   })();
 
-  inFlightSearches.set(cacheKey, searchPromise);
+  inFlightSearches.set(cacheKeyWithLocale, searchPromise);
 
   try {
     return await searchPromise;

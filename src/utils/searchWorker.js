@@ -154,17 +154,41 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
   return scored;
 }
 
+// ─── BỘ NHỚ ĐỆM RAW TRACKS (Chống spam API, giữ raw results để đổi mode tức thì 0ms) ───
+const rawTrackCache = new Map();
+const RAW_CACHE_MAX = 200;
+const RAW_CACHE_TTL_MS = 15 * 60 * 1000;
+
+function getCachedRawTracks(cacheKey) {
+  const cached = rawTrackCache.get(cacheKey);
+  if (!cached) return null;
+  if (Date.now() - cached.time > RAW_CACHE_TTL_MS) {
+    rawTrackCache.delete(cacheKey);
+    return null;
+  }
+  return cached.tracks;
+}
+
+function setCachedRawTracks(cacheKey, tracks) {
+  if (rawTrackCache.size >= RAW_CACHE_MAX) {
+    const firstKey = rawTrackCache.keys().next().value;
+    if (firstKey) rawTrackCache.delete(firstKey);
+  }
+  rawTrackCache.set(cacheKey, { time: Date.now(), tracks });
+}
+
 /**
  * Tầng 1: Tìm kiếm trực tiếp qua YouTube InnerTube Search API (Nhanh, nhẹ < 1MB RAM, không parse HTML)
  */
-async function searchWithInnerTube(query) {
+async function searchWithInnerTube(query, locale = 'vi') {
+  const isEn = locale === 'en';
   const payload = {
     context: {
       client: {
         clientName: 'WEB',
         clientVersion: '2.20240726.00.00',
-        hl: 'vi',
-        gl: 'VN'
+        hl: isEn ? 'en' : 'vi',
+        gl: isEn ? 'US' : 'VN'
       }
     },
     query: query,
@@ -251,30 +275,51 @@ async function searchWithYtSearch(query) {
  */
 if (parentPort) {
   parentPort.on('message', async (task) => {
-    const { id, query, limit = 20, mode = 'official' } = task;
+    const { id, query, limit = 20, mode = 'official', locale = 'vi' } = task;
     try {
-      let rawTracks = [];
-      try {
-        rawTracks = await searchWithInnerTube(query);
-      } catch (innerTubeErr) {
-        // Fallback sang yt-search
+      const rawCacheKey = `${(query || '').toLowerCase().trim()}|${locale}`;
+      let rawTracks = getCachedRawTracks(rawCacheKey);
+
+      if (!rawTracks || rawTracks.length === 0) {
         try {
-          rawTracks = await searchWithYtSearch(query);
-        } catch (ytsErr) {}
+          rawTracks = await searchWithInnerTube(query, locale);
+        } catch (innerTubeErr) {
+          // Fallback sang yt-search
+          try {
+            rawTracks = await searchWithYtSearch(query);
+          } catch (ytsErr) {}
+        }
+
+        if (Array.isArray(rawTracks) && rawTracks.length > 0) {
+          setCachedRawTracks(rawCacheKey, rawTracks);
+        }
       }
 
       if (!rawTracks || rawTracks.length === 0) {
-        parentPort.postMessage({ id, results: [] });
+        parentPort.postMessage({ id, results: [], alternateResults: [], alternateMode: mode === 'official' ? 'all' : 'official' });
         return;
       }
 
-      // Xếp hạng và chấm điểm thông minh
-      const ranked = rankAndFilterTracks(rawTracks, query, mode);
-      const results = ranked.slice(0, Math.min(limit, 30));
+      // Tính sẵn kết quả cho cả 2 chế độ official và all từ rawTracks
+      const rankedOfficial = rankAndFilterTracks(rawTracks, query, 'official').slice(0, Math.min(limit, 30));
+      const rankedAll = rankAndFilterTracks(rawTracks, query, 'all').slice(0, Math.min(limit, 30));
 
-      parentPort.postMessage({ id, results });
+      const isOfficial = mode === 'official';
+      const results = isOfficial ? rankedOfficial : rankedAll;
+      const alternateResults = isOfficial ? rankedAll : rankedOfficial;
+      const alternateMode = isOfficial ? 'all' : 'official';
+
+      parentPort.postMessage({
+        id,
+        results,
+        alternateResults,
+        alternateMode,
+        query,
+        limit,
+        locale
+      });
     } catch (err) {
-      parentPort.postMessage({ id, results: [], error: err.message });
+      parentPort.postMessage({ id, results: [], alternateResults: [], error: err.message });
     }
   });
 }

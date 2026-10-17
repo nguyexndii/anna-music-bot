@@ -6,7 +6,13 @@ const {
   AudioPlayerStatus,
   entersState
 } = require('@discordjs/voice');
-const { createResource, getRelatedTrack, searchTrack } = require('../utils/musicExtractor');
+const {
+  createResource,
+  getRelatedTrack,
+  searchTrack,
+  analyzeTrackOriginAndMeta,
+  isCandidateMatchingRegion
+} = require('../utils/musicExtractor');
 const { getGemini247LofiTrack } = require('../utils/geminiHelper');
 const {
   createNowPlayingBanner,
@@ -486,30 +492,52 @@ class MusicQueue {
       // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay (DJ AI) gợi ý bài tương tự!
       if (guildSettings.autoplay !== false && songToRelate && !isLofiTrack) {
         const useAi = guildSettings.useAiAssistant !== false;
+        const seedMeta = analyzeTrackOriginAndMeta(songToRelate);
+        const targetRegion = seedMeta.region;
+
         let relatedTrack = null;
         try {
-          relatedTrack = await getRelatedTrack(songToRelate, this.guild.id, useAi);
+          relatedTrack = await getRelatedTrack(songToRelate, this.guild.id, useAi, targetRegion);
         } catch (getRelErr) {
           console.warn('[getRelatedTrack Error]:', getRelErr.message);
         }
 
-        // Fallback tự động nếu không tìm được: Tìm bài hát hay nhất cùng ca sĩ hoặc cùng thể loại
+        // Fallback tự động nếu không tìm được: Tìm bài cùng thể loại / cùng vùng theo seedMeta
         if (!relatedTrack && songToRelate) {
           try {
-            const cleanTitle = (songToRelate.title || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').trim();
-            const artist = (songToRelate.artist && songToRelate.artist !== 'Unknown') ? songToRelate.artist : cleanTitle.split(/[-–|]/)[0]?.trim();
-            const query = (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất') && !artist.includes('King Of Rap'))
-              ? `${artist} bài hát hay nhất tuyển chọn`
-              : `nhac tre remix hot tiktok official audio`;
-            console.log(`[Autoplay Fallback Query] Thử tìm bài thay thế: "${query}"`);
-            const fallbackResults = await searchTrack(query);
+            let fallbackQuery = '';
+            const artist = seedMeta.realArtist;
+            const songName = seedMeta.realTitle;
+
+            if (targetRegion === 'INTL') {
+              fallbackQuery = (artist && artist !== 'YouTube')
+                ? `${artist} greatest hits official audio`
+                : `${songName} official audio`;
+            } else if (targetRegion === 'KR') {
+              fallbackQuery = (artist && artist !== 'YouTube')
+                ? `${artist} official audio MV`
+                : `${songName} kpop official`;
+            } else if (targetRegion === 'JP') {
+              fallbackQuery = (artist && artist !== 'YouTube')
+                ? `${artist} official audio`
+                : `${songName} official audio`;
+            } else {
+              // Nhạc Việt:
+              fallbackQuery = (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất'))
+                ? `${artist} bài hát hay nhất tuyển chọn`
+                : `nhac tre hot vpop official audio`;
+            }
+
+            console.log(`[Autoplay Fallback Query (${targetRegion})] Thử tìm bài thay thế: "${fallbackQuery}"`);
+            const fallbackResults = await searchTrack(fallbackQuery);
             if (fallbackResults && fallbackResults.length > 0) {
               relatedTrack = fallbackResults.find(t => 
                 t && t.url &&
                 t.url !== songToRelate.url && 
                 t.url !== this.lastPlayErrorUrl && 
                 t.title !== this.lastPlayErrorTitle &&
-                !historyManager.isRecentlyPlayed(this.guild.id, t, 25)
+                !historyManager.isRecentlyPlayed(this.guild.id, t, 25) &&
+                isCandidateMatchingRegion(t, targetRegion, seedMeta)
               ) || null;
             }
           } catch (fbErr) {
@@ -1530,11 +1558,13 @@ class MusicQueue {
       this._isPrefetching = true;
       try {
         const useAi = guildSettings.useAiAssistant !== false;
-        const nextTrack = await getRelatedTrack(this.currentSong, this.guild.id, useAi);
+        const seedMeta = analyzeTrackOriginAndMeta(this.currentSong);
+        const targetRegion = seedMeta.region;
+        const nextTrack = await getRelatedTrack(this.currentSong, this.guild.id, useAi, targetRegion);
         if (nextTrack) {
           nextTrack.requestedBy = 'Tự động phát 🎵';
           this.prefetchedSong = nextTrack;
-          console.log(`[Autoplay Metadata Pre-fetch] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'})`);
+          console.log(`[Autoplay Metadata Pre-fetch (${targetRegion})] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'})`);
         }
       } catch (err) {
         console.warn('[Autoplay Pre-fetch Error]:', err.message);
