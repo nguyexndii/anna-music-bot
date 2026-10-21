@@ -1,0 +1,44 @@
+# Dependencies & Environments
+node_modules/
+lyrics-service/venv/
+__pycache__/
+*.pyc
+
+# Environment & Credentials
+.env
+.env.*
+!.env.example
+vps_credentials.json
+vps_*.json
+*.cookies
+youtube.cookies
+cookies.txt
+
+# Operational & Maintenance Functional Scripts (Các script chức năng vận hành)
+scripts/
+scratch/
+*.scratch.*
+
+# Runtime Data & Storage
+data/
+*.tmp
+
+# Logs, Dumps & Archives
+*.log
+logs/
+*.zip
+*.tar.gz
+/*.txt
+!lyrics-service/requirements.txt
+*-watch.html
+
+# Agent & IDE
+.agent/
+.agents/
+.impeccable/
+memory-bank/
+skills-lock.json
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
