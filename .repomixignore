@@ -1,0 +1,29 @@
+# Prevent recursive self-packing
+repomix-output*
+*.repomix.*
+*CODE*.txt
+*Part*.txt
+
+# Build outputs, dependencies & git
+dist/
+build/
+out/
+node_modules/
+.git/
+package-lock.json
+
+# Local environment & secrets
+.env
+*.cookies
+*.log
+lyrics-service/__pycache__/
+*.pyc
+public/
+review_bot_texts.html
+
+# Agent temporary metadata
+.agent/
+.agents/
+.impeccable/
+memory-bank/
+skills-lock.json

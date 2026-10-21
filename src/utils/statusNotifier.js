@@ -1,0 +1,484 @@
+const { EmbedBuilder, Events } = require('discord.js');
+
+/**
+ * Lấy thời gian định dạng chuẩn Việt Nam (Asia/Ho_Chi_Minh)
+ */
+function getVietnamTime() {
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(new Date());
+}
+
+/**
+ * Định dạng số giây sang dạng ngày, giờ, phút, giây
+ */
+function formatDuration(seconds) {
+  const s = Math.floor(seconds % 60);
+  const m = Math.floor((seconds / 60) % 60);
+  const h = Math.floor((seconds / 3600) % 24);
+  const d = Math.floor(seconds / 86400);
+  const parts = [];
+  if (d > 0) parts.push(`${d} ngày`);
+  if (h > 0) parts.push(`${h} giờ`);
+  if (m > 0) parts.push(`${m} phút`);
+  parts.push(`${s} giây`);
+  return parts.length > 0 ? parts.join(' ') : '0 giây';
+}
+
+const config = require('../config');
+const ERROR_LOG_CHANNEL_ID = process.env.ERROR_LOG_CHANNEL_ID || config.errorLogChannelId || '1547449482835394640';
+
+/**
+ * Gửi thông báo / cảnh báo lỗi tới Kênh Log (1547449482835394640) kèm tag Admin
+ */
+async function sendAdminDM(client, adminId, { title, description, color, fields }) {
+  if (!client) return;
+  const targetAdminId = adminId || config.adminId || '875358286487097395';
+  const targetChannelId = ERROR_LOG_CHANNEL_ID;
+
+  try {
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description || null)
+      .setColor(color)
+      .setTimestamp(new Date());
+
+    if (fields && Array.isArray(fields) && fields.length > 0) {
+      embed.addFields(fields);
+    }
+
+    // Gửi trực tiếp vào Kênh Log 1547449482835394640 kèm tag Admin để Admin nhận thông báo
+    let channel = client.channels.cache.get(targetChannelId)
+      || await client.channels.fetch(targetChannelId).catch(() => null);
+
+    if (channel && channel.isTextBased && channel.isTextBased()) {
+      const mentionText = targetAdminId ? `<@${targetAdminId}>` : '';
+      await channel.send({
+        content: mentionText || undefined,
+        embeds: [embed],
+        allowedMentions: targetAdminId ? { users: [targetAdminId] } : { parse: [] }
+      }).catch((sendErr) => {
+        console.warn(`[StatusNotifier] Không thể gửi vào kênh log ${targetChannelId}:`, sendErr.message);
+      });
+      console.log(`[StatusNotifier] Đã gửi thông báo ("${title}") tới kênh log ${targetChannelId} và tag Admin ID ${targetAdminId}`);
+      return;
+    }
+
+    console.warn(`[StatusNotifier] Kênh log ${targetChannelId} không khả dụng hoặc bot không có quyền truy cập.`);
+  } catch (err) {
+    console.warn('[StatusNotifier Alert Error]:', err.message);
+  }
+}
+
+const ytdlp = require('yt-dlp-exec');
+const path = require('path');
+const fs = require('fs');
+
+let lastCookieAlertTime = 0;
+const COOKIE_ALERT_COOLDOWN = 6 * 60 * 60 * 1000; // 6 tiếng chống spam kênh log
+
+/**
+ * Gửi cảnh báo khi phát hiện Cookie YouTube bị hết hạn hoặc không khả dụng
+ */
+async function notifyCookieExpired(client, adminId, reason = 'Cookie không hợp lệ hoặc đã bị Google thu hồi') {
+  const now = Date.now();
+  if (now - lastCookieAlertTime < COOKIE_ALERT_COOLDOWN) {
+    return;
+  }
+  lastCookieAlertTime = now;
+
+  const vnTime = getVietnamTime();
+  const cleanReason = String(reason || 'Phiên đăng nhập đã hết hạn').slice(0, 300);
+
+  await sendAdminDM(client, adminId, {
+    title: '🍪 [Anna Music Bot] Cảnh Báo: Cookie YouTube Đã Hết Hạn!',
+    color: 0xe67e22, // Cam cảnh báo
+    description: 'Hệ thống kiểm tra phát hiện file **Cookie YouTube** trên VPS đã hết hạn hoặc bị Google chặn đăng nhập.',
+    fields: [
+      { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+      { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${cleanReason}\`\`\``, inline: false },
+      { name: '💡 Ảnh hưởng', value: 'Tính năng YouTube Mix, gợi ý bài hát cá nhân hóa và một số bài YouTube có thể bị chậm hoặc không phát được.', inline: false },
+      { name: '🛠️ Hướng dẫn cập nhật', value: '1. Mở trình duyệt chứa tài khoản clone.\n2. Dùng tiện ích xuất file cookie mới (đuôi `.txt`).\n3. Upload đè file cookie mới lên VPS (`/root/anna-music-bot/youtube.cookies`) và restart bot.', inline: false }
+    ]
+  });
+}
+
+/**
+ * Kiểm tra thực tế xem cookie YouTube trên VPS có còn hợp lệ hay không
+ */
+async function checkYouTubeCookieHealth(client, adminId) {
+  try {
+    const musicManager = require('../structures/MusicManager');
+    if (musicManager && musicManager.queues) {
+      let isAnyPlaying = false;
+      for (const [, q] of musicManager.queues.entries()) {
+        if (q?.currentSong && q?.player?.state?.status === 'playing') {
+          isAnyPlaying = true;
+          break;
+        }
+      }
+      if (isAnyPlaying) {
+        console.log('[Cookie Checker] Bot đang phát nhạc ổn định, tạm hoãn test cookie để không chiếm dụng CPU 1 core.');
+        return true;
+      }
+    }
+  } catch (e) {}
+
+  const cookiePath = process.env.YTDLP_COOKIES_FILE || '/root/anna-music-bot/youtube.cookies';
+  if (!fs.existsSync(cookiePath)) {
+    console.warn(`[Cookie Checker] Không tìm thấy file cookie tại: ${cookiePath}`);
+    await notifyCookieExpired(client, adminId, `Không tìm thấy file cookie tại đường dẫn: ${cookiePath}`);
+    return false;
+  }
+
+  try {
+    const testUrl = 'https://www.youtube.com/watch?v=kJQP7kiw5Fk&list=RDkJQP7kiw5Fk';
+    const res = await ytdlp('', {
+      dumpSingleJson: true,
+      flatPlaylist: true,
+      playlistEnd: 2,
+      cookies: cookiePath,
+      extractorArgs: 'youtube:player_client=android,mweb',
+      noWarnings: true,
+      '--': [testUrl]
+    });
+
+    if (res && res.entries && res.entries.length > 0) {
+      console.log(`[Cookie Checker] Cookie YouTube đang hoạt động tốt (${res.entries.length} items verified)`);
+      return true;
+    } else {
+      throw new Error('YouTube Mix không trả về danh sách bài hát (Có thể cookie bị chặn)');
+    }
+  } catch (err) {
+    const errMsg = err.message || String(err);
+    console.warn('[Cookie Checker Warning]: Cookie YouTube kiểm tra thất bại:', errMsg);
+
+    // Kiểm tra các dấu hiệu cookie bị chết / hết hạn
+    const isCookieIssue = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookies|expired|private video|429/i.test(errMsg);
+    if (isCookieIssue) {
+      await notifyCookieExpired(client, adminId, errMsg);
+    }
+    return false;
+  }
+}
+
+/**
+ * Khởi tạo bộ giám sát trạng thái và tự động thông báo qua Kênh Log Lỗi
+ * @param {import('discord.js').Client} client 
+ * @param {Object} options 
+ * @param {string} options.adminId ID tài khoản Admin để tag thông báo
+ * @param {string} options.botName Tên định danh của bot
+ * @param {string} options.platform Nền tảng hosting (vd: VPS Ubuntu, Discloud)
+ */
+function initStatusNotifier(client, options = {}) {
+  const {
+    adminId = '875358286487097395',
+    botName = 'Anna Music Bot',
+    platform = 'VPS Ubuntu (PM2)'
+  } = options;
+
+  let isShuttingDown = false;
+  let lastDisconnectAlert = 0;
+  let disconnectTime = 0; // Biến lưu thời gian bắt đầu rớt mạng
+
+  // 1. Khi Bot đã sẵn sàng và Online
+  client.once(Events.ClientReady, async () => {
+    // Đợi 2 giây để các kết nối ổn định và ping sẵn sàng
+    setTimeout(async () => {
+      try {
+        const vnTime = getVietnamTime();
+        const ping = client.ws?.ping != null ? `${client.ws.ping}ms` : 'Đang đo...';
+        const memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
+        const guildCount = client.guilds?.cache?.size || 0;
+
+        await sendAdminDM(client, adminId, {
+          title: `🟢 [${botName}] Đã Online Trở Lại`,
+          color: 0x2ecc71, // Green
+          fields: [
+            { name: '⏰ Thời gian', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+            { name: '⚡ Ping Gateway', value: `\`${ping}\``, inline: true },
+            { name: '🖥️ Nền tảng', value: `\`${platform}\``, inline: true },
+            { name: '💾 RAM', value: `\`${memMB} MB\``, inline: true },
+            { name: '🌐 Máy chủ', value: `\`${guildCount} servers\``, inline: true },
+            { name: '📋 Trạng thái', value: 'Sẵn sàng phục vụ 24/7!', inline: false }
+          ]
+        });
+      } catch (e) {
+        console.warn('[StatusNotifier Ready Alert Error]:', e.message);
+      }
+    }, 2000);
+  });
+
+  // 2. Ghi nhận khi mất kết nối Gateway
+  client.on(Events.ShardDisconnect, async (event, shardId) => {
+    disconnectTime = Date.now();
+    // Tạm hoãn thông báo ngay lúc này để tránh spam rớt mạng lặt vặt.
+    // Nếu rớt thật thì hàm bên dưới (ShardResume) sẽ báo kèm tổng thời gian sập.
+  });
+
+  // 3. Thông báo khi phục hồi phiên kết nối thành công (Shard Resume)
+  client.on(Events.ShardResume, async (shardId, replayedEvents) => {
+    const now = Date.now();
+    const downtimeMs = disconnectTime > 0 ? (now - disconnectTime) : 0;
+    
+    // BỘ LỌC CHỐNG SPAM: Nếu rớt mạng dưới 15 giây (mạng chớp nháy/bảo trì siêu tốc), bỏ qua.
+    if (downtimeMs < 15000) {
+      console.log(`[StatusNotifier] Đã bỏ qua 1 tin nhắn spam rớt mạng (${Math.round(downtimeMs/1000)}s)`);
+      return; 
+    }
+
+    const vnTime = getVietnamTime();
+    const downtimeStr = formatDuration(downtimeMs / 1000);
+    
+    await sendAdminDM(client, adminId, {
+      title: `🔄 [${botName}] Đã Khôi Phục Kết Nối Gateway`,
+      color: 0x3498db, // Blue
+      description: `Hệ thống vừa bị gián đoạn mạng và đã tự động kết nối lại.`,
+      fields: [
+        { name: '⏰ Khôi phục lúc', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+        { name: '⏳ Tổng thời gian sập', value: `\`${downtimeStr}\``, inline: true }
+      ]
+    });
+    disconnectTime = 0; // Reset
+  });
+
+  // 4. Xử lý Shutdown / Tắt Bot / Restart (Được quản lý tập trung từ src/index.js)
+  // 5. Cảnh báo khi gặp ngoại lệ nghiêm trọng (Crash)
+  process.on('uncaughtException', async (err) => {
+    if (err.code === 'EPIPE' || err.code === 'ECONNRESET') return;
+    console.error('[Uncaught Exception]', err);
+
+    const vnTime = getVietnamTime();
+    const errMsg = (err.message || String(err)).slice(0, 500);
+
+    const sendPromise = sendAdminDM(client, adminId, {
+      title: `💥 [${botName}] Gặp Lỗi Nghiêm Trọng (Crash)`,
+      color: 0xe74c3c,
+      fields: [
+        { name: '⏰ Thời gian xảy ra', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+        { name: '❌ Chi tiết lỗi', value: `\`\`\`${errMsg}\`\`\``, inline: false },
+        { name: '🖥️ Nền tảng', value: `\`${platform}\``, inline: true }
+      ]
+    });
+
+    await Promise.race([
+      sendPromise,
+      new Promise((resolve) => setTimeout(resolve, 2500))
+    ]).catch(() => {});
+  });
+
+  // 6. Lập lịch tự động kiểm tra sức khỏe Cookie YouTube
+  // Kiểm tra lần đầu sau 90 giây khi bot và âm thanh đã ổn định hoàn toàn
+  setTimeout(() => {
+    checkYouTubeCookieHealth(client, adminId).catch(() => {});
+  }, 90000);
+
+  // Kiểm tra định kỳ mỗi 6 giờ
+  setInterval(() => {
+    checkYouTubeCookieHealth(client, adminId).catch(() => {});
+  }, 6 * 60 * 60 * 1000);
+
+  // 7. Lập lịch tự động giám sát Web Player (/web) & Cloudflare Tunnel
+  // Kiểm tra lần đầu sau 30 giây, sau đó kiểm tra định kỳ mỗi 5 phút
+  setTimeout(() => {
+    checkWebPlayerHealth(client, adminId).catch(() => {});
+    checkTunnelUrlChange(client, adminId).catch(() => {});
+  }, 30000);
+
+  setInterval(() => {
+    checkWebPlayerHealth(client, adminId).catch(() => {});
+    checkTunnelUrlChange(client, adminId).catch(() => {});
+  }, 5 * 60 * 1000);
+}
+
+/**
+ * Đọc tối đa 16KB cuối cùng của file log để tiết kiệm RAM, tránh đọc cả file lớn
+ */
+function readLastBytesSync(filePath, maxBytes = 16384) {
+  try {
+    if (!fs.existsSync(filePath)) return '';
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const stat = fs.fstatSync(fd);
+      const fileSize = stat.size;
+      if (fileSize === 0) return '';
+      const bytesToRead = Math.min(fileSize, maxBytes);
+      const buffer = Buffer.alloc(bytesToRead);
+      const position = fileSize - bytesToRead;
+      fs.readSync(fd, buffer, 0, bytesToRead, position);
+      return buffer.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Gửi thông báo khi bot đang tắt an toàn
+ */
+async function notifyBotShutdown(client, adminId = null, signal = 'SIGTERM') {
+  if (!client) return;
+  const targetAdminId = adminId || config.adminId || '875358286487097395';
+  const vnTime = getVietnamTime();
+  const uptimeStr = formatDuration(process.uptime());
+
+  const sendPromise = sendAdminDM(client, targetAdminId, {
+    title: '🔴 [Anna Music Bot] Đang Tắt / Ngoại Tuyến (Shutdown)',
+    color: 0xe74c3c, // Red
+    fields: [
+      { name: '⏰ Thời gian out', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+      { name: '⏱️ Thời gian đã chạy (Uptime)', value: `\`${uptimeStr}\``, inline: true },
+      { name: '🛑 Lý do', value: `Tín hiệu dừng hệ điều hành (\`${signal}\`)`, inline: false },
+      { name: '🖥️ Nền tảng', value: 'VPS Ubuntu (PM2)', inline: true }
+    ]
+  });
+
+  await Promise.race([
+    sendPromise,
+    new Promise((resolve) => setTimeout(resolve, 2000))
+  ]).catch(() => {});
+}
+
+let isWebDown = false;
+let lastWebAlertTime = 0;
+const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nếu vẫn lỗi để tránh spam kênh log
+
+/**
+ * Kiểm tra trạng thái hoạt động thực tế của Web Player proxy
+ */
+async function checkWebPlayerHealth(client, adminId) {
+  const webHealthUrl = 'https://anna-music-bot-ui.pages.dev/api/health';
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    const res = await fetch(webHealthUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      if (isWebDown) {
+        isWebDown = false;
+        const vnTime = getVietnamTime();
+        await sendAdminDM(client, adminId, {
+          title: '🟢 [Anna Music Bot] Web Player Đã Khôi Phục Kết Nối!',
+          color: 0x2ecc71,
+          description: 'Giao diện **Web Player** (`/web`) đã kết nối thành công tới bot và hoạt động bình thường trở lại.',
+          fields: [
+            { name: '⏰ Thời gian khôi phục', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+            { name: '🌐 Địa chỉ Web', value: 'https://anna-music-bot-ui.pages.dev', inline: false }
+          ]
+        });
+      }
+      return true;
+    } else {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+  } catch (err) {
+    const now = Date.now();
+    if (!isWebDown || (now - lastWebAlertTime >= WEB_ALERT_COOLDOWN)) {
+      isWebDown = true;
+      lastWebAlertTime = now;
+      const vnTime = getVietnamTime();
+      await sendAdminDM(client, adminId, {
+        title: '⚠️ [Anna Music Bot] Cảnh Báo: Web Player (/web) Bị Mất Kết Nối!',
+        color: 0xe74c3c,
+        description: 'Hệ thống giám sát phát hiện trang điều khiển Web Player không thể kết nối tới bot (Lỗi 502 hoặc Timeout).',
+        fields: [
+          { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+          { name: '⚠️ Chi tiết lỗi', value: `\`\`\`${err.message || String(err)}\`\`\``, inline: false },
+          { name: '💡 Nguyên nhân thường gặp', value: '1. Tiến trình Express server trên VPS bị dừng hoặc quá tải.\n2. Cloudflare Tunnel ngắt kết nối hoặc chưa cập nhật.', inline: false },
+          { name: '🛠️ Hướng dẫn xử lý', value: `1. Kiểm tra VPS: \`pm2 list\` và \`pm2 logs anna-music-bot\`\n2. Thử truy cập trực tiếp: \`${process.env.VPS_HEALTH_URL || 'trực tiếp trên VPS (cổng 3000)/health'}\``, inline: false }
+        ]
+      });
+    }
+    return false;
+  }
+}
+
+let currentKnownTunnelUrl = '';
+
+/**
+ * Tự động nhận diện URL trycloudflare.com mới nhất trên VPS
+ */
+function getActiveTunnelUrl() {
+  if (process.env.TUNNEL_URL && process.env.TUNNEL_URL.trim()) {
+    return process.env.TUNNEL_URL.trim().replace(/\/$/, '');
+  }
+
+  const logFiles = [
+    '/root/.pm2/logs/anna-tunnel-error.log',
+    '/root/.pm2/logs/anna-tunnel-out.log'
+  ];
+
+  for (const logPath of logFiles) {
+    try {
+      if (fs.existsSync(logPath)) {
+        const content = readLastBytesSync(logPath, 16384);
+        const matches = [...content.matchAll(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g)];
+        if (matches && matches.length > 0) {
+          const latestUrl = matches[matches.length - 1][0];
+          if (latestUrl) return latestUrl;
+        }
+      }
+    } catch (e) {}
+  }
+
+  return 'https://asking-grain-result-knew.trycloudflare.com';
+}
+
+/**
+ * Theo dõi và thông báo khi Cloudflare Tunnel trên VPS đổi subdomain ngẫu nhiên
+ */
+async function checkTunnelUrlChange(client, adminId) {
+  const tunnelLogPath = process.platform === 'linux' ? '/root/.pm2/logs/anna-tunnel-error.log' : null;
+  if (!tunnelLogPath || !fs.existsSync(tunnelLogPath)) return;
+
+  try {
+    const content = readLastBytesSync(tunnelLogPath, 16384);
+    const matches = [...content.matchAll(/https:\/\/([a-z0-9-]+)\.trycloudflare\.com/g)];
+    if (matches && matches.length > 0) {
+      const latestUrl = matches[matches.length - 1][0];
+      if (!currentKnownTunnelUrl) {
+        currentKnownTunnelUrl = latestUrl;
+      } else if (currentKnownTunnelUrl !== latestUrl) {
+        const oldUrl = currentKnownTunnelUrl;
+        currentKnownTunnelUrl = latestUrl;
+        const vnTime = getVietnamTime();
+
+        await sendAdminDM(client, adminId, {
+          title: '🔄 [Anna Music Bot] Cloudflare Tunnel Vừa Cấp URL Mới!',
+          color: 0x3498db,
+          description: 'Tiến trình `anna-tunnel` trên VPS vừa khởi động lại hoặc Cloudflare đã cấp phát một subdomain mới.',
+          fields: [
+            { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
+            { name: '🌐 URL Tunnel mới', value: `\`${latestUrl}\``, inline: false },
+            { name: '⏮️ URL cũ', value: `\`${oldUrl}\``, inline: false },
+            { name: '💡 Tình trạng', value: 'Hệ thống đã có fallback cấu hình VPS trực tiếp, bạn không cần làm gì nếu Web Player vẫn đang chạy bình thường.', inline: false }
+          ]
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Tunnel Checker Warning]:', err.message);
+  }
+}
+
+module.exports = {
+  initStatusNotifier,
+  sendAdminDM,
+  getVietnamTime,
+  checkYouTubeCookieHealth,
+  notifyCookieExpired,
+  notifyBotShutdown,
+  checkWebPlayerHealth,
+  checkTunnelUrlChange,
+  getActiveTunnelUrl
+};
