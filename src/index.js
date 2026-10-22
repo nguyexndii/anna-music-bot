@@ -651,7 +651,7 @@ client.on('interactionCreate', async (interaction) => {
       const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
       if (!isOwner && !hasAdminPerm) {
         return interaction.reply({
-          content: `⚠️ Bot chỉ nhận lệnh trong kênh <#${guildSettings.musicChannelId}>!`,
+          content: `${EMOJI_TAG.warning} Bot chỉ nhận lệnh trong kênh <#${guildSettings.musicChannelId}>!`,
           flags: 64
         });
       }
@@ -1688,11 +1688,11 @@ client.on('interactionCreate', async (interaction) => {
 
     // 5. Kiểm tra phân quyền khi bấm Dừng (btn_stop)
     if (customId === 'btn_stop') {
-      const isAdmin = Boolean(interaction.member?.permissions?.has('Administrator') || interaction.guild?.ownerId === interaction.user?.id);
+      const isAdmin = Boolean(isStrictAdmin(interaction.member) || interaction.guild?.ownerId === interaction.user?.id);
       if (is247Mode) {
         if (!isAdmin) {
           return interaction.reply({
-            embeds: [createErrorEmbed('⚠️ Bot đang phát nhạc chế độ Lofi 24/7! Chỉ **Quản trị viên (Admin)** mới có quyền dừng phát nhạc.')],
+            embeds: [createErrorEmbed('Bot đang phát nhạc chế độ Lofi 24/7! Chỉ **Quản trị viên (Admin)** mới có quyền dừng phát nhạc.')],
             flags: 64
           });
         }

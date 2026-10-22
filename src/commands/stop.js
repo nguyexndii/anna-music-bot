@@ -25,7 +25,7 @@ module.exports = {
     );
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247 && !isAdmin) {
-      return ctx.reply('⚠️ Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể dừng nhạc!');
+      return ctx.reply(`${EMOJI_TAG.warning} Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể dừng nhạc!`);
     }
     if (!hasMusicPermission(ctx.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';

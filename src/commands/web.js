@@ -70,7 +70,7 @@ module.exports = {
               components: [
                 {
                   type: 10,
-                  content: '### ⚠️ Mã PIN Web Player Đã Hết Hiệu Lực\nMã PIN và liên kết đăng nhập này **đã hết hiệu lực** vì bạn vừa yêu cầu một mã mới qua lệnh `/web`.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
+                  content: '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hiệu Lực\nMã PIN và liên kết đăng nhập này **đã hết hiệu lực** vì bạn vừa yêu cầu một mã mới qua lệnh `/web`.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
                 }
               ],
               accessory: {
@@ -176,7 +176,7 @@ module.exports = {
                 components: [
                   {
                     type: 10,
-                    content: '### ⚠️ Mã PIN Web Player Đã Hết Hạn\nMã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\nNếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
+                    content: '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hạn\nMã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\nNếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
                   }
                 ],
                 accessory: {

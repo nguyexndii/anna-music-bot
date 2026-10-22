@@ -25,7 +25,7 @@ module.exports = {
     // BẢO VỆ CHẾ ĐỘ 24/7
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247 && !isAdmin) {
-      return ctx.reply('⚠️ Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể yêu cầu bot rời phòng!');
+      return ctx.reply(`${EMOJI_TAG.warning} Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể yêu cầu bot rời phòng!`);
     }
 
     if (!hasMusicPermission(ctx.member)) {
