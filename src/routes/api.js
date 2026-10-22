@@ -138,6 +138,19 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  // Rate-limit cho /api/lyrics & /api/lyrics/status: tối đa 30 request/phút/IP (chống DoS Python service & Zing/Musixmatch IP ban)
+  const lyricsLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
+    statusCode: 429,
+    handler: (req, res) => {
+      res.status(429).json({ success: false, error: 'Bạn đang tra cứu lời bài hát quá nhanh, vui lòng chờ giây lát!' });
+    }
+  });
+
   // Helper kiểm tra quyền Admin của User trong máy chủ (Kiểm tra nghiêm ngặt thời gian thực)
   async function checkIsAdmin(guildId, userId) {
     if (!guildId || !userId) return false;

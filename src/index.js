@@ -1,3 +1,9 @@
+
+const crypto = require('crypto');
+function signTunnelUrl(url, secret) {
+  if (!url || !secret) return '';
+  return crypto.createHmac('sha256', secret).update(url.trim().replace(/\/$/, '')).digest('hex');
+}
 // Thiết lập độ ưu tiên CPU cao nhất cho tiến trình phát nhạc trên Linux (nice -5)
 const os = require('os');
 try {
@@ -418,10 +424,14 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           userId: newState.id
         });
         queue.clearEmptyRoomTimer();
-        // Đánh thức luồng phát nhạc 24/7 khi có người bước vào phòng đang Sleep Mode
-        if (queue.mode247 && !queue.currentSong && queue.songs.length === 0) {
+        // Đánh thức luồng phát nhạc 24/7 khi có người bước vào phòng đang Sleep Mode (xử lý cả khi còn bài dở)
+        if (queue.mode247 && !queue.currentSong && !queue._isPlayingNext) {
           queue.isQueueOnHold = false;
-          queue._play247BackgroundLofi().catch(() => {});
+          if (queue.songs.length > 0) {
+            queue.playNext().catch(() => {});
+          } else {
+            queue._play247BackgroundLofi().catch(() => {});
+          }
         }
       }
     }
@@ -661,7 +671,8 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để thêm bài hát!')], flags: 64 });
       }
       if (!isAllowedVoiceChannel(memberVoice)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bot không được phép hoạt động trong kênh Voice này!')], flags: 64 });
+        const guildSettings = settingsManager.get(interaction.guild.id);
+        return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
       }
       const botVoice = interaction.guild?.members?.me?.voice?.channel;
       if (botVoice && memberVoice.id !== botVoice.id && !isStrictAdmin(interaction.member)) {
@@ -1219,7 +1230,8 @@ client.on('interactionCreate', async (interaction) => {
       const { token, pin } = generateWebToken(userData, 2);
       const tunnelUrl = getActiveTunnelUrl();
       const baseUrl = (config.webUrl || 'https://anna-music-bot-ui.pages.dev');
-      const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}` : '';
+      const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
+      const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}${tunnelSig ? `&tsig=${tunnelSig}` : ''}` : '';
       const webUrl = `${baseUrl}/?token=${token}&guild=${interaction.guild.id}${tunnelParam}`;
 
       const embed = new EmbedBuilder()
@@ -1372,7 +1384,8 @@ client.on('interactionCreate', async (interaction) => {
         const { token, pin } = generateWebToken(userData, 5);
         const tunnelUrl = getActiveTunnelUrl();
         const baseUrl = config.webUrl || 'https://anna-music-bot-ui.pages.dev';
-        const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}` : '';
+        const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
+        const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}${tunnelSig ? `&tsig=${tunnelSig}` : ''}` : '';
         const playlistWebUrl = `${baseUrl}/?tab=playlists&token=${token}&guild=${interaction.guild.id}${tunnelParam}`;
 
         const lines = [
@@ -1467,14 +1480,13 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút ➕ Thêm bài hát (Hiện Popup Modal nhập tên / link / playlist)
     if (customId === 'btn_add_song') {
+      const guildSettings = settingsManager.get(interaction.guild.id);
       if (!hasMusicPermission(interaction.member)) {
-        const guildSettings = settingsManager.get(interaction.guild.id);
         const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
         return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để thêm bài.`)], flags: 64 });
       }
 
-      if (!isAllowedVoiceChannel(interaction.member)) {
-        const guildSettings = settingsManager.get(interaction.guild.id);
+      if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(interaction.member)) {
         return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
       }
 
@@ -1492,7 +1504,20 @@ client.on('interactionCreate', async (interaction) => {
       const modalRow = new ActionRowBuilder().addComponents(songInput);
       modal.addComponents(modalRow);
 
-      return interaction.showModal(modal);
+      try {
+        logAction('INTERACTION_SHOW_MODAL', {
+          type: 'BTN_ADD_SONG',
+          interactionId: interaction.id,
+          channelId: interaction.channelId,
+          userId: interaction.user.id
+        });
+        return await interaction.showModal(modal);
+      } catch (modalErr) {
+        console.error('[BTN_ADD_SONG showModal Error]:', modalErr);
+        if (!interaction.replied && !interaction.deferred) {
+          return await interaction.reply({ embeds: [createErrorEmbed(`Không thể mở bảng thêm bài hát: ${modalErr.message}`)], flags: 64 }).catch(() => {});
+        }
+      }
     }
 
     // Kiểm tra quyền DJ khi bấm các nút điều khiển khác

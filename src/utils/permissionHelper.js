@@ -37,25 +37,30 @@ function hasMusicPermission(member) {
 
 /**
  * Kiểm tra xem phòng voice người dùng tham gia có hợp lệ không (Bao gồm kênh Staff)
+ * Hỗ trợ nhận linh hoạt cả đối tượng GuildMember lẫn VoiceChannel
  */
-function isAllowedVoiceChannel(member) {
-  if (!member || !member.guild) return true;
-  if (isStrictAdmin(member)) return true;
+function isAllowedVoiceChannel(memberOrChannel) {
+  if (!memberOrChannel || !memberOrChannel.guild) return true;
 
-  const userVoice = member.voice?.channel;
-  if (!userVoice) return false;
+  // Nếu là Member và là Admin thì luôn được phép
+  if (memberOrChannel.permissions && isStrictAdmin(memberOrChannel)) return true;
 
-  // Kênh Staff luôn được phép
-  if (STAFF_VOICE_CHANNELS.includes(userVoice.id)) {
+  const guildSettings = settingsManager.get(memberOrChannel.guild.id);
+  // Nếu server KHÔNG cấu hình khóa kênh Voice nào thì mặc định mọi kênh đều hợp lệ
+  if (!guildSettings?.lockedVoiceChannelId) {
     return true;
   }
 
-  const guildSettings = settingsManager.get(member.guild.id);
-  if (guildSettings.lockedVoiceChannelId) {
-    return userVoice.id === guildSettings.lockedVoiceChannelId;
+  // Lấy ID kênh Voice (hỗ trợ cả Member lẫn VoiceChannel object)
+  const channelId = memberOrChannel.voice?.channelId || memberOrChannel.voice?.channel?.id || memberOrChannel.id;
+  if (!channelId) return false;
+
+  // Kênh Staff luôn được phép
+  if (STAFF_VOICE_CHANNELS.includes(channelId)) {
+    return true;
   }
 
-  return true;
+  return channelId === guildSettings.lockedVoiceChannelId;
 }
 
 /**
