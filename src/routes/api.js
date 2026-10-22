@@ -1089,7 +1089,7 @@ module.exports = function createApiRouter(client) {
     const user = req.user;
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
-    if (!queue && action !== 'toggle247' && action !== 'toggleAutoplay' && action !== 'switchTo247' && action !== 'resetTo247' && action !== 'toggleLofiMode' && action !== 'playFavorites' && action !== 'playUserPlaylist' && action !== 'playNow') {
+    if (!queue && action !== 'toggle247' && action !== 'set247' && action !== 'toggleAutoplay' && action !== 'setAutoplay' && action !== 'switchTo247' && action !== 'resetTo247' && action !== 'toggleLofiMode' && action !== 'playFavorites' && action !== 'playUserPlaylist' && action !== 'playNow') {
       return res.status(400).json({ success: false, error: 'Hiện không có bài hát nào đang phát trong máy chủ này' });
     }
 
@@ -1470,6 +1470,18 @@ module.exports = function createApiRouter(client) {
           }
           break;
         }
+        case 'set247': {
+          const targetVal = Boolean(value);
+          if (queue) {
+            queue.set247(targetVal);
+            if (targetVal && !queue.currentSong) {
+              queue._play247BackgroundLofi().catch(() => {});
+            }
+          }
+          settingsManager.update(guildId, { mode247: targetVal });
+          resultMessage = targetVal ? 'Đã BẬT chế độ Treo Lofi 24/7' : 'Đã TẮT chế độ 24/7';
+          break;
+        }
         case 'switchTo247':
         case 'resetTo247': {
           let targetQueue = queue;
@@ -1521,6 +1533,12 @@ module.exports = function createApiRouter(client) {
           const newVal = !current.autoplay;
           settingsManager.update(guildId, { autoplay: newVal });
           resultMessage = newVal ? 'Đã BẬT Tự Động Phát Bài Tương Tự (Autoplay)' : 'Đã TẮT Tự Động Phát';
+          break;
+        }
+        case 'setAutoplay': {
+          const targetVal = Boolean(value);
+          settingsManager.update(guildId, { autoplay: targetVal });
+          resultMessage = targetVal ? 'Đã BẬT Tự Động Phát Bài Tương Tự (Autoplay)' : 'Đã TẮT Tự Động Phát';
           break;
         }
         case 'setLogChannel': {
@@ -1623,8 +1641,16 @@ module.exports = function createApiRouter(client) {
     try {
       const updated = settingsManager.update(guildId, req.body);
       const queue = client.musicManager ? client.musicManager.get(guildId) : null;
-      if (queue && updated.crossfadeDuration !== undefined) {
-        queue.crossfadeDuration = updated.crossfadeDuration;
+      if (queue) {
+        if (updated.crossfadeDuration !== undefined) {
+          queue.crossfadeDuration = updated.crossfadeDuration;
+        }
+        if (req.body.mode247 !== undefined) {
+          queue.set247(Boolean(updated.mode247));
+          if (updated.mode247 === true && !queue.currentSong) {
+            queue._play247BackgroundLofi().catch(() => {});
+          }
+        }
       }
       logAction('WEB_PLAYER_ACTION', {
         guildId,

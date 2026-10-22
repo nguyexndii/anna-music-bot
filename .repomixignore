@@ -9,10 +9,9 @@ venv/
 __pycache__/
 *.pyc
 
-# Public assets (Frontend build bundles)
-public/assets/
-public/*.js
-public/*.css
+# Public static & Frontend build bundles (Exclude completely to prevent token overflow)
+public/
+public/**
 
 # Logs & temp
 logs/
@@ -22,7 +21,8 @@ yarn-debug.log*
 pnpm-debug.log*
 .DS_Store
 
-# Large media & archives
+# Large media, SVGs & archives
+**/*.svg
 **/*.mp3
 **/*.mp4
 **/*.wav
