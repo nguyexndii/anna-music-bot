@@ -65,6 +65,8 @@ def health_check():
 
 # Bỏ "Lrclib" vì Node.js đã gọi trực tiếp API LRCLIB cực nhanh (<150ms)
 FAST_PROVIDERS = ["Musixmatch", "NetEase"]
+# Tái sử dụng ThreadPool tĩnh toàn cục để tránh chi phí khởi tạo / hủy thread liên tục trên VPS 2GB
+_provider_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 def _search_single_provider(query: str, provider: str, synced_only: bool) -> Optional[str]:
     import syncedlyrics
@@ -80,19 +82,18 @@ def _search_single_provider(query: str, provider: str, synced_only: bool) -> Opt
 
 @functools.lru_cache(maxsize=512)
 def _cached_search_lyrics(query: str) -> Optional[str]:
-    # 1. Đua song song giữa Musixmatch và NetEase cho Synced Lyrics (LRC)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {
-            pool.submit(_search_single_provider, query, prov, True): prov
-            for prov in FAST_PROVIDERS
-        }
-        for future in concurrent.futures.as_completed(futures, timeout=3.2):
-            try:
-                res = future.result()
-                if res and "[" in res:
-                    return res
-            except Exception:
-                pass
+    # 1. Đua song song giữa Musixmatch và NetEase cho Synced Lyrics (LRC) bằng pool dùng chung
+    futures = {
+        _provider_pool.submit(_search_single_provider, query, prov, True): prov
+        for prov in FAST_PROVIDERS
+    }
+    for future in concurrent.futures.as_completed(futures, timeout=3.2):
+        try:
+            res = future.result()
+            if res and "[" in res:
+                return res
+        except Exception:
+            pass
 
     # 2. Fallback nhanh sang Plain Lyrics nếu không tìm thấy bản đồng bộ .lrc
     for prov in FAST_PROVIDERS:

@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const GuildSettings = require('../database/models/GuildSettings');
 
 const DATA_DIR = path.join(__dirname, '../../data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 const DEFAULT_GUILD_SETTINGS = {
-  mode247: true,               // Chế độ 24/7 (Luôn trực tuyến trong voice)
+  mode247: false,              // Chế độ 24/7 (Mặc định TẮT để tối ưu CPU trên VPS đa máy chủ)
   autoplay: true,              // Tự động phát bài tương tự khi hết hàng chờ
   musicChannelId: null,        // Kênh văn bản chỉ định (Khóa kênh lệnh)
   lockedVoiceChannelId: null,  // Kênh đàm thoại cố định (Khóa phòng voice)
@@ -169,13 +170,57 @@ class SettingsManager {
     const updated = { ...current, ...toApply };
     this.settings.set(guildId, updated);
     this._save();
+
+    // Đồng bộ lên MongoDB Atlas (non-blocking)
+    GuildSettings.findOneAndUpdate(
+      { guildId },
+      { $set: { guildId, ...updated } },
+      { upsert: true, setDefaultsOnInsert: true }
+    ).catch(err => {
+      console.warn(`[SettingsManager] Lỗi lưu MongoDB Guild ${guildId}:`, err.message);
+    });
+
     return updated;
   }
 
   reset(guildId) {
     this.settings.set(guildId, { ...DEFAULT_GUILD_SETTINGS });
     this._save();
+
+    GuildSettings.findOneAndReplace(
+      { guildId },
+      { guildId, ...DEFAULT_GUILD_SETTINGS },
+      { upsert: true }
+    ).catch(err => {
+      console.warn(`[SettingsManager] Lỗi reset MongoDB Guild ${guildId}:`, err.message);
+    });
+
     return this.get(guildId);
+  }
+
+  async syncFromDatabase() {
+    try {
+      const records = await GuildSettings.find({}).lean();
+      if (Array.isArray(records) && records.length > 0) {
+        let count = 0;
+        for (const doc of records) {
+          if (!doc.guildId) continue;
+          const merged = { ...DEFAULT_GUILD_SETTINGS, ...doc };
+          delete merged._id;
+          delete merged.__v;
+          delete merged.createdAt;
+          delete merged.updatedAt;
+          merged.autoplayLayers = cleanAutoplayLayers(merged.autoplayLayers);
+          merged.lyricsLayers = cleanLyricsLayers(merged.lyricsLayers);
+          if (merged.crossfadeDuration > 0) merged.crossfadeDuration = 0;
+          this.settings.set(doc.guildId, merged);
+          count++;
+        }
+        console.log(`[SettingsManager] Đã đồng bộ cài đặt của ${count} máy chủ từ MongoDB Atlas.`);
+      }
+    } catch (e) {
+      console.warn('[SettingsManager] Không thể đồng bộ từ MongoDB Atlas:', e.message);
+    }
   }
 }
 

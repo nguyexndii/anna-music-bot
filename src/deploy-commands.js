@@ -240,6 +240,18 @@ async function deploySlashCommands(customClient = null) {
           console.warn(`[Deploy Slash] Lỗi đăng ký Guild ${gId}:`, gErr.message);
         }
       }
+    } else if (config.allowedGuildIds && config.allowedGuildIds.length > 0 && clientId) {
+      for (const gId of config.allowedGuildIds) {
+        try {
+          await rest.put(
+            Routes.applicationGuildCommands(clientId, gId),
+            { body: commands }
+          );
+          console.log(`✅ [Deploy Slash] Đã đăng ký thành công ${commands.length} Guild Slash Commands cho Whitelist Server: ${gId}`);
+        } catch (gErr) {
+          console.warn(`[Deploy Slash] Lỗi đăng ký Whitelist Guild ${gId}:`, gErr.message);
+        }
+      }
     } else if (guildId && clientId) {
       await rest.put(
         Routes.applicationGuildCommands(clientId, guildId),

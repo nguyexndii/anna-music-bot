@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { SlashCommandBuilder } = require('discord.js');
 const { generateWebToken, invalidateUserTokens } = require('../utils/tokenHelper');
 const { getActiveTunnelUrl } = require('../utils/statusNotifier');
@@ -9,6 +10,12 @@ const config = require('../config');
 
 // Lưu trữ các phiên web đang active theo User ID để vô hiệu hóa và sửa tin nhắn cũ
 const userActiveWebMessages = new Map();
+
+function signTunnelUrl(url, secret) {
+  if (!url || !secret) return '';
+  return crypto.createHmac('sha256', secret).update(url.trim().replace(/\/$/, '')).digest('hex');
+}
+
 
 module.exports = {
   name: 'web',
@@ -42,8 +49,9 @@ module.exports = {
       }, 7000);
     }
 
-    // 0. Nếu người dùng đã có tin nhắn /web cũ đang hoạt động -> vô hiệu hóa mã PIN/OTC cũ và sửa tin nhắn cũ
-    const prevSession = userActiveWebMessages.get(author.id);
+    // 0. Tách biệt phiên theo từng máy chủ: ${guild.id}_${author.id}
+    const sessionKey = `${guild.id}_${author.id}`;
+    const prevSession = userActiveWebMessages.get(sessionKey);
     if (prevSession) {
       if (prevSession.timer) {
         clearTimeout(prevSession.timer);
@@ -79,7 +87,7 @@ module.exports = {
           prevSession.replyMsg.edit({ components: [supersededContainer] }).catch(() => {});
         }
       } catch (e) {}
-      userActiveWebMessages.delete(author.id);
+      userActiveWebMessages.delete(sessionKey);
     }
 
     // 3. Tạo User data và Magic Token (kèm PIN 6 số hiệu lực 3 phút, session 2 giờ)
@@ -98,7 +106,8 @@ module.exports = {
     const { token, pin } = generateWebToken(userData, 3, 24);
     const tunnelUrl = getActiveTunnelUrl();
     const baseUrl = (config.webUrl || 'https://anna-music-bot-ui.pages.dev');
-    const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}` : '';
+    const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
+    const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}${tunnelSig ? `&tsig=${tunnelSig}` : ''}` : '';
     const webUrl = `${baseUrl}/?token=${token}&guild=${guild.id}${tunnelParam}`;
 
     // 4. Tạo Components V2 Container
@@ -149,9 +158,9 @@ module.exports = {
       // Tự động vô hiệu hóa mã PIN sau 3 phút
       const timer = setTimeout(async () => {
         try {
-          const currentActive = userActiveWebMessages.get(author.id);
+          const currentActive = userActiveWebMessages.get(sessionKey);
           if (currentActive && currentActive.pin === pin) {
-            userActiveWebMessages.delete(author.id);
+            userActiveWebMessages.delete(sessionKey);
             if (global._tokenStore) {
               global._tokenStore.delete(pin);
               global._tokenStore.delete(token);
@@ -186,7 +195,7 @@ module.exports = {
         } catch (e) {}
       }, 180 * 1000);
 
-      userActiveWebMessages.set(author.id, {
+      userActiveWebMessages.set(sessionKey, {
         interaction: ctx.isInteraction ? ctx.interaction : null,
         replyMsg,
         timer,

@@ -702,16 +702,10 @@ class MusicQueue {
       this.isQueueOnHold = true;
       this.prefetchedSong = null;
       this.preloadedResource = null;
-      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
-      if (isFailedTrack) {
-        setTimeout(() => {
-          if (this.mode247 && !this.currentSong && !this.isDestroyed) {
-            this._play247BackgroundLofi();
-          }
-        }, 5000);
-        return;
-      }
-      await this._play247BackgroundLofi();
+      this.currentSong = null;
+      if (this.player) this.player.stop();
+      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Chờ phát nhạc');
+      console.log(`[MusicQueue 24/7] Phòng trống (${this.guild.name}) - Đưa bot về chế độ 24/7 Sleep Mode (0% CPU)`);
       return;
     }
 
@@ -1120,7 +1114,7 @@ class MusicQueue {
         if (this.mode247) {
           const humanCount = this.getHumanMemberCount();
           if (humanCount === 0) {
-            console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, hủy bộ đếm và chuyển sang phát nhạc Lofi 24/7...`);
+            console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, đưa bot về chế độ 24/7 Sleep Mode (0% CPU)...`);
             this.songs = [];
             this.prefetchedSong = null;
             this.preloadedResource = null;
@@ -1128,8 +1122,7 @@ class MusicQueue {
             this.currentResource = null;
             this.loopMode = 'off';
             this.player.stop(true);
-            setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Mode');
-            await this._play247BackgroundLofi();
+            setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Chờ phát nhạc');
             await sessionManager.saveSession(this.guild.id, {
               voiceChannelId: this.voiceChannel.id,
               textChannelId: this.textChannel?.id,
@@ -2389,14 +2382,17 @@ class MusicQueue {
       if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;
 
       if (lyricsData && Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length >= 3) {
-        // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim
+        let activeSyncedLyrics = lyricsData.syncedLyrics;
+        let activeAutoOffsetMs = lyricsData.autoOffsetMs || 0;
+
+        // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, chống Double-Offset Mutation)
         if (song.trimStart > 0 || song.trimEnd > 0) {
           const trimStartMs = (song.trimStart || 0) * 1000;
           const realDurMs = song.durationMs || 0;
 
           if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
             // 1. Với YouTube CC: Dịch lùi timestamp về mốc 0 của phần nhạc đã cắt
-            lyricsData.syncedLyrics = lyricsData.syncedLyrics
+            activeSyncedLyrics = lyricsData.syncedLyrics
               .map(line => ({
                 ...line,
                 time: line.time - trimStartMs,
@@ -2408,16 +2404,16 @@ class MusicQueue {
                 time: Math.max(0, line.time),
                 time_ms: Math.max(0, line.time_ms)
               }));
-            lyricsData.autoOffsetMs = 0;
+            activeAutoOffsetMs = 0;
           } else {
             // 2. Với Zing MP3 / LRCLIB / Musixmatch: Âm thanh đã cắt khớp sẵn với bản thu phòng thu
-            lyricsData.autoOffsetMs = 0;
+            activeAutoOffsetMs = 0;
           }
         }
 
-        this.cachedSyncedLyrics = lyricsData.syncedLyrics;
+        this.cachedSyncedLyrics = activeSyncedLyrics;
         this.hasSyncedLyrics = true;
-        this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + (lyricsData.autoOffsetMs || 0);
+        this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
         this._lastLyricsEditTime = 0; // Đặt về 0 để câu đầu tiên xuất hiện tức thì không bị cooldown ban đầu
         console.log(`[Live Lyrics] Hiển thị tức thì (${lyricsData.syncedLyrics.length} câu, offset: ${this.currentLyricOffsetMs}ms, nguồn: ${lyricsData.source}) cho "${song.title}"`);
         this.scheduleNextLyricUpdate(song);

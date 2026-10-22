@@ -199,11 +199,14 @@ client.once(Events.ClientReady, async () => {
     console.warn('[Auto-Deploy Slash Commands Error]:', deployErr.message);
   }
 
-  // 🔄 Tự động khôi phục kết nối các phòng Voice và hàng chờ khi bot khởi động lại / sau khi mất kết nối
+  // 🔄 Đồng bộ cấu hình cài đặt từ MongoDB và khôi phục kết nối các phòng Voice
   try {
+    await settingsManager.syncFromDatabase().catch(() => {});
     await sessionManager.syncFromDatabase();
     const activeSessions = sessionManager.getAllActiveSessions();
     for (const session of activeSessions) {
+      // Giãn cách 2.5s giữa mỗi máy chủ để chống nghẽn CPU và quá tải Voice Gateway
+      await new Promise(r => setTimeout(r, 2500));
       try {
         const guild = client.guilds.cache.get(session.guildId);
         if (!guild) continue;
@@ -415,6 +418,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           userId: newState.id
         });
         queue.clearEmptyRoomTimer();
+        // Đánh thức luồng phát nhạc 24/7 khi có người bước vào phòng đang Sleep Mode
+        if (queue.mode247 && !queue.currentSong && queue.songs.length === 0) {
+          queue.isQueueOnHold = false;
+          queue._play247BackgroundLofi().catch(() => {});
+        }
       }
     }
   }
@@ -527,9 +535,40 @@ client.on('guildDelete', async (guild) => {
   }
 });
 
+// Helper kiểm tra danh sách máy chủ được phép (Private / Whitelist Multi-Guild)
+function isAllowedGuild(guildId, userId) {
+  if (!config.allowedGuildIds || config.allowedGuildIds.length === 0) return true;
+  if (config.allowedGuildIds.includes(guildId)) return true;
+  if (userId && String(userId) === String(config.adminId)) return true;
+  return false;
+}
+
+// Tự động kiểm tra và rời máy chủ nếu không nằm trong Whitelist
+client.on(Events.GuildCreate, async (guild) => {
+  if (config.allowedGuildIds && config.allowedGuildIds.length > 0 && !config.allowedGuildIds.includes(guild.id)) {
+    console.warn(`[Whitelist] Máy chủ "${guild.name}" (${guild.id}) không nằm trong danh sách được phép. Đang tự rời khỏi...`);
+    try {
+      await guild.leave();
+    } catch (e) {
+      console.warn(`[Whitelist] Không thể rời máy chủ ${guild.id}:`, e.message);
+    }
+  }
+});
+
 // Xử lý Tương tác (Slash Commands, Nút bấm, Menu Dropdown, Modal thêm bài hát)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.guild) return;
+
+  // Kiểm tra Whitelist máy chủ
+  if (!isAllowedGuild(interaction.guild.id, interaction.user.id)) {
+    if (interaction.isRepliable()) {
+      return interaction.reply({
+        content: '❌ Máy chủ này chưa được cấp phép sử dụng Anna Music Bot. Vui lòng liên hệ Quản trị viên để được hỗ trợ!',
+        ephemeral: true
+      }).catch(() => {});
+    }
+    return;
+  }
 
   try {
 

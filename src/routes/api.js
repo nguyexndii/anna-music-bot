@@ -407,13 +407,14 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  // 2.1 Xem log sự kiện hệ thống (Bảo vệ bằng requireAuth & Chỉ Admin mới được xem)
+  // 2.1 Xem log sự kiện hệ thống (Bảo vệ bằng requireAuth & Phân quyền theo Server/Owner)
   router.get('/logs', requireAuth, async (req, res) => {
     try {
       const user = req.user;
-      const isAdmin = (user.userId === config.adminId) || await checkIsAdmin(user.guildId, user.userId);
-      if (!isAdmin) {
-        return res.status(403).json({ success: false, error: 'Quyền bị từ chối: Chỉ Quản trị viên mới được phép xem nhật ký hệ thống.' });
+      const isOwner = (user.userId === config.adminId);
+      const isGuildAdmin = await checkIsAdmin(user.guildId, user.userId);
+      if (!isOwner && !isGuildAdmin) {
+        return res.status(403).json({ success: false, error: 'Quyền bị từ chối: Chỉ Quản trị viên mới được phép xem nhật ký.' });
       }
 
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
@@ -425,7 +426,9 @@ module.exports = function createApiRouter(client) {
       }
       const raw = fs.readFileSync(logPath, 'utf8');
       const lines = raw.trim().split('\n').filter(Boolean);
-      const lastLines = lines.slice(-limit);
+      // Chống lộ log chéo server: Nếu không phải Bot Owner, chỉ lọc các dòng log của chính máy chủ người dùng
+      const filteredLines = isOwner ? lines : lines.filter(line => line.includes(user.guildId));
+      const lastLines = filteredLines.slice(-limit);
       return res.json({
         success: true,
         count: lastLines.length,
@@ -973,8 +976,8 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  // 4.1 Lấy thông tin chi tiết Playlist (cho phép xem trước và thêm từng bài lẻ)
-  let isExtractingPlaylist = false;
+  // 4.1 Lấy thông tin chi tiết Playlist (Khóa theo từng Guild, chống DoS Logic)
+  const extractingGuilds = new Set();
   router.get('/guilds/:guildId/playlist-info', requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     let url = req.query.url?.trim();
@@ -999,12 +1002,15 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    // 2. Khóa an toàn: Tránh chạy đồng thời nhiều tác vụ nặng
-    if (isExtractingPlaylist) {
-      return res.status(429).json({ success: false, error: 'Hệ thống đang phân tích một danh sách phát khác, vui lòng chờ trong giây lát!' });
+    // 2. Khóa an toàn theo từng máy chủ và giới hạn tối đa 3 tác vụ đồng thời trên VPS
+    if (extractingGuilds.has(guildId)) {
+      return res.status(429).json({ success: false, error: 'Máy chủ đang phân tích một danh sách phát khác, vui lòng chờ trong giây lát!' });
+    }
+    if (extractingGuilds.size >= 3) {
+      return res.status(429).json({ success: false, error: 'Hệ thống đang bận xử lý nhiều danh sách phát cùng lúc, vui lòng thử lại sau ít giây!' });
     }
 
-    isExtractingPlaylist = true;
+    extractingGuilds.add(guildId);
     try {
       let rawResults = await searchTrack(url);
       if (!rawResults || rawResults.length === 0) {
@@ -1033,7 +1039,7 @@ module.exports = function createApiRouter(client) {
       console.error('[API Playlist Info Error]:', err);
       return res.status(500).json({ success: false, error: 'Không thể phân tích danh sách phát' });
     } finally {
-      isExtractingPlaylist = false;
+      extractingGuilds.delete(guildId);
     }
   });
 
@@ -1624,13 +1630,16 @@ module.exports = function createApiRouter(client) {
       const guildSettings = settingsManager.get(guildId);
       const lyricsData = await getLyrics(safeTitle, queryArtist, durMs || 0, currentTrack.url, guildSettings?.lyricsLayers);
 
-      // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim
+      let activeSyncedLyrics = lyricsData?.syncedLyrics || null;
+      let activeAutoOffsetMs = lyricsData?.autoOffsetMs || 0;
+
+      // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, không mutate cache)
       if (lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0)) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;
         const realDurMs = currentTrack.durationMs || 0;
 
         if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
-          lyricsData.syncedLyrics = lyricsData.syncedLyrics
+          activeSyncedLyrics = lyricsData.syncedLyrics
             .map(line => ({
               ...line,
               time: line.time - trimStartMs,
@@ -1642,9 +1651,9 @@ module.exports = function createApiRouter(client) {
               time: Math.max(0, line.time),
               time_ms: Math.max(0, line.time_ms)
             }));
-          lyricsData.autoOffsetMs = 0;
+          activeAutoOffsetMs = 0;
         } else {
-          lyricsData.autoOffsetMs = 0;
+          activeAutoOffsetMs = 0;
         }
       }
 
@@ -1655,12 +1664,12 @@ module.exports = function createApiRouter(client) {
         artist: lyricsData?.artist || (currentTrack.artist && currentTrack.artist !== 'YouTube Music' ? currentTrack.artist : (lyricsData?.artist || '')),
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
-        autoOffsetMs: lyricsData?.autoOffsetMs || 0,
+        autoOffsetMs: activeAutoOffsetMs,
         userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
         trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
-        syncedLyrics: lyricsData?.syncedLyrics || null,
-        synced: !!lyricsData?.syncedLyrics,
+        syncedLyrics: activeSyncedLyrics,
+        synced: !!activeSyncedLyrics,
         source: lyricsData?.source || 'lrclib',
         isRemixOrDurationMismatch: Boolean(lyricsData?.isRemixOrDurationMismatch),
         isExternalSource: Boolean(lyricsData?.source && lyricsData.source !== 'youtube_cc')
@@ -1670,7 +1679,7 @@ module.exports = function createApiRouter(client) {
     }
   });
 
-  router.get('/lyrics', async (req, res) => {
+  router.get('/lyrics', requireAuth, lyricsLimiter, async (req, res) => {
     const rawTitle = req.query.title || req.query.q;
     const rawArtist = req.query.artist || '';
     const title = typeof rawTitle === 'string' ? rawTitle.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim().slice(0, 150) : '';
@@ -1817,7 +1826,7 @@ module.exports = function createApiRouter(client) {
   });
 
   // 6.1 Kiểm tra trạng thái hoạt động của 3 tầng Lyric (Diagnostics / Health Check)
-  router.get('/lyrics/status', async (req, res) => {
+  router.get('/lyrics/status', requireAuth, lyricsLimiter, async (req, res) => {
     // 1. Kiểm tra Tầng 1: LRCLIB (Spotify/Apple Music Open DB)
     let tier1 = {
       tier: 1,
