@@ -25,7 +25,7 @@
 1. [Key Highlights & Exclusive Strengths](#key-highlights--exclusive-strengths)
 2. [System Architecture](#system-architecture)
 3. [Discord Commands Reference (Slash & Prefix)](#discord-commands-reference-slash--prefix)
-4. [Installation & Deployment Guide](#installation--deployment-guide)
+4. [Deployment Guide](#deployment-guide)
 5. [Project Structure](#project-structure)
 6. [Security & Infrastructure Protection](#security--infrastructure-protection)
 7. [Copyright, Disclaimer & DMCA](#copyright-disclaimer--dmca)
@@ -88,7 +88,7 @@ Automatically retrieves millisecond-synchronized `.lrc` lyrics in customizable p
 │                    ANNA BOT CORE (NODE.JS + EXPRESS)                    │
 │  • MusicManager / MusicQueue (18s Preload, Crossfade, SponsorBlock)     │
 │  • 3-Layer Autoplay & 24/7 Dynamic Lofi Engine                          │
-│  • Smart 4-Tier Lyrics Engine (YouTube CC, Zing MP3, LRCLIB)           │
+│  • Smart 4-Tier Lyrics Engine (YouTube CC, Zing MP3, LRCLIB)            │
 │  • Direct Raw PCM s16le Audio Pipeline                                  │
 └───────┬───────────────────────────┬─────────────────────────────┬───────┘
         │ HTTP (127.0.0.1:8787)     │ Mongoose / FS               │ Stream / API
@@ -113,9 +113,9 @@ The bot supports both **Slash Commands (/)** and **Prefix Commands** with conven
 | `/play <query/url>` | `p` | Play music or playlist from YouTube, Spotify, SoundCloud (with autocomplete). |
 | `/web` | — | Receive Magic Token link and 6-digit PIN to access the Web Player. |
 | `/nowplaying` | `np`, `c`, `panel` | Display the interactive Now Playing embed (Components V2) with controls. |
-| `/lyrics [song]` | `ly`, `loi` | View synchronized lyrics from YouTube CC, Zing MP3, LRCLIB, or Musixmatch. |
-| `/like [action]` | `fav`, `yeuthich`| Manage (`list`, `add`, `remove`) and play (`play`) personal favorite songs. |
-| `/pause` / `/resume`| `unpause` | Pause or resume current audio playback. |
+| `/lyrics [song]` | `ly`, `lrc` | View synchronized lyrics from YouTube CC, Zing MP3, LRCLIB, or Musixmatch. |
+| `/like [action]` | `fav`, `mylikes` | Manage (`list`, `add`, `remove`) and play (`play`) personal favorite songs. |
+| `/pause` / `/resume` | `unpause` | Pause or resume current audio playback. |
 | `/skip` | `s`, `sk`, `fs` | Skip current track and play the next queued item. |
 | `/stop` | `st`, `off` | Stop playback, clear the queue, and disconnect from voice. |
 | `/join` / `/leave` | `j`, `dc`, `out` | Summon the bot to or disconnect from the active voice channel. |
@@ -125,7 +125,7 @@ The bot supports both **Slash Commands (/)** and **Prefix Commands** with conven
 | :--- | :--- | :--- |
 | `/queue [page]` | `q`, `list` | View the paginated list of songs in the current queue. |
 | `/move <from> [to]` | `mv`, `jump` | Move a song to a new position in the queue (default brings to `#1`). |
-| `/remove <index>` | `rm`, `xoa` | Remove a song from the queue by its index number. |
+| `/remove <index>` | `rm`, `del` | Remove a song from the queue by its index number. |
 | `/shuffle` | `sh`, `mix` | Shuffle the ordering of all remaining songs in the queue. |
 | `/volume <1-150>` | `vol`, `v` | Adjust master playback volume level from 1% to 150%. |
 | `/loop [mode]` | `l`, `repeat` | Cycle loop mode: `off` (Disabled) $\rightarrow$ `song` (Repeat 1) $\rightarrow$ `queue` (Repeat All). |
@@ -133,23 +133,22 @@ The bot supports both **Slash Commands (/)** and **Prefix Commands** with conven
 ### Administration & Utilities
 | Command | Aliases | Description |
 | :--- | :--- | :--- |
-| `/settings` | `caidat`, `config` | Open the comprehensive server configuration dashboard (Admin only). |
+| `/settings` | `config`, `setup` | Open the comprehensive server configuration dashboard (Admin only). |
 | `/247 [on/off]` | `24/7` | Toggle 24/7 voice retention mode with ambient lofi music. |
-| `/autoplay [status]`| `ap`, `auto` | Toggle automatic similar music recommendations when queue ends. |
-| `/lockvoice` | `lockvc`, `setvoice`| Lock bot operations to one designated voice channel. |
-| `/setchannel` | `channel`, `kenhnhac`| Restrict music command responses to a designated text channel. |
+| `/autoplay [status]` | `ap`, `auto` | Toggle automatic similar music recommendations when queue ends. |
+| `/lockvoice` | `lockvc`, `setvoice` | Lock bot operations to one designated voice channel. |
+| `/setchannel` | `channel`, `tc` | Restrict music command responses to a designated text channel. |
 | `/setdj` | `djrole`, `djonly` | Configure DJ role and toggle DJ-only mode. |
 | `/setlog` | `logchannel`, `log` | Designate a channel for logging voice activity, commands, and web actions. |
-| `/ping` / `/feedback` | `ms`, `fb`, `gopy` | Check network latency (ping) or submit feedback to developers. |
-| `/help` | `h`, `lenh` | Display the categorized interactive help manual. |
+| `/ping` / `/feedback` | `ms`, `fb` | Check network latency (ping) or submit feedback to developers. |
+| `/help` | `h`, `info` | Display the categorized interactive help manual. |
 
 ---
 
-## Installation & Deployment Guide
+## Deployment Guide
 
-### 1. System Requirements
+### 1. System Requirements & Setup
 - **Node.js**: `20.x LTS` or `22.x` or later.
-- **Python**: `3.10+` (only needed if running the optional `lyrics-service`).
 - **Media Tools**: `ffmpeg` and `yt-dlp` installed and accessible in the system `PATH`.
 - **Database**: MongoDB Atlas cluster (if omitted, automatically falls back to local JSON files in `data/`).
 
@@ -158,58 +157,11 @@ Copy `.env.example` to `.env` and fill in your credentials:
 ```bash
 cp .env.example .env
 ```
-Example configuration:
-```env
-# Discord Credentials
-DISCORD_TOKEN=your_discord_bot_token_here
-DISCORD_CLIENT_ID=your_discord_client_id_here
-
-# Database
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/anna_bot?retryWrites=true&w=majority
-
-# Web Dashboard Server
-PORT=3005
-WEB_JWT_SECRET=your_super_secret_jwt_hmac_key_random_string
-
-# Default Ambient Stream
-DEFAULT_247_STREAM=https://www.youtube.com/watch?v=jfKfPfyJRdk
-LASTFM_API_KEY=your_optional_lastfm_key
-```
 
 ### 3. Launch with Docker Compose (Recommended)
 ```bash
 docker compose up -d --build
 ```
-
-### 4. Manual VPS Deployment (Ubuntu / Debian / Windows)
-
-#### Step 1: Install & Run Main Bot (Node.js)
-```bash
-# Install backend dependencies
-npm install
-
-# Register Slash Commands on Discord
-node src/deploy-commands.js
-
-# Run in Development mode
-npm run dev
-
-# Or run in Production with PM2
-npm install -g pm2
-pm2 start src/index.js --name "anna-music-bot"
-pm2 save
-```
-
-#### Step 2: Run Lyrics Fallback Microservice (Python - Optional)
-This microservice serves as Tier 4 fallback for rare international tracks:
-```bash
-cd lyrics-service
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8787 --workers 1
-```
-*(See [lyrics-service/README.md](./lyrics-service/README.md) for detailed instructions on configuring a systemd service with `MemoryMax=200M`).*
 
 ---
 
@@ -254,36 +206,36 @@ anna-music-bot/
 
 ## Copyright, Disclaimer & DMCA
 
-1. **Source Code Copyright**: The Anna Music Bot architecture and codebase are copyrighted by **Diiexe**, licensed under the **MIT License**.
-2. **Anime Character & Fan Project Disclaimer**:
-   - The name *"Anna"* and associated visual avatars/banners are inspired by anime characters and remain the intellectual property of their respective creators and animation studios.
-   - Anna Music Bot is an independent, non-profit, fan-made open-source project with no official affiliation or endorsement from any anime studio.
-3. **Audio Stream Fair Use Disclaimer**:
-   - Anna Music Bot **does not store, host, distribute, or download audio files** to server storage.
-   - The software acts solely as an ephemeral audio relay passing user-requested public streams into private Discord voice sessions under non-commercial Fair Use principles.
-4. **Lyrics Intellectual Property**: All song lyrics remain the exclusive property of their respective artists, songwriters, and publishers, retrieved dynamically via open third-party APIs.
-5. **DMCA Compliance & Takedown Procedure**: Copyright owners wishing to restrict their content from being relayed by this bot may submit a request for digital blacklisting.
+* **Source Code Copyright**: The Anna Music Bot architecture and codebase are copyrighted by Diiexe, licensed under the MIT License.
+* **Anime Character & Fan Project Disclaimer**:
+  * The name "Anna" and associated visual avatars/banners are inspired by anime characters and remain the intellectual property of their respective creators and animation studios.
+  * Anna Music Bot is an independent, non-profit, fan-made open-source project with no official affiliation or endorsement from any anime studio.
+* **Audio Stream Fair Use Disclaimer**:
+  * Anna Music Bot does not store, host, distribute, or download audio files to server storage.
+  * The software acts solely as an ephemeral audio relay passing user-requested public streams into private Discord voice sessions under non-commercial Fair Use principles.
+* **Lyrics Intellectual Property**: All song lyrics remain the exclusive property of their respective artists, songwriters, and publishers, retrieved dynamically via open third-party APIs.
+* **DMCA Compliance & Takedown Procedure**: Copyright owners wishing to restrict their content from being relayed by this bot may submit a request for digital blacklisting.
 
 ---
 
 ## Third-Party Credits & Acknowledgments
 
 Anna Music Bot is built upon the foundation of outstanding open-source projects and community APIs:
-* **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**: Core media extraction utility powering direct stream demuxing and closed caption retrieval.
-* **[FFmpeg](https://ffmpeg.org/)**: Industry-standard audio processing framework powering zero-latency hardware trimming and `s16le` PCM decoding.
-* **[SponsorBlock](https://sponsor.ajay.app/)**: Open community database created by Ajay Ramachandran, providing `music_offtopic` segment timestamps.
-* **[LRCLIB](https://lrclib.net/)**: Open, community-driven synchronized lyrics database.
-* **[Zing MP3](https://zingmp3.vn/)**: Music streaming platform providing millisecond-accurate Vietnamese karaoke lyrics.
-* **[Discord.js](https://discord.js.org/) & [@discordjs/voice](https://github.com/discordjs/voice)**: Official libraries for Discord Gateway and Voice v4 protocol implementation.
-* **[React](https://react.dev/) & [Vite](https://vitejs.dev/) & [Tailwind CSS](https://tailwindcss.com/)**: Modern web toolchain powering the real-time Dashboard.
-* **[syncedlyrics](https://github.com/brentvollebregt/syncedlyrics)**: Multi-provider Python lyrics scraping library.
-* **[Muse](https://github.com/museofficial/muse) & [LavaMusic](https://github.com/appujet/lavamusic)**: Architectural inspiration for queue handling and SponsorBlock integration in Discord music bots.
+* [yt-dlp](https://github.com/yt-dlp/yt-dlp): Core media extraction utility powering direct stream demuxing and closed caption retrieval.
+* [FFmpeg](https://ffmpeg.org/): Industry-standard audio processing framework powering zero-latency hardware trimming and s16le PCM decoding.
+* [SponsorBlock](https://sponsor.ajay.app/): Open community database created by Ajay Ramachandran, providing `music_offtopic` segment timestamps.
+* [LRCLIB](https://lrclib.net/): Open, community-driven synchronized lyrics database.
+* [Zing MP3](https://zingmp3.vn/): Music streaming platform providing millisecond-accurate Vietnamese karaoke lyrics.
+* [Discord.js](https://discord.js.org/) & [@discordjs/voice](https://github.com/discordjs/voice): Official libraries for Discord Gateway and Voice v4 protocol implementation.
+* [React](https://react.dev/) & [Vite](https://vitejs.dev/) & [Tailwind CSS](https://tailwindcss.com/): Modern web toolchain powering the real-time Dashboard.
+* [syncedlyrics](https://github.com/brentvollebregt/syncedlyrics): Multi-provider Python lyrics scraping library.
+* [Muse](https://github.com/museofficial/muse) & [LavaMusic](https://github.com/appujet/lavamusic): Architectural inspiration for queue handling and SponsorBlock integration in Discord music bots.
 
 ---
 
 ## License Terms
 
-This project is distributed under the terms of the **[MIT License](LICENSE)**.  
-Copyright © 2026 **Diiexe** (`Anna Music Bot Project`).
+This project is distributed under the terms of the [MIT License](./LICENSE).  
+Copyright © 2026 Diiexe (Anna Music Bot Project).
 
-Under MIT terms: You are granted permission to freely use, copy, modify, merge, publish, and distribute the software for non-commercial community purposes, with the **sole requirement of preserving the original copyright notice crediting Diiexe** (`Copyright (c) 2026 Diiexe`).
+Under MIT terms: You are granted permission to freely use, copy, modify, merge, publish, and distribute the software for non-commercial community purposes, with the sole requirement of preserving the original copyright notice crediting Diiexe (`Copyright (c) 2026 Diiexe`).

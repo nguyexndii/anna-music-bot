@@ -69,6 +69,7 @@ const CUSTOM_EMOJIS = {
   micActive: { id: '1562334273497997432', name: 'anna_mic_active' },
   lyricNext: { id: '1562334338593325147', name: 'anna_lyric_next' },
   dotNext: { id: '1562334476644646923', name: 'anna_dot_next' },
+  radioButton: { id: '1562668699217952798', name: 'anna_radio_btn' },
 
   // --- Bí danh (Aliases) tương thích ngược ---
   close: { id: '1562002793416630312', name: 'anna_stop_circle' },
@@ -124,6 +125,7 @@ const EMOJI_TAG = {
   micActive: '<:anna_mic_active:1562334273497997432>',
   lyricNext: '<:anna_lyric_next:1562334338593325147>',
   dotNext: '<:anna_dot_next:1562334476644646923>',
+  radioButton: '<:anna_radio_btn:1562668699217952798>',
 
   close: '<:anna_stop_circle:1562002793416630312>',
   list: '<:anna_queue:1562002762827300955>',
@@ -208,22 +210,22 @@ function is247Track(song, queue) {
 
 function createProgressBar(currentMs, totalMs, size = 15, is247Mode = false) {
   if (is247Mode) {
-    return '`LIVE` 🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ `∞`';
+    return `\`LIVE\` ${EMOJI_TAG.radioButton || '<:anna_radio_btn:1562668699217952798>'}▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ \`∞\``;
   }
 
   const currentFormatted = formatDurationMs(currentMs || 0);
   if (!totalMs || totalMs <= 0) {
-    return '`LIVE` ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬🔘 `∞`';
+    return `\`LIVE\` ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬${EMOJI_TAG.radioButton || '<:anna_radio_btn:1562668699217952798>'} \`∞\``;
   }
 
   const clampedCurrent = Math.min(totalMs, Math.max(0, currentMs || 0));
   const totalFormatted = formatDurationMs(totalMs);
-  const progress = Math.min(1, Math.max(0, clampedCurrent / totalMs));
-  const progressIndex = Math.round(progress * size);
+  const progressRatio = totalMs > 0 ? clampedCurrent / totalMs : 0;
+  const progressIndex = Math.min(size, Math.max(0, Math.round(progressRatio * size)));
 
   const before = '▬'.repeat(progressIndex);
   const after = '▬'.repeat(Math.max(0, size - progressIndex));
-  const bar = `${before}🔘${after}`;
+  const bar = `${before}${EMOJI_TAG.radioButton || '<:anna_radio_btn:1562668699217952798>'}${after}`;
 
   return `\`${currentFormatted}\` ${bar} \`${totalFormatted}\``;
 }
