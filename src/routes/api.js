@@ -151,6 +151,14 @@ module.exports = function createApiRouter(client) {
     }
   });
 
+  // Helper kiểm tra quyền máy chủ thuộc Whitelist (Private / Whitelist Multi-Guild)
+  function isGuildAllowed(guildId, userId) {
+    if (!config.allowedGuildIds || config.allowedGuildIds.length === 0) return true;
+    if (config.allowedGuildIds.includes(guildId)) return true;
+    if (userId && String(userId) === String(config.adminId)) return true;
+    return false;
+  }
+
   // Helper kiểm tra quyền Admin của User trong máy chủ (Kiểm tra nghiêm ngặt thời gian thực)
   async function checkIsAdmin(guildId, userId) {
     if (!guildId || !userId) return false;
@@ -264,6 +272,15 @@ module.exports = function createApiRouter(client) {
       return res.status(404).json({ success: false, error: 'Không tìm thấy máy chủ' });
     }
 
+    // Kiểm tra Whitelist máy chủ
+    if (!isGuildAllowed(targetGuildId, user.userId)) {
+      return res.status(403).json({
+        success: false,
+        code: 'GUILD_NOT_ALLOWED',
+        error: 'Máy chủ này chưa được cấp phép sử dụng hệ thống!'
+      });
+    }
+
     // Chủ bot (Super Admin) luôn có quyền hỗ trợ quản trị
     if (config.adminId && user.userId === config.adminId) {
       req.guild = guild;
@@ -332,6 +349,15 @@ module.exports = function createApiRouter(client) {
 
     // Đăng nhập thành công -> Xóa lịch sử nhập sai của IP
     clearPinFailures(clientIp);
+
+    // Kiểm tra Whitelist máy chủ khi xác thực token
+    if (!isGuildAllowed(user.guildId, user.userId)) {
+      return res.status(403).json({
+        success: false,
+        code: 'GUILD_NOT_ALLOWED',
+        error: 'Máy chủ này chưa được cấp phép sử dụng hệ thống!'
+      });
+    }
 
     const guild = client.guilds.cache.get(user.guildId);
     if (!guild) {

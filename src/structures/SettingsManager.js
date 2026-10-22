@@ -24,6 +24,7 @@ const DEFAULT_GUILD_SETTINGS = {
   autoplayLayers: ['ytmix', 'lastfm', 'heuristic'], // Thứ tự và danh sách tầng Autoplay được kích hoạt
   lyricsLayers: ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'], // Thứ tự và danh sách tầng Lời bài hát (Lyrics) được kích hoạt
   autoSkipOfftopic: true,      // Tự động bỏ qua đoạn kịch mở đầu/credit kết thúc MV YouTube qua SponsorBlock
+  useAiAssistant: true,        // Bật/Tắt trợ lý DJ AI (Gemini) gợi ý bài hát & trò chuyện
   language: 'en'               // Ngôn ngữ hệ thống: 'en' (English) | 'vi' (Tiếng Việt)
 };
 
@@ -160,7 +161,7 @@ class SettingsManager {
     }
 
     // Validate kiểu Boolean
-    const booleanFields = ['mode247', 'autoplay', 'djOnly', 'announceSongs', 'updateVoiceStatus'];
+    const booleanFields = ['mode247', 'autoplay', 'djOnly', 'announceSongs', 'updateVoiceStatus', 'autoSkipOfftopic', 'useAiAssistant'];
     for (const b of booleanFields) {
       if (toApply[b] !== undefined) {
         toApply[b] = Boolean(toApply[b]);

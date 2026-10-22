@@ -196,6 +196,16 @@ client.once(Events.ClientReady, async () => {
   client.user.setActivity('ò_Ó 🫵 | /help', { type: ActivityType.Listening });
   await connectDatabase();
 
+  // Quét và tự động rời khỏi các máy chủ không còn nằm trong danh sách Whitelist
+  if (config.allowedGuildIds && config.allowedGuildIds.length > 0) {
+    for (const [gId, g] of client.guilds.cache) {
+      if (!config.allowedGuildIds.includes(gId)) {
+        console.warn(`[Startup Whitelist Scan] Rời khỏi máy chủ không được phép: ${g.name} (${gId})`);
+        g.leave().catch(() => {});
+      }
+    }
+  }
+
   // Đăng ký Slash Commands tự động lên Discord REST API (Chạy ngầm không chặn luồng khởi động bot)
   try {
     const { deploySlashCommands } = require('./deploy-commands');
@@ -212,6 +222,10 @@ client.once(Events.ClientReady, async () => {
     await sessionManager.syncFromDatabase();
     const activeSessions = sessionManager.getAllActiveSessions();
     for (const session of activeSessions) {
+      // Bỏ qua khôi phục phiên nếu máy chủ không nằm trong Whitelist
+      if (config.allowedGuildIds && config.allowedGuildIds.length > 0 && !config.allowedGuildIds.includes(session.guildId)) {
+        continue;
+      }
       // Giãn cách 2.5s giữa mỗi máy chủ để chống nghẽn CPU và quá tải Voice Gateway
       await new Promise(r => setTimeout(r, 2500));
       try {
@@ -282,6 +296,7 @@ client.once(Events.ClientReady, async () => {
 // Ghi log tin nhắn của người dùng trong kênh voice / kênh âm nhạc hoặc có đính kèm
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
+  if (!isAllowedGuild(message.guild.id, message.author.id)) return;
 
   const isVoiceText = message.channel.isVoiceBased?.() || message.channel.type === 2;
   const guildSettings = settingsManager.get(message.guild.id);
@@ -554,7 +569,7 @@ function isAllowedGuild(guildId, userId) {
   return false;
 }
 
-// Tự động kiểm tra và rời máy chủ nếu không nằm trong Whitelist
+// Tự động kiểm tra và rời máy chủ nếu không nằm trong Whitelist & Đăng ký Slash Commands cho server mới
 client.on(Events.GuildCreate, async (guild) => {
   if (config.allowedGuildIds && config.allowedGuildIds.length > 0 && !config.allowedGuildIds.includes(guild.id)) {
     console.warn(`[Whitelist] Máy chủ "${guild.name}" (${guild.id}) không nằm trong danh sách được phép. Đang tự rời khỏi...`);
@@ -563,6 +578,16 @@ client.on(Events.GuildCreate, async (guild) => {
     } catch (e) {
       console.warn(`[Whitelist] Không thể rời máy chủ ${guild.id}:`, e.message);
     }
+    return;
+  }
+
+  // Tự động đồng bộ ngay lập tức toàn bộ Slash Commands cho máy chủ mới vừa tham gia
+  try {
+    const { deploySlashCommands } = require('./deploy-commands');
+    await deploySlashCommands(client, guild.id);
+    console.log(`✅ [Guild Join] Đã triển khai thành công Slash Commands cho máy chủ: ${guild.name} (${guild.id})`);
+  } catch (deployErr) {
+    console.warn(`[Guild Join Deploy Error]:`, deployErr.message);
   }
 });
 
@@ -671,7 +696,7 @@ client.on('interactionCreate', async (interaction) => {
         });
         return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để thêm bài hát!')], flags: 64 });
       }
-      if (!isAllowedVoiceChannel(memberVoice)) {
+      if (!isAllowedVoiceChannel(interaction.member)) {
         const guildSettings = settingsManager.get(interaction.guild.id);
         return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
       }
@@ -1216,6 +1241,7 @@ client.on('interactionCreate', async (interaction) => {
 
       const { generateWebToken } = require('./utils/tokenHelper');
       const { getActiveTunnelUrl } = require('./utils/statusNotifier');
+      const isAdmin = isStrictAdmin(interaction.member);
       const avatarUrl = interaction.user.displayAvatarURL({ dynamic: true, size: 256 });
       const userData = {
         userId: interaction.user.id,
@@ -1223,10 +1249,11 @@ client.on('interactionCreate', async (interaction) => {
         displayName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
         avatar: avatarUrl,
         guildId: interaction.guild.id,
-        guildName: interaction.guild.name
+        guildName: interaction.guild.name,
+        isAdmin: Boolean(isAdmin)
       };
 
-      const { token, pin } = generateWebToken(userData, 2);
+      const { token, pin } = generateWebToken(userData, 3, 24);
       const tunnelUrl = getActiveTunnelUrl();
       const baseUrl = (config.webUrl || 'https://anna-music-bot-ui.pages.dev');
       const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
@@ -1372,15 +1399,17 @@ client.on('interactionCreate', async (interaction) => {
         const userPlaylists = await userPlaylistManager.getUserPlaylists(interaction.user.id);
         const { generateWebToken } = require('./utils/tokenHelper');
         const { getActiveTunnelUrl } = require('./utils/statusNotifier');
+        const isAdmin = isStrictAdmin(interaction.member);
         const userData = {
           userId: interaction.user.id,
           username: interaction.user.username,
           displayName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
           avatar: interaction.user.displayAvatarURL({ dynamic: true, size: 256 }),
           guildId: interaction.guild.id,
-          guildName: interaction.guild.name
+          guildName: interaction.guild.name,
+          isAdmin: Boolean(isAdmin)
         };
-        const { token, pin } = generateWebToken(userData, 5);
+        const { token, pin } = generateWebToken(userData, 3, 24);
         const tunnelUrl = getActiveTunnelUrl();
         const baseUrl = config.webUrl || 'https://anna-music-bot-ui.pages.dev';
         const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';

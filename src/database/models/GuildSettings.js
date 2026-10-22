@@ -20,6 +20,7 @@ const GuildSettingsSchema = new mongoose.Schema({
   autoplayLayers: { type: [String], default: ['ytmix', 'lastfm', 'heuristic'] },
   lyricsLayers: { type: [String], default: ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'] },
   autoSkipOfftopic: { type: Boolean, default: true },
+  useAiAssistant: { type: Boolean, default: true },
   language: { type: String, default: 'en' }
 }, { timestamps: true });
 
