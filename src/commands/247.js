@@ -33,6 +33,7 @@ module.exports = {
     if (!ctx.guild) return;
 
     // Chỉ Admin máy chủ mới được phép cấu hình chế độ 24/7
+    // Chỉ Admin máy chủ mới được phép cấu hình chế độ 24/7
     const isOwner = ctx.guild.ownerId === ctx.user.id;
     const hasAdminPerm = ctx.member?.permissions.has('Administrator') || ctx.member?.permissions.has('ManageGuild');
     if (!isOwner && !hasAdminPerm) {
@@ -40,6 +41,9 @@ module.exports = {
         embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt 24/7!')]
       });
     }
+
+    // Hoãn phản hồi ngay lập tức để chống lỗi Discord timeout quá 3s (DiscordAPIError 10062)
+    await ctx.deferReply();
 
     const voiceChannel = ctx.member?.voice?.channel;
     let queue = musicManager.get(ctx.guild.id);
