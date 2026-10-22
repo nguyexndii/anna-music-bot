@@ -989,6 +989,9 @@ client.on('interactionCreate', async (interaction) => {
       } else if (selectedValue === 'set_language') {
         const newLang = currentSettings.language === 'en' ? 'vi' : 'en';
         updatedSettings = settingsManager.update(guildId, { language: newLang });
+        if (queue && typeof queue.refreshNowPlayingCard === 'function') {
+          queue.refreshNowPlayingCard();
+        }
       } else if (selectedValue === 'set_ai') {
         const newVal = !(currentSettings.useAiAssistant !== false);
         updatedSettings = settingsManager.update(guildId, { useAiAssistant: newVal });
@@ -1216,10 +1219,8 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút Bảng cài đặt
     if (customId === 'btn_settings') {
-      const isOwner = interaction.guild.ownerId === interaction.user.id;
-      const hasAdminPerm = interaction.member.permissions.has('Administrator') || interaction.member.permissions.has('ManageGuild');
-      if (!isOwner && !hasAdminPerm) {
-        return interaction.reply({ embeds: [createErrorEmbed('Chỉ Quản Trị Viên (Administrator) hoặc Quản Lý Máy Chủ mới được mở bảng cài đặt!')], flags: 64 });
+      if (!isStrictAdmin(interaction.member)) {
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))], flags: 64 });
       }
 
       const guildSettings = settingsManager.get(interaction.guild.id);
@@ -1230,25 +1231,27 @@ client.on('interactionCreate', async (interaction) => {
 
     // Nút 🌐 Mở Web Player
     if (customId === 'btn_web_player') {
+      const guildSettings = settingsManager.get(interaction.guild.id);
+      const isEn = guildSettings?.language === 'en';
+
       const memberVoice = interaction.member?.voice?.channel;
       if (!memberVoice) {
         return interaction.reply({
-          embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để mở Web Player!')],
+          embeds: [createErrorEmbed(isEn ? 'You must be in a Voice channel to use Web Player!' : 'Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')],
           flags: 64
         });
       }
 
       const { isAllowedVoiceChannel } = require('./utils/permissionHelper');
-      const settingsManager = require('./structures/SettingsManager');
-      const guildSettings = settingsManager.get(interaction.guild.id);
       if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(interaction.member)) {
         return interaction.reply({
-          embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)],
+          embeds: [createErrorEmbed(isEn ? `Server voice channel is locked! Please join <#${guildSettings.lockedVoiceChannelId}> to use Web Player.` : `Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)],
           flags: 64
         });
       }
 
       const { generateWebToken } = require('./utils/tokenHelper');
+      const { registerWebSession } = require('./utils/webSessionManager');
       const { getActiveTunnelUrl } = require('./utils/statusNotifier');
       const isAdmin = isStrictAdmin(interaction.member);
       const avatarUrl = interaction.user.displayAvatarURL({ dynamic: true, size: 256 });
@@ -1262,33 +1265,70 @@ client.on('interactionCreate', async (interaction) => {
         isAdmin: Boolean(isAdmin)
       };
 
-      const { token, pin } = generateWebToken(userData, 3, 24);
+      const { token, pin } = generateWebToken(userData, 2, 24);
       const tunnelUrl = getActiveTunnelUrl();
       const baseUrl = (config.webUrl || 'https://anna-music-bot-ui.pages.dev');
       const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
       const tunnelParam = tunnelUrl ? `&tunnel=${encodeURIComponent(tunnelUrl)}${tunnelSig ? `&tsig=${tunnelSig}` : ''}` : '';
       const webUrl = `${baseUrl}/?token=${token}&guild=${interaction.guild.id}${tunnelParam}`;
 
-      const embed = new EmbedBuilder()
-        .setColor(config.embedColor || '#5865F2')
-        .setAuthor({ name: 'ANNA MUSIC', iconURL: client.user.displayAvatarURL() })
-        .setTitle('Bảng Điều Khiển Web Player')
-        .setDescription(
-          `Nhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.\n\n` +
-          `🔊 **Kênh Voice:** <#${memberVoice.id}>\n` +
-          `🔑 **Mã PIN:** \`${pin}\``
-        )
-        .setFooter({ text: 'Mã PIN có hiệu lực trong 2 phút' });
+      // Tạo Components V2 Container chuẩn đồng bộ với lệnh /web
+      const webContainer = {
+        type: 17,
+        accent_color: 0x2B7FFF,
+        components: [
+          {
+            type: 9,
+            components: [
+              {
+                type: 10,
+                content: isEn ? `### Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${interaction.guild.name}**.` : `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.`
+              }
+            ],
+            accessory: {
+              type: 11,
+              media: { url: client.user.displayAvatarURL() }
+            }
+          },
+          {
+            type: 10,
+            content: isEn ? `🔊 **Voice Channel:** <#${memberVoice.id}>\n🔑 **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `🔊 **Kênh Voice:** <#${memberVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
+          },
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 5,
+                label: isEn ? 'Open Web Player' : 'Mở Trình Phát Web Player',
+                url: webUrl,
+                emoji: CUSTOM_EMOJIS.web || { name: '🌐' }
+              }
+            ]
+          },
+          {
+            type: 10,
+            content: isEn ? '-# One-time PIN self-destructs after opening • Automatically expires in 2 minutes' : '-# Mã PIN dùng 1 lần sẽ tự hủy sau khi mở • Hết hạn tự động sau 2 phút'
+          }
+        ]
+      };
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel('Mở Web Player')
-          .setStyle(ButtonStyle.Link)
-          .setURL(webUrl)
-          .setEmoji('🌐')
-      );
+      try {
+        await interaction.reply({ components: [webContainer], flags: 32768 | 64 });
 
-      return interaction.reply({ embeds: [embed], components: [row], flags: 64 });
+        registerWebSession({
+          guildId: interaction.guild.id,
+          userId: interaction.user.id,
+          interaction,
+          pin,
+          token,
+          isEn,
+          client
+        });
+      } catch (err) {
+        console.error('[btn_web_player Error]:', err);
+      }
+      return;
     }
 
     // Nút Xem hàng chờ (Kèm cụm nút chuyển trang và dropdown xóa bài theo trang)

@@ -23,7 +23,8 @@ module.exports = {
 
     if (!isStrictAdmin(ctx.member)) {
       return ctx.reply({
-        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))]
+        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))],
+        flags: 64
       });
     }
 
@@ -31,6 +32,6 @@ module.exports = {
     const embed = createSettingsEmbed(ctx.guild, guildSettings);
     const row = createSettingsSelectMenu(guildSettings);
 
-    return ctx.reply({ embeds: [embed], components: [row] });
+    return ctx.reply({ embeds: [embed], components: [row], flags: 64 });
   }
 };

@@ -35,11 +35,10 @@ module.exports = {
     if (!ctx.guild) return;
     const guildId = ctx.guild.id;
 
-    const isOwner = ctx.guild.ownerId === ctx.user.id;
-    const hasAdminPerm = isStrictAdmin(ctx.member);
-    if (!isOwner && !hasAdminPerm) {
+    if (!isStrictAdmin(ctx.member)) {
       return ctx.reply({
-        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))]
+        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))],
+        flags: 64
       });
     }
 
@@ -49,7 +48,7 @@ module.exports = {
     if (statusOption === 'layers' || (args && (args[0]?.toLowerCase() === 'layers' || args[0]?.toLowerCase() === 'layer'))) {
       const layersEmbed = createAutoplayLayersEmbed(ctx.guild, current);
       const layersComponents = createAutoplayLayersComponents(current);
-      return ctx.reply({ embeds: [layersEmbed], components: layersComponents });
+      return ctx.reply({ embeds: [layersEmbed], components: layersComponents, flags: 64 });
     }
 
     let newVal;

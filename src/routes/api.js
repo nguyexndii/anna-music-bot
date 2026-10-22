@@ -581,6 +581,11 @@ module.exports = function createApiRouter(client) {
     const currentTrack = queue?.currentSong;
     const activeWebUsers = getActiveWebUsers(guildId);
 
+    const callerVoice = req.member?.voice?.channel;
+    const isCallerAdmin = await checkIsAdmin(guildId, caller?.userId);
+    const isCallerDJ = await checkIsManager(guildId, caller?.userId);
+    const inSameVoice = Boolean(callerVoice && voiceChannel && callerVoice.id === voiceChannel.id);
+
     return res.json({
       success: true,
       guild: {
@@ -589,6 +594,13 @@ module.exports = function createApiRouter(client) {
         icon: guild.iconURL({ dynamic: true }) || null
       },
       settings: guildSettings,
+      language: guildSettings.language || 'vi',
+      userPermissions: {
+        isAdmin: isCallerAdmin,
+        isDJ: isCallerDJ,
+        inSameVoice,
+        userId: caller?.userId
+      },
       activeWebUsers,
       voiceMembers,
       connectionDiagnostics: {
@@ -1176,6 +1188,69 @@ module.exports = function createApiRouter(client) {
       });
 
       // Vô hiệu hóa các nút điều khiển luồng phát khi không có bài hát và bot không phát âm thanh
+      // Chống phá hoại (Anti-Sabotage): Đếm số lượng người nghe thật trong phòng Voice
+      const voiceChannelForCheck = queue?.getVoiceChannel ? queue.getVoiceChannel() : (queue?.voiceChannel || req.guild?.members?.me?.voice?.channel);
+      const humanListeners = voiceChannelForCheck?.members ? voiceChannelForCheck.members.filter(m => !m.user?.bot && m.id !== client.user?.id) : [];
+      const humanCount = humanListeners.size !== undefined ? humanListeners.size : (Array.isArray(humanListeners) ? humanListeners.length : 0);
+      const isActionAdmin = await checkIsAdmin(guildId, user.userId);
+      const isActionDJ = await checkIsManager(guildId, user.userId);
+      const canManageQueue = isActionAdmin || isActionDJ;
+
+      // 1. Chặn thành viên thường Xóa Toàn Bộ Hàng Chờ (Clear) khi phòng có từ 2 người nghe trở lên
+      if (action === 'clear' && humanCount >= 2 && !canManageQueue) {
+        return res.status(403).json({
+          success: false,
+          code: 'PERMISSION_DENIED',
+          error: 'Chỉ Quản trị viên hoặc DJ mới có quyền xóa toàn bộ hàng chờ khi phòng có từ 2 người nghe trở lên!'
+        });
+      }
+
+      // 2. Chặn thành viên thường Nhảy Cóc (PlayNow) khi phòng có từ 2 người nghe trở lên
+      if (action === 'playNow' && humanCount >= 2 && !canManageQueue) {
+        return res.status(403).json({
+          success: false,
+          code: 'PERMISSION_DENIED',
+          error: 'Chỉ Quản trị viên hoặc DJ mới có quyền nhảy cóc bài hát khi phòng có từ 2 người nghe trở lên!'
+        });
+      }
+
+      // 3. Chặn thành viên thường Chuyển đổi Lofi 24/7 khi hàng chờ đang có bài và phòng có từ 2 người nghe
+      if ((action === 'switchTo247' || action === 'resetTo247' || action === 'toggleLofiMode') && queue?.songs?.length > 0 && humanCount >= 2 && !canManageQueue) {
+        return res.status(403).json({
+          success: false,
+          code: 'PERMISSION_DENIED',
+          error: 'Chỉ Quản trị viên hoặc DJ mới có quyền chuyển đổi sang chế độ Lofi 24/7 khi đang có người nghe!'
+        });
+      }
+
+      // 4. Chặn xóa bài của người khác đối với thành viên thường (Chỉ được xóa bài của chính mình)
+      if ((action === 'remove' || action === 'removeBatch') && !canManageQueue && queue?.songs?.length > 0) {
+        if (Array.isArray(value)) {
+          const allMine = value.every(idx => {
+            const s = queue.songs[Number(idx)];
+            return s && (s.requestedById === user.userId || (typeof s.requestedBy === 'string' && s.requestedBy.includes(user.userId)));
+          });
+          if (!allMine) {
+            return res.status(403).json({
+              success: false,
+              code: 'PERMISSION_DENIED',
+              error: 'Bạn chỉ có quyền xóa các bài hát do chính mình đã thêm vào hàng chờ!'
+            });
+          }
+        } else {
+          const idx = parseInt(value, 10);
+          const targetSong = queue.songs[idx];
+          const isMine = targetSong && (targetSong.requestedById === user.userId || (typeof targetSong.requestedBy === 'string' && targetSong.requestedBy.includes(user.userId)));
+          if (!isMine) {
+            return res.status(403).json({
+              success: false,
+              code: 'PERMISSION_DENIED',
+              error: 'Bạn chỉ có quyền xóa bài hát do chính bạn yêu cầu!'
+            });
+          }
+        }
+      }
+
       const playbackActions = ['pause', 'resume', 'stop', 'seek', 'skip', 'previous'];
       if (playbackActions.includes(action)) {
         if ((!queue?.currentSong && !queue?.isPlaying) || queue?.isStopped) {
@@ -1620,6 +1695,9 @@ module.exports = function createApiRouter(client) {
         case 'updateSettings': {
           if (typeof value === 'object' && value !== null) {
             settingsManager.update(guildId, value);
+            if (value.language !== undefined && queue && typeof queue.refreshNowPlayingCard === 'function') {
+              queue.refreshNowPlayingCard();
+            }
             resultMessage = 'Đã lưu cài đặt máy chủ thành công!';
           }
           break;
@@ -1712,6 +1790,9 @@ module.exports = function createApiRouter(client) {
       const updated = settingsManager.update(guildId, req.body);
       const queue = client.musicManager ? client.musicManager.get(guildId) : null;
       if (queue) {
+        if (req.body.language !== undefined && typeof queue.refreshNowPlayingCard === 'function') {
+          queue.refreshNowPlayingCard();
+        }
         if (updated.crossfadeDuration !== undefined) {
           queue.crossfadeDuration = updated.crossfadeDuration;
         }

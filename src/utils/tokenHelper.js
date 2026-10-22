@@ -46,11 +46,11 @@ const SECRET_KEY = crypto.createHash('sha256').update(secretKeySource).digest();
 /**
  * Tạo Mã PIN 6 số và Token dùng 1 lần (One-Time Token) cho User khi gõ lệnh /web
  * @param {Object} userData - { userId, username, displayName, avatar, guildId, guildName }
- * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 3 phút)
+ * @param {number} pinExpiryMinutes - Thời hạn mã PIN (mặc định 2 phút)
  * @param {number} sessionExpiryHours - Thời hạn phiên đăng nhập khi đổi mã (mặc định 24 tiếng)
  * @returns {{ token: string, pin: string }}
  */
-function generateWebToken(userData, pinExpiryMinutes = 3, sessionExpiryHours = 24) {
+function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 24) {
   const userIdStr = String(userData.userId);
 
   // 0. Dọn dẹp các mã một lần cũ của user này
@@ -63,8 +63,9 @@ function generateWebToken(userData, pinExpiryMinutes = 3, sessionExpiryHours = 2
     }
   }
 
+  // Thống nhất thời hạn của cả PIN và Link dùng 1 lần là đúng 2 phút (120 giây)
   const pinExp = now + pinExpiryMinutes * 60 * 1000;
-  const linkExp = now + 5 * 60 * 1000; // Link mở web có hiệu lực 5 phút
+  const linkExp = pinExp;
 
   // 1. Tạo mã PIN 6 số ngẫu nhiên an toàn chuẩn mật mã học (CSPRNG)
   const pin = crypto.randomInt(100000, 1000000).toString();
@@ -83,11 +84,11 @@ function generateWebToken(userData, pinExpiryMinutes = 3, sessionExpiryHours = 2
     sessionExpiryHours
   };
 
-  // Lưu PIN và OTC vào store, đánh dấu isOneTime = true
+  // Lưu PIN và OTC vào store, liên kết chéo cặp khóa linkedCode và đánh dấu isOneTime = true
   enforceMapLimit(tokenStore, MAX_TOKEN_STORE_SIZE);
-  tokenStore.set(pin, { ...baseData, pin, isOneTime: true, exp: pinExp });
+  tokenStore.set(pin, { ...baseData, pin, linkedCode: oneTimeCode, isOneTime: true, exp: pinExp });
   enforceMapLimit(tokenStore, MAX_TOKEN_STORE_SIZE);
-  tokenStore.set(oneTimeCode, { ...baseData, isOneTime: true, exp: linkExp });
+  tokenStore.set(oneTimeCode, { ...baseData, pin, linkedCode: pin, isOneTime: true, exp: linkExp });
 
   return { token: oneTimeCode, pin };
 }
@@ -144,8 +145,18 @@ function verifyWebToken(tokenOrPin, consume = false) {
 
     if (stored.isOneTime) {
       if (consume) {
-        // Tiêu hủy mã 1 lần ngay lập tức để không ai dùng lại được
+        // Tiêu hủy mã 1 lần ngay lập tức và hủy luôn mã liên kết (cặp PIN & OTC)
         tokenStore.delete(cleanInput);
+        if (stored.linkedCode && tokenStore.has(stored.linkedCode)) {
+          tokenStore.delete(stored.linkedCode);
+        }
+
+        // Thông báo cho webSessionManager cập nhật tin nhắn Discord nếu có
+        try {
+          const { notifyWebSessionSuccess } = require('./webSessionManager');
+          notifyWebSessionSuccess(stored.userId, stored.guildId, stored.pin);
+        } catch (_) {}
+
         const sessionToken = createSessionToken(stored, stored.sessionExpiryHours || 24);
         return { ...stored, sessionToken };
       }
