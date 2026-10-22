@@ -1356,6 +1356,15 @@ module.exports = function createApiRouter(client) {
           break;
         }
         case 'move': {
+          const humanListeners = queue?.voiceChannel?.members ? queue.voiceChannel.members.filter(m => !m.user.bot) : [];
+          const humanCount = humanListeners.size !== undefined ? humanListeners.size : (humanListeners.length || 0);
+          const isManager = await checkIsManager(guildId, user.userId);
+          if (humanCount >= 2 && !isManager) {
+            return res.status(403).json({
+              success: false,
+              error: 'Chỉ Quản trị viên hoặc DJ mới có quyền thay đổi vị trí bài hát khi phòng có từ 2 người nghe trở lên!'
+            });
+          }
           const { from, to } = value || {};
           const ok = queue.moveTrack(from, to);
           resultMessage = ok ? 'Đã thay đổi thứ tự hàng chờ' : 'Không thể di chuyển bài hát';
@@ -1382,6 +1391,16 @@ module.exports = function createApiRouter(client) {
           break;
         }
         case 'playNow': {
+          const targetVoice = queue?.voiceChannel || req.member?.voice?.channel;
+          const humanListeners = targetVoice?.members ? targetVoice.members.filter(m => !m.user.bot) : [];
+          const humanCount = humanListeners.size !== undefined ? humanListeners.size : (humanListeners.length || 0);
+          const isManager = await checkIsManager(guildId, user.userId);
+          if (humanCount >= 2 && !isManager) {
+            return res.status(403).json({
+              success: false,
+              error: 'Chỉ Quản trị viên hoặc DJ mới có quyền phát ngay bài hát (nhảy cóc hàng chờ) khi phòng có từ 2 người nghe trở lên!'
+            });
+          }
           let targetQueue = queue;
           if (!targetQueue) {
             const userVoice = req.member?.voice?.channel;
@@ -1560,7 +1579,16 @@ module.exports = function createApiRouter(client) {
           resultMessage = `Đã nạp toàn bộ ${validTracks.length} bài hát từ playlist "${targetPlaylist.name}" vào hàng chờ 🎵`;
           break;
         }
-        case 'clear':
+        case 'clear': {
+          const humanListeners = queue?.voiceChannel?.members ? queue.voiceChannel.members.filter(m => !m.user.bot) : [];
+          const humanCount = humanListeners.size !== undefined ? humanListeners.size : (humanListeners.length || 0);
+          const isManager = await checkIsManager(guildId, user.userId);
+          if (humanCount >= 2 && !isManager) {
+            return res.status(403).json({
+              success: false,
+              error: 'Chỉ Quản trị viên hoặc DJ mới có quyền xóa toàn bộ hàng chờ khi phòng có từ 2 người nghe trở lên!'
+            });
+          }
           if (queue) {
             queue.songs = [];
             queue.preloadedResource = null;
@@ -1573,6 +1601,7 @@ module.exports = function createApiRouter(client) {
           }
           resultMessage = 'Đã xóa toàn bộ bài hát trong hàng chờ';
           break;
+        }
         case 'shuffle':
           queue.shuffle();
           resultMessage = 'Đã xáo trộn hàng chờ';
@@ -1704,7 +1733,30 @@ module.exports = function createApiRouter(client) {
         }
         case 'remove':
         case 'removeBatch': {
+          const humanListeners = queue?.voiceChannel?.members ? queue.voiceChannel.members.filter(m => !m.user.bot) : [];
+          const humanCount = humanListeners.size !== undefined ? humanListeners.size : (humanListeners.length || 0);
+          const isManager = await checkIsManager(guildId, user.userId);
+          const isSongOwned = (song) => {
+            if (isManager) return true;
+            if (!song) return false;
+            if (song.requestedById && String(song.requestedById) === String(user.userId)) return true;
+            if (typeof song.requestedBy === 'string' && song.requestedBy.includes(String(user.userId))) return true;
+            return false;
+          };
+
           if (Array.isArray(value)) {
+            if (humanCount >= 2 && !isManager) {
+              const anyNotMine = value.some(idx => {
+                const s = queue?.songs?.[Number(idx)];
+                return s && !isSongOwned(s);
+              });
+              if (anyNotMine) {
+                return res.status(403).json({
+                  success: false,
+                  error: 'Bạn chỉ có quyền xóa các bài hát do chính mình yêu cầu khi phòng có từ 2 người trở lên!'
+                });
+              }
+            }
             const sortedIndices = value
               .map(Number)
               .filter(n => !isNaN(n) && n >= 0 && n < queue.songs.length)
@@ -1716,6 +1768,13 @@ module.exports = function createApiRouter(client) {
           } else {
             const idx = parseInt(value, 10);
             if (!isNaN(idx) && idx >= 0 && idx < queue.songs.length) {
+              const targetSong = queue.songs[idx];
+              if (humanCount >= 2 && !isManager && !isSongOwned(targetSong)) {
+                return res.status(403).json({
+                  success: false,
+                  error: 'Bạn chỉ có quyền xóa các bài hát do chính mình yêu cầu khi phòng có từ 2 người trở lên!'
+                });
+              }
               const removed = queue.songs.splice(idx, 1)[0];
               resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
             }

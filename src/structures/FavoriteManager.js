@@ -86,11 +86,15 @@ class FavoriteManager {
    */
   async toggleFavorite(userId, song) {
     if (!song || !song.title) {
-      throw new Error('Dữ liệu bài hát không hợp lệ');
+      const err = new Error('Dữ liệu bài hát không hợp lệ');
+      err.code = 'ERR_INVALID_SONG_DATA';
+      throw err;
     }
 
     if (song.is247 || song.requestedBy === 'Auto (24/7)' || song.requestedBy === 'Auto (24/7 Lofi)') {
-      throw new Error('Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích');
+      const err = new Error('Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích');
+      err.code = 'ERR_CANNOT_FAVORITE_247';
+      throw err;
     }
 
     const title = String(song.title).trim();

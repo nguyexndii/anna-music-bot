@@ -176,7 +176,15 @@ module.exports = {
           embeds: [createSuccessEmbed(`${actionText}: [**${formatMarkdownTitle(track.title, 60)}**](${track.url})\n${totalText}`)]
         });
       } catch (fErr) {
-        return ctx.editReply({ embeds: [createErrorEmbed(fErr.message)] });
+        let msg = fErr.message;
+        if (isEn) {
+          if (fErr.code === 'ERR_CANNOT_FAVORITE_247' || fErr.message.includes('24/7')) {
+            msg = '❌ Cannot add 24/7 Lofi background radio to favorites!';
+          } else if (fErr.code === 'ERR_INVALID_SONG_DATA' || fErr.message.includes('không hợp lệ')) {
+            msg = '❌ Invalid song data!';
+          }
+        }
+        return ctx.editReply({ embeds: [createErrorEmbed(msg)] });
       }
     }
 

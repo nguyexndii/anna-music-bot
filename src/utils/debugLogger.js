@@ -120,191 +120,191 @@ function initLogger(client) {
 /**
  * Helper dịch tên hành động sang tiếng Việt dễ đọc
  */
-function getActionInfo(action, details = {}) {
+function getActionInfo(action, details = {}, isEn = false) {
   const type = details.type || details.event || '';
 
   if (action === 'PLAY_ERROR' || action === 'PLAYER_ERROR' || action === 'STREAM_ERROR') {
     return {
-      title: '❌ Lỗi Phát Nhạc (Playback Error)',
+      title: isEn ? '❌ Playback Error' : '❌ Lỗi Phát Nhạc (Playback Error)',
       color: 0xED4245,
-      desc: details.error ? `Lỗi: **${details.error}**` : 'Không thể phát bài hát'
+      desc: details.error ? (isEn ? 'Error: **' + details.error + '**' : 'Lỗi: **' + details.error + '**') : (isEn ? 'Cannot play track' : 'Không thể phát bài hát')
     };
   }
   if (action === 'SYSTEM_ERROR' || action === 'CLIENT_ERROR') {
     return {
-      title: '🚨 Lỗi Hệ Thống (System Error)',
+      title: isEn ? '🚨 System Error' : '🚨 Lỗi Hệ Thống (System Error)',
       color: 0xED4245,
-      desc: details.error ? `Lỗi: **${details.error}**` : 'Lỗi hệ thống'
+      desc: details.error ? (isEn ? 'Error: **' + details.error + '**' : 'Lỗi: **' + details.error + '**') : (isEn ? 'System error' : 'Lỗi hệ thống')
     };
   }
   if (action === 'VOICE_CONNECTION_READY') {
     return {
-      title: '🔊 Kết Nối Voice Sẵn Sàng (Voice Ready)',
+      title: isEn ? '🔊 Voice Connected' : '🔊 Kết Nối Voice Sẵn Sàng (Voice Ready)',
       color: 0x57F287,
-      desc: details.channelId ? `Đã kết nối vào <#${details.channelId}>` : 'Kết nối Voice đã sẵn sàng'
+      desc: details.channelId ? (isEn ? 'Connected to <#' + details.channelId + '>' : 'Đã kết nối vào <#' + details.channelId + '>') : (isEn ? 'Voice connection ready' : 'Kết nối Voice đã sẵn sàng')
     };
   }
   if (action === 'VOICE_CONNECTION_DISCONNECTED') {
     return {
-      title: '🔌 Mất Kết Nối Voice (Voice Disconnected)',
+      title: isEn ? '🔌 Voice Disconnected' : '🔌 Mất Kết Nối Voice (Voice Disconnected)',
       color: 0xED4245,
-      desc: 'Bot bị mất kết nối với phòng Voice'
+      desc: isEn ? 'Bot disconnected from voice channel' : 'Bot bị mất kết nối với phòng Voice'
     };
   }
   if (action === 'VOICE_CONNECTION_RECONNECTING') {
     return {
-      title: '🔄 Đang Kết Nối Lại Voice (Voice Reconnecting)',
+      title: isEn ? '🔄 Voice Reconnecting' : '🔄 Đang Kết Nối Lại Voice (Voice Reconnecting)',
       color: 0xFEE75C,
-      desc: 'Bot đang tự động kết nối lại phòng Voice'
+      desc: isEn ? 'Bot is reconnecting to voice channel' : 'Bot đang tự động kết nối lại phòng Voice'
     };
   }
   
   if (action === 'VOICE_USER_JOIN') {
     return {
-      title: '🟢 Tham Gia Phòng Voice (Voice Join)',
+      title: isEn ? '🟢 Voice Join' : '🟢 Tham Gia Phòng Voice (Voice Join)',
       color: 0x57F287,
-      desc: details.user ? `**${details.user}** đã vào phòng Voice` : 'Người dùng vào phòng Voice'
+      desc: details.user ? (isEn ? '**' + details.user + '** joined voice' : '**' + details.user + '** đã vào phòng Voice') : (isEn ? 'User joined voice' : 'Người dùng vào phòng Voice')
     };
   }
   if (action === 'VOICE_USER_LEAVE') {
     return {
-      title: '🔴 Rời Khỏi Phòng Voice (Voice Leave)',
+      title: isEn ? '🔴 Voice Leave' : '🔴 Rời Khỏi Phòng Voice (Voice Leave)',
       color: 0xED4245,
-      desc: details.user ? `**${details.user}** đã rời phòng Voice` : 'Người dùng rời phòng Voice'
+      desc: details.user ? (isEn ? '**' + details.user + '** left voice' : '**' + details.user + '** đã rời phòng Voice') : (isEn ? 'User left voice' : 'Người dùng rời phòng Voice')
     };
   }
   if (action === 'VOICE_USER_MOVE') {
     return {
-      title: '🔀 Chuyển Phòng Voice (Voice Move)',
+      title: isEn ? '🔀 Voice Move' : '🔀 Chuyển Phòng Voice (Voice Move)',
       color: 0xFEE75C,
-      desc: details.user ? `**${details.user}** đã chuyển phòng Voice` : 'Người dùng đổi phòng Voice'
+      desc: details.user ? (isEn ? '**' + details.user + '** moved voice channels' : '**' + details.user + '** đã chuyển phòng Voice') : (isEn ? 'User changed voice channel' : 'Người dùng đổi phòng Voice')
     };
   }
   if (action === 'VOICE_USER_STREAM') {
     return {
-      title: '📺 Chia Sẻ Màn Hình / Stream (Screen Share)',
+      title: isEn ? '📺 Screen Share' : '📺 Chia Sẻ Màn Hình / Stream (Screen Share)',
       color: 0x9B59B6,
-      desc: details.status || 'Bắt đầu chia sẻ màn hình'
+      desc: details.status || (isEn ? 'Started screen share' : 'Bắt đầu chia sẻ màn hình')
     };
   }
   if (action === 'VOICE_USER_VIDEO') {
     return {
-      title: '📷 Camera Video (Webcam)',
+      title: isEn ? '📷 Webcam Video' : '📷 Camera Video (Webcam)',
       color: 0x3498DB,
-      desc: details.status || 'Bật/tắt camera video'
+      desc: details.status || (isEn ? 'Toggled camera video' : 'Bật/tắt camera video')
     };
   }
   if (action === 'VOICE_USER_MUTE_DEAF') {
     return {
-      title: '🎙️ Trạng Thái Mic / Tai Nghe',
+      title: isEn ? '🎙️ Mic / Deafen Status' : '🎙️ Trạng Thái Mic / Tai Nghe',
       color: 0x7289DA,
-      desc: details.status || 'Thay đổi trạng thái Mic / Tai nghe'
+      desc: details.status || (isEn ? 'Changed Mic / Deafen status' : 'Thay đổi trạng thái Mic / Tai nghe')
     };
   }
   if (action === 'MESSAGE_USER_SEND') {
     return {
-      title: '💬 Tin Nhắn Trên Kênh (Channel Message)',
+      title: isEn ? '💬 Channel Message' : '💬 Tin Nhắn Trên Kênh (Channel Message)',
       color: 0x5865F2,
-      desc: details.user ? `Người gửi: **${details.user}**` : 'Tin nhắn mới'
+      desc: details.user ? (isEn ? 'Sender: **' + details.user + '**' : 'Người gửi: **' + details.user + '**') : (isEn ? 'New message' : 'Tin nhắn mới')
     };
   }
   if (action === 'MESSAGE_EDIT') {
     return {
-      title: '✏️ Sửa Tin Nhắn (Message Edit)',
+      title: isEn ? '✏️ Message Edit' : '✏️ Sửa Tin Nhắn (Message Edit)',
       color: 0xFEE75C,
-      desc: details.type ? `Loại: \`${details.type}\`` : 'Đã chỉnh sửa tin nhắn trên kênh'
+      desc: details.type ? (isEn ? 'Type: `' + details.type + '`' : 'Loại: `' + details.type + '`') : (isEn ? 'Edited channel message' : 'Đã chỉnh sửa tin nhắn trên kênh')
     };
   }
   if (action === 'MESSAGE_DELETE') {
     return {
-      title: '🗑️ Xóa Tin Nhắn (Message Delete)',
+      title: isEn ? '🗑️ Message Delete' : '🗑️ Xóa Tin Nhắn (Message Delete)',
       color: 0xED4245,
-      desc: details.type ? `Loại: \`${details.type}\`` : 'Đã xóa tin nhắn trên kênh'
+      desc: details.type ? (isEn ? 'Type: `' + details.type + '`' : 'Loại: `' + details.type + '`') : (isEn ? 'Deleted channel message' : 'Đã xóa tin nhắn trên kênh')
     };
   }
   if (action === 'MESSAGE_SEND' || action === 'MESSAGE_REPLY') {
     return {
-      title: '📤 Gửi Tin Nhắn (Message Send)',
+      title: isEn ? '📤 Message Send' : '📤 Gửi Tin Nhắn (Message Send)',
       color: 0x57F287,
-      desc: details.type ? `Loại: \`${details.type}\`` : 'Bot gửi phản hồi / thông báo'
+      desc: details.type ? (isEn ? 'Type: `' + details.type + '`' : 'Loại: `' + details.type + '`') : (isEn ? 'Bot sent notification' : 'Bot gửi phản hồi / thông báo')
     };
   }
   if (action === 'COMMAND_EXECUTE' || action === 'SLASH_COMMAND') {
     return {
-      title: '⚡ Thực Thi Lệnh (Command Execute)',
+      title: isEn ? '⚡ Command Executed' : '⚡ Thực Thi Lệnh (Command Execute)',
       color: 0x5865F2,
-      desc: `Lệnh: \`${details.command || details.name || 'unknown'}\``
+      desc: isEn ? 'Command: `' + (details.command || details.name || 'unknown') + '`' : 'Lệnh: `' + (details.command || details.name || 'unknown') + '`'
     };
   }
   if (action === 'VOICE_STATE_UPDATE') {
     return {
-      title: '🔊 Thay Đổi Trạng Thái Voice (Voice State Update)',
+      title: isEn ? '🔊 Voice State Update' : '🔊 Thay Đổi Trạng Thái Voice (Voice State Update)',
       color: 0x9B59B6,
-      desc: details.event ? `Trạng thái: \`${details.event}\`` : 'Thay đổi trạng thái phòng Voice'
+      desc: details.event ? (isEn ? 'Status: `' + details.event + '`' : 'Trạng thái: `' + details.event + '`') : (isEn ? 'Voice room state updated' : 'Thay đổi trạng thái phòng Voice')
     };
   }
   if (action === 'VOICE_STATUS_UPDATE' || action === 'VOICE_STATUS_CLEAR') {
     return {
-      title: '📡 Trạng Thái Kênh Voice (Channel Status)',
+      title: isEn ? '📡 Voice Channel Status' : '📡 Trạng Thái Kênh Voice (Channel Status)',
       color: 0x3498DB,
-      desc: details.status ? `Trạng thái: **${details.status}**` : 'Cập nhật trạng thái kênh Voice'
+      desc: details.status ? (isEn ? 'Status: **' + details.status + '**' : 'Trạng thái: **' + details.status + '**') : (isEn ? 'Voice status updated' : 'Cập nhật trạng thái kênh Voice')
     };
   }
   if (action.startsWith('INTERACTION_') || action === 'MODAL_ADD_SONG') {
     return {
-      title: '🖱️ Tương Tác Nút / Menu (Interaction)',
+      title: isEn ? '🖱️ Button / Menu Interaction' : '🖱️ Tương Tác Nút / Menu (Interaction)',
       color: 0x3BA55D,
-      desc: details.customId ? `Nút/Menu ID: \`${details.customId}\`` : (details.type || 'Tương tác người dùng')
+      desc: details.customId ? (isEn ? 'Button/Menu ID: `' + details.customId + '`' : 'Nút/Menu ID: `' + details.customId + '`') : (details.type || (isEn ? 'User interaction' : 'Tương tác người dùng'))
     };
   }
   if (action === 'WEB_PLAYER_ACTION' || action === 'WEB_ACTION') {
     return {
-      title: '🌐 Thao Tác Từ Web Player',
+      title: isEn ? '🌐 Web Player Action' : '🌐 Thao Tác Từ Web Player',
       color: 0x00B0F4,
-      desc: details.action ? `Thao tác: \`${details.action}\`` : 'Người dùng điều khiển từ giao diện Web'
+      desc: details.action ? (isEn ? 'Action: `' + details.action + '`' : 'Thao tác: `' + details.action + '`') : (isEn ? 'User controlled from Web Player' : 'Người dùng điều khiển từ giao diện Web')
     };
   }
 
   if (action === 'TRACK_START') {
     return {
-      title: '▶️ Bắt Đầu Phát Nhạc (Track Start)',
+      title: isEn ? '▶️ Track Started' : '▶️ Bắt Đầu Phát Nhạc (Track Start)',
       color: 0x57F287,
-      desc: details.title ? `Đang phát: **${details.title}**` : 'Bắt đầu phát bài hát'
+      desc: details.title ? (isEn ? 'Now playing: **' + details.title + '**' : 'Đang phát: **' + details.title + '**') : (isEn ? 'Track playback started' : 'Bắt đầu phát bài hát')
     };
   }
   if (action === 'TRACK_END') {
     return {
-      title: '⏹️ Kết Thúc Bài Hát (Track End)',
+      title: isEn ? '⏹️ Track Ended' : '⏹️ Kết Thúc Bài Hát (Track End)',
       color: 0x95A5A6,
-      desc: details.title ? `Đã phát xong: **${details.title}**${details.wasSkip ? ' (Bị Skip)' : ''}` : 'Kết thúc bài hát'
+      desc: details.title ? (isEn ? 'Finished: **' + details.title + '**' + (details.wasSkip ? ' (Skipped)' : '') : 'Đã phát xong: **' + details.title + '**' + (details.wasSkip ? ' (Bị Skip)' : '')) : (isEn ? 'Track ended' : 'Kết thúc bài hát')
     };
   }
   if (action === 'SWITCH_TO_247_LOFI') {
     return {
-      title: '♾️ Chuyển Sang Lofi 24/7 Nền',
+      title: isEn ? '♾️ Switched to 24/7 Lofi Radio' : '♾️ Chuyển Sang Lofi 24/7 Nền',
       color: 0x3498DB,
-      desc: details.track ? `Treo Lofi nền: **${details.track}**` : 'Chuyển sang chế độ Treo Lofi nền'
+      desc: details.track ? (isEn ? 'Background Lofi: **' + details.track + '**' : 'Treo Lofi nền: **' + details.track + '**') : (isEn ? 'Switched to background 24/7 Lofi' : 'Chuyển sang chế độ Treo Lofi nền')
     };
   }
   if (action === 'KEEPER_JOIN') {
     return {
-      title: '🛡️ [Voice Keeper] Bot Phụ Vào Giữ Phòng',
+      title: isEn ? '🛡️ [Voice Keeper] Keeper Bot Joined' : '🛡️ [Voice Keeper] Bot Phụ Vào Giữ Phòng',
       color: 0x57F287,
-      desc: details.desc || 'Bot phụ đã vào giữ phòng để tránh reset thời gian'
+      desc: details.desc || (isEn ? 'Keeper bot joined voice to prevent timer reset' : 'Bot phụ đã vào giữ phòng để tránh reset thời gian')
     };
   }
   if (action === 'KEEPER_LEAVE') {
     return {
-      title: '👋 [Voice Keeper] Bot Phụ Rời Phòng (Nhường Chỗ)',
+      title: isEn ? '👋 [Voice Keeper] Keeper Bot Left' : '👋 [Voice Keeper] Bot Phụ Rời Phòng (Nhường Chỗ)',
       color: 0xFEE75C,
-      desc: details.desc || 'Phòng đã an toàn (có Bot Nhạc + từ 2 người thật trở lên)'
+      desc: details.desc || (isEn ? 'Voice channel safe (Music Bot + 2 or more listeners)' : 'Phòng đã an toàn (có Bot Nhạc + từ 2 người thật trở lên)')
     };
   }
 
   return {
-    title: `📋 Hoạt Động: ${action}`,
+    title: isEn ? '📋 Activity: ' + action : '📋 Hoạt Động: ' + action,
     color: 0x95A5A6,
-    desc: type ? `Chi tiết: \`${type}\`` : ''
+    desc: type ? (isEn ? 'Details: `' + type + '`' : 'Chi tiết: `' + type + '`') : ''
   };
 }
 
@@ -414,9 +414,10 @@ function logAction(action, details = {}) {
 
     const logChannel = discordClient.channels.cache.get(targetChannelId);
 
-    const info = getActionInfo(action, details);
+    const isEn = guildSettings?.language === 'en';
+    const info = getActionInfo(action, details, isEn);
     const nowUnix = Math.floor(Date.now() / 1000);
-    const timeFull = `<t:${nowUnix}:F> (<t:${nowUnix}:R>)`;
+    const timeFull = '<t:' + nowUnix + ':F> (<t:' + nowUnix + ':R>)';
 
     const embed = new EmbedBuilder()
       .setColor(info.color)
@@ -427,47 +428,50 @@ function logAction(action, details = {}) {
       embed.setThumbnail(details.avatar);
     }
 
-    let desc = `⏰ **Thời gian:** ${timeFull}\n`;
-    desc += `📌 **Sự kiện:** ${info.desc}\n\n`;
+    let desc = '⏰ **' + (isEn ? 'Time' : 'Thời gian') + ':** ' + timeFull + '\n';
+    desc += '📌 **' + (isEn ? 'Event' : 'Sự kiện') + ':** ' + info.desc + '\n\n';
 
     if (details.userId) {
-      desc += `👤 **Người dùng:** <@${details.userId}> (\`${details.userId}\`)\n`;
+      desc += '👤 **' + (isEn ? 'User' : 'Người dùng') + ':** <@' + details.userId + '> (`' + details.userId + '`)\n';
     } else if (details.user) {
-      desc += `👤 **Người dùng:** ${details.user}\n`;
+      desc += '👤 **' + (isEn ? 'User' : 'Người dùng') + ':** ' + details.user + '\n';
     }
 
     if (details.oldChannelId && details.newChannelId) {
-      desc += `🚪 **Từ phòng:** <#${details.oldChannelId}> ➔ **Sang phòng:** <#${details.newChannelId}>\n`;
+      desc += '🚪 **' + (isEn ? 'From channel' : 'Từ phòng') + ':** <#' + details.oldChannelId + '> ➔ **' + (isEn ? 'To channel' : 'Sang phòng') + ':** <#' + details.newChannelId + '>\n';
     } else if (details.channelId) {
-      desc += `📁 **Kênh / Phòng:** <#${details.channelId}>\n`;
+      desc += '📁 **' + (isEn ? 'Channel' : 'Kênh / Phòng') + ':** <#' + details.channelId + '>\n';
     }
 
     if (details.command) {
-      desc += `⚡ **Lệnh:** \`${details.command}\`\n`;
+      desc += '⚡ **' + (isEn ? 'Command' : 'Lệnh') + ':** `' + details.command + '`\n';
     }
     if (details.song) {
-      desc += `🎵 **Bài hát:** ${details.song}\n`;
+      desc += '🎵 **' + (isEn ? 'Song' : 'Bài hát') + ':** ' + details.song + '\n';
     }
     if (details.url && details.url !== 'N/A') {
-      desc += `🔗 **Liên kết:** ${details.url}\n`;
+      desc += '🔗 **' + (isEn ? 'Link' : 'Liên kết') + ':** ' + details.url + '\n';
     }
     if (details.error) {
       const cleanErr = String(details.error).slice(0, 500);
-      desc += `⚠️ **Chi tiết lỗi:** \`\`\`${cleanErr}\`\`\`\n`;
+      desc += '⚠️ **' + (isEn ? 'Error details' : 'Chi tiết lỗi') + ':** ```' + cleanErr + '```\n';
     }
     if (details.is247 !== undefined) {
-      desc += `♾️ **Chế độ 24/7:** ${details.is247 ? 'Có (Phát lofi nền tự động)' : 'Không (Người dùng yêu cầu)'}\n`;
+      const is247Text = details.is247
+        ? (isEn ? 'Yes (Automatic background lofi)' : 'Có (Phát lofi nền tự động)')
+        : (isEn ? 'No (Requested by user)' : 'Không (Người dùng yêu cầu)');
+      desc += '♾️ **' + (isEn ? '24/7 Mode' : 'Chế độ 24/7') + ':** ' + is247Text + '\n';
     }
     if (details.content) {
       const cleanContent = String(details.content).slice(0, 500);
-      desc += `📝 **Nội dung:** \`\`\`${cleanContent}\`\`\`\n`;
+      desc += '📝 **' + (isEn ? 'Content' : 'Nội dung') + ':** ```' + cleanContent + '```\n';
     }
     if (details.attachments && details.attachments.length > 0) {
-      desc += `📎 **Đính kèm:** ${details.attachments.join(', ')}\n`;
+      desc += '📎 **' + (isEn ? 'Attachments' : 'Đính kèm') + ':** ' + details.attachments.join(', ') + '\n';
     }
     if (details.oldContent && details.newContent) {
-      desc += `📝 **Cũ:** \`${String(details.oldContent).slice(0, 150)}\`\n`;
-      desc += `📝 **Mới:** \`${String(details.newContent).slice(0, 150)}\`\n`;
+      desc += '📝 **' + (isEn ? 'Old' : 'Cũ') + ':** `' + String(details.oldContent).slice(0, 150) + '`\n';
+      desc += '📝 **' + (isEn ? 'New' : 'Mới') + ':** `' + String(details.newContent).slice(0, 150) + '`\n';
     }
 
     embed.setDescription(desc.trim());
