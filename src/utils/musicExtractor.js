@@ -143,7 +143,7 @@ class PrioritySemaphore {
   }
 }
 
-const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 1;
+const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 2;
 const extractionSemaphore = new PrioritySemaphore(MAX_CONCURRENT_EXTRACTION);
 
 // RAM Cache tái sử dụng Metadata & Direct Stream URL (tối đa 200 mục, TTL theo tham số expire còn hạn >= 30p)
