@@ -249,7 +249,7 @@ function createEmbed(title, description, color = '#2B2D31') {
     .setTitle(title)
     .setDescription(description)
     .setColor(color)
-    .setFooter({ text: 'Anna Music 24/7 • High Quality Audio' })
+    .setFooter({ text: 'Anna Music 24/7' })
     .setTimestamp();
 }
 
@@ -309,13 +309,23 @@ function createNowPlayingBanner(song, queue) {
   return { content, components: [row] };
 }
 
-function createQueueAddedEmbed(song, position = 1) {
+function createQueueAddedEmbed(song, position = 1, guildId = null) {
   const safeTitle = formatMarkdownTitle(song?.title || 'Bài hát mới', 60);
   const songLink = song?.url ? `[**${safeTitle}**](${song.url})` : `**${safeTitle}**`;
+  let isEn = false;
+  if (guildId) {
+    try {
+      const settingsManager = require('../structures/SettingsManager');
+      isEn = settingsManager.get(guildId)?.language === 'en';
+    } catch (e) {}
+  }
+  const prefix = isEn ? 'Added to queue' : 'Đã thêm vào hàng chờ';
+  const durLabel = isEn ? 'Duration' : 'Thời lượng';
+  const posLabel = isEn ? 'Position' : 'Vị trí';
   return new EmbedBuilder()
     .setDescription(
-      `${EMOJI_TAG.playlist} **Đã thêm vào hàng chờ:** ${songLink}\n` +
-      `${EMOJI_TAG.musicNote} Thời lượng: \`${song?.duration || '3:30'}\`  •  ${EMOJI_TAG.queue} Vị trí: \`#${position}\``
+      `${EMOJI_TAG.playlist} **${prefix}:** ${songLink}\n` +
+      `${EMOJI_TAG.musicNote} ${durLabel}: \`${song?.duration || '3:30'}\`  •  ${EMOJI_TAG.queue} ${posLabel}: \`#${position}\``
     )
     .setColor('#2B2D31');
 }
@@ -327,8 +337,20 @@ function createQueueAddedEmbed(song, position = 1) {
  */
 function createNowPlayingCard(song, queue) {
   const is247Mode = is247Track(song, queue);
+  const guildId = queue?.guild?.id;
+  let isEn = false;
+  let guildSettings = null;
+  try {
+    const settingsManager = require('../structures/SettingsManager');
+    guildSettings = guildId ? settingsManager.get(guildId) : null;
+    isEn = guildSettings?.language === 'en';
+  } catch (e) {}
 
-  const safeTitle = formatMarkdownTitle(song?.title || (is247Mode ? 'Đài Phát Thanh Lofi 24/7' : 'Bài hát đang phát'), 58);
+  const defaultTitle = is247Mode
+    ? (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7')
+    : (isEn ? 'Now Playing' : 'Bài hát đang phát');
+
+  const safeTitle = formatMarkdownTitle(song?.title || defaultTitle, 58);
   const songUrl = (song?.url && song.url.startsWith('http')) ? song.url : 'https://discord.com';
 
   let requesterName = 'User';
@@ -348,7 +370,7 @@ function createNowPlayingCard(song, queue) {
   // Nếu bài do Autoplay phát tự động, hiển thị custom emoji Autoplay của bot
   let requesterDisplay = requesterName;
   if (/tự động phát|autoplay/i.test(requesterName)) {
-    requesterDisplay = `${EMOJI_TAG.autoplay} Tự động phát`;
+    requesterDisplay = `${EMOJI_TAG.autoplay} ${isEn ? 'Autoplay' : 'Tự động phát'}`;
   }
 
   // Thumbnail
@@ -367,9 +389,12 @@ function createNowPlayingCard(song, queue) {
   const isPendingStop = pendingAction === 'stop';
   const hasPendingAction = Boolean(pendingAction);
 
-  const skipLabel = isPendingSkip ? 'Skipping...' : 'Skip';
-  const prevLabel = isPendingPrevious ? 'Loading...' : 'Back';
-  const stopLabel = isPendingStop ? 'Stopping...' : 'Stop';
+  const skipLabel = isPendingSkip ? (isEn ? 'Skipping...' : 'Đang chuyển...') : (isEn ? 'Skip' : 'Bỏ qua');
+  const prevLabel = isPendingPrevious ? (isEn ? 'Loading...' : 'Đang tải...') : (isEn ? 'Back' : 'Trước');
+  const stopLabel = isPendingStop ? (isEn ? 'Stopping...' : 'Đang dừng...') : (isEn ? 'Stop' : 'Dừng');
+  const favLabel = isEn ? 'Favorite' : 'Thích';
+  const pauseLabel = isEn ? 'Pause' : 'Tạm dừng';
+  const resumeLabel = isEn ? 'Resume' : 'Tiếp tục';
 
   const isPlayable = Boolean(queue?.currentSong && !queue?.isPreparing && !queue?.isStopped);
   const isPausedOrStopped = Boolean(queue?.paused || queue?.isStopped);
@@ -380,40 +405,38 @@ function createNowPlayingCard(song, queue) {
   const userSongsCount = userSongs.length;
 
   const loopMode = !is247Mode ? (queue?.loopMode || 'off') : 'off';
-  const loopLabel = loopMode === 'song' ? 'Loop: Track' : loopMode === 'queue' ? 'Loop: Queue' : 'Loop: Off';
+  const loopLabel = loopMode === 'song'
+    ? (isEn ? 'Loop: Track' : 'Lặp: Bài')
+    : loopMode === 'queue'
+      ? (isEn ? 'Loop: Queue' : 'Lặp: Hàng chờ')
+      : (isEn ? 'Loop: Off' : 'Lặp: Tắt');
   const loopEmoji = loopMode === 'song' ? CUSTOM_EMOJIS.loopOne : CUSTOM_EMOJIS.loop;
-  const loopActive = loopMode !== 'off';
 
-  let autoplayActive = true;
-  try {
-    const settingsManager = require('../structures/SettingsManager');
-    const guildSettings = queue?.guild?.id ? settingsManager.get(queue.guild.id) : null;
-    autoplayActive = queue?.autoplay !== undefined ? queue.autoplay : (guildSettings?.autoplay !== false);
-  } catch (e) {
-    autoplayActive = queue?.autoplay !== false;
-  }
-  const autoplayLabel = autoplayActive ? 'Autoplay: On' : 'Autoplay: Off';
-
-  const vol = Number(queue?.volume ?? 80);
-  const volumeEmoji = getVolumeCustomEmoji(vol);
+  const autoplayActive = queue?.autoplay !== undefined ? queue.autoplay : (guildSettings?.autoplay !== false);
+  const autoplayLabel = autoplayActive ? (isEn ? 'Autoplay: On' : 'Tự phát: Bật') : (isEn ? 'Autoplay: Off' : 'Tự phát: Tắt');
 
   const nextSongText = userSongsCount > 0
-    ? `Next: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} in queue)`
-    : 'No more songs in the queue';
+    ? (isEn ? `Next: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} tracks in queue)` : `Tiếp theo: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} bài trong hàng chờ)`)
+    : (isEn ? 'No more songs in the queue' : 'Hàng chờ hiện đang trống');
 
   // 1. Header: Chế độ 24/7 không có ảnh và không có link clickable; Bài thường có Section + Thumbnail
-  const trimBadge = (song?.skippedIntroSec > 0) ? `\n> ✂️ *Đã tự động bỏ qua ${song.skippedIntroSec}s kịch mở đầu*` : '';
+  const trimBadge = (song?.skippedIntroSec > 0)
+    ? (isEn ? `\n-# ✂️ Automatically skipped ${song.skippedIntroSec}s of intro` : `\n-# ✂️ Đã tự động bỏ qua ${song.skippedIntroSec}s kịch mở đầu`)
+    : '';
+
   const headerComponent = is247Mode
     ? {
         type: 10,
-        content: `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`
+        content: isEn
+          ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Lofi Radio Station**\n*Relaxing 24/7 Lofi background music playing continuously*`
+          : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`
       }
     : {
         type: 9, // Section
         components: [
           {
             type: 10, // TextDisplay
-            content: `### Now Playing — Requested by: ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}`
+            content: `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}`
           }
         ],
         accessory: {
@@ -447,9 +470,9 @@ function createNowPlayingCard(song, queue) {
       {
         type: 1,
         components: [
-          { type: 2, style: 2, custom_id: 'btn_favorite', label: 'Favorite', emoji: CUSTOM_EMOJIS.heart, disabled: !isPlayable || is247Mode || hasPendingAction },
+          { type: 2, style: 2, custom_id: 'btn_favorite', label: favLabel, emoji: CUSTOM_EMOJIS.heart, disabled: !isPlayable || is247Mode || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_previous', label: prevLabel, emoji: CUSTOM_EMOJIS.back, disabled: !isPlayable || is247Mode || !hasPrevious || hasPendingAction },
-          { type: 2, style: 2, custom_id: 'btn_pause', label: isPausedOrStopped ? 'Resume' : 'Pause', emoji: isPausedOrStopped ? CUSTOM_EMOJIS.playCircle : CUSTOM_EMOJIS.pauseCircle, disabled: !isPlayable || is247Mode || hasPendingAction },
+          { type: 2, style: 2, custom_id: 'btn_pause', label: isPausedOrStopped ? resumeLabel : pauseLabel, emoji: isPausedOrStopped ? CUSTOM_EMOJIS.playCircle : CUSTOM_EMOJIS.pauseCircle, disabled: !isPlayable || is247Mode || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_skip', label: skipLabel, emoji: CUSTOM_EMOJIS.skip, disabled: !isPlayable || is247Mode || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_stop', label: stopLabel, emoji: CUSTOM_EMOJIS.stopCircle, disabled: (!isPlayable && !is247Mode) || hasPendingAction }
         ]
@@ -458,7 +481,7 @@ function createNowPlayingCard(song, queue) {
       {
         type: 1,
         components: [
-          { type: 2, style: 2, custom_id: 'btn_queue', label: userSongsCount > 0 ? `Queue (${userSongsCount})` : 'Queue', emoji: CUSTOM_EMOJIS.queue },
+          { type: 2, style: 2, custom_id: 'btn_queue', label: userSongsCount > 0 ? `${isEn ? 'Queue' : 'Hàng chờ'} (${userSongsCount})` : (isEn ? 'Queue' : 'Hàng chờ'), emoji: CUSTOM_EMOJIS.queue },
           { type: 2, style: 2, custom_id: 'btn_loop', label: loopLabel, emoji: loopEmoji, disabled: !isPlayable || is247Mode || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_autoplay', label: autoplayLabel, emoji: CUSTOM_EMOJIS.autoplay, disabled: is247Mode || hasPendingAction }
         ]
@@ -467,7 +490,7 @@ function createNowPlayingCard(song, queue) {
       {
         type: 1,
         components: [
-          { type: 2, style: 2, custom_id: 'btn_add_song', label: 'Add Song', emoji: CUSTOM_EMOJIS.add },
+          { type: 2, style: 2, custom_id: 'btn_add_song', label: isEn ? 'Add Song' : 'Thêm bài', emoji: CUSTOM_EMOJIS.add },
           { type: 2, style: 2, custom_id: 'btn_playlist', label: 'Playlist', emoji: CUSTOM_EMOJIS.playlist },
           { type: 2, style: 2, custom_id: 'btn_web_player', label: 'Web Player', emoji: CUSTOM_EMOJIS.web }
         ]
@@ -481,7 +504,9 @@ function createNowPlayingCard(song, queue) {
       // 6. Footer text
       {
         type: 10,
-        content: `-# Manage your music more professionally at Web Player: [Click here!](https://anna-music-bot-ui.pages.dev)\n-# ${nextSongText}`
+        content: isEn
+          ? `-# Manage your music more professionally at Web Player: [Click here!](https://anna-music-bot-ui.pages.dev)\n-# ${nextSongText}`
+          : `-# Quản lý âm nhạc chuyên nghiệp hơn tại Web Player: [Nhấn vào đây!](https://anna-music-bot-ui.pages.dev)\n-# ${nextSongText}`
       }
     ]
   };
@@ -497,15 +522,20 @@ function createNowPlayingCard(song, queue) {
  */
 function createNowPlayingEmbed(song, queue) {
   const is247Mode = is247Track(song, queue);
+  const guildSettings = queue?.guild?.id ? require('../structures/SettingsManager').get(queue.guild.id) : null;
+  const isEn = guildSettings?.language === 'en';
 
-  const safeTitle = formatMarkdownTitle(song?.title || (is247Mode ? 'Đài Phát Thanh Lofi 24/7' : 'Bài hát đang phát'), 58);
+  const defaultTitle = is247Mode
+    ? (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7')
+    : (isEn ? 'Now Playing Track' : 'Bài hát đang phát');
+  const safeTitle = formatMarkdownTitle(song?.title || defaultTitle, 58);
   const songUrl = (song?.url && song.url.startsWith('http')) ? song.url : 'https://discord.com';
   const currentMs = ((song?.seekPosition || 0) * 1000) + (queue?.currentResource?.playbackDuration || 0);
   const totalMs = song?.durationMs || parseDurationToMs(song?.duration);
   const progressBar = createProgressBar(currentMs, totalMs, 15, is247Mode);
 
   const embed = new EmbedBuilder()
-    .setAuthor({ name: 'Now Playing', iconURL: queue?.guild?.client?.user?.displayAvatarURL() })
+    .setAuthor({ name: isEn ? 'Now Playing' : 'Đang Phát Nhạc', iconURL: queue?.guild?.client?.user?.displayAvatarURL() })
     .setTitle(safeTitle)
     .setURL(songUrl)
     .setColor('#2B7FFF')
@@ -519,6 +549,12 @@ function createNowPlayingEmbed(song, queue) {
 
 function createMusicControls(queue) {
   const is247Mode = is247Track(queue?.currentSong, queue);
+  const guildId = queue?.guild?.id;
+  let isEn = false;
+  try {
+    const settingsManager = require('../structures/SettingsManager');
+    isEn = settingsManager.get(guildId)?.language === 'en';
+  } catch (e) {}
 
   const pendingAction = queue?._pendingButtonAction;
   const isPendingSkip = pendingAction === 'skip';
@@ -526,24 +562,32 @@ function createMusicControls(queue) {
   const isPendingStop = pendingAction === 'stop';
   const hasPendingAction = Boolean(pendingAction);
 
-  const skipLabel = isPendingSkip ? 'Skipping...' : 'Skip';
-  const stopLabel = isPendingStop ? 'Stopping...' : 'Stop';
+  const skipLabel = isPendingSkip ? (isEn ? 'Skipping...' : 'Đang chuyển...') : (isEn ? 'Skip' : 'Bỏ qua');
+  const stopLabel = isPendingStop ? (isEn ? 'Stopping...' : 'Đang dừng...') : (isEn ? 'Stop' : 'Dừng');
+  const favLabel = isEn ? 'Favorite' : 'Thích';
+  const pauseLabel = isEn ? 'Pause' : 'Tạm dừng';
+  const resumeLabel = isEn ? 'Resume' : 'Tiếp tục';
 
   const isPlayable = Boolean(queue?.currentSong && !queue?.isPreparing && !queue?.isStopped);
   const isPausedOrStopped = Boolean(queue?.paused || queue?.isStopped);
   const loopMode = !is247Mode ? (queue?.loopMode || 'off') : 'off';
   const loopEmoji = loopMode === 'song' ? CUSTOM_EMOJIS.loopOne : CUSTOM_EMOJIS.loop;
+  const loopLabel = loopMode === 'song'
+    ? (isEn ? 'Loop: Track' : 'Lặp: Bài')
+    : loopMode === 'queue'
+      ? (isEn ? 'Loop: Queue' : 'Lặp: Hàng chờ')
+      : (isEn ? 'Loop: Off' : 'Lặp: Tắt');
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('btn_favorite')
-      .setLabel('Favorite')
+      .setLabel(favLabel)
       .setEmoji(CUSTOM_EMOJIS.heart)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!isPlayable || is247Mode || hasPendingAction),
     new ButtonBuilder()
       .setCustomId('btn_pause')
-      .setLabel(isPausedOrStopped ? 'Resume' : 'Pause')
+      .setLabel(isPausedOrStopped ? resumeLabel : pauseLabel)
       .setEmoji(isPausedOrStopped ? CUSTOM_EMOJIS.playCircle : CUSTOM_EMOJIS.pauseCircle)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!isPlayable || is247Mode || hasPendingAction),
@@ -555,7 +599,7 @@ function createMusicControls(queue) {
       .setDisabled(!isPlayable || is247Mode || hasPendingAction),
     new ButtonBuilder()
       .setCustomId('btn_loop')
-      .setLabel(loopMode === 'song' ? 'Loop: Track' : loopMode === 'queue' ? 'Loop: Queue' : 'Loop: Off')
+      .setLabel(loopLabel)
       .setEmoji(loopEmoji)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!isPlayable || is247Mode || hasPendingAction),
@@ -575,12 +619,12 @@ function createMusicControls(queue) {
     new ButtonBuilder()
       .setCustomId('btn_add_song')
       .setEmoji(CUSTOM_EMOJIS.add)
-      .setLabel('Add Song')
+      .setLabel(isEn ? 'Add Song' : 'Thêm bài')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('btn_queue')
       .setEmoji(CUSTOM_EMOJIS.queue)
-      .setLabel(userSongsCount > 0 ? `Queue (${userSongsCount})` : 'Queue')
+      .setLabel(userSongsCount > 0 ? `${isEn ? 'Queue' : 'Hàng chờ'} (${userSongsCount})` : (isEn ? 'Queue' : 'Hàng chờ'))
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('btn_web_player')
@@ -597,8 +641,10 @@ function createNowPlayingV2Payload(song, queue) {
 }
 
 function createQueueEmbed(queue, page = 1) {
+  const guildSettings = queue?.guild?.id ? require('../structures/SettingsManager').get(queue.guild.id) : null;
+  const isEn = guildSettings?.language === 'en';
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI_TAG.queue} Hàng Chờ Âm Nhạc — ${queue.guild.name}`)
+    .setTitle(isEn ? `${EMOJI_TAG.queue} Music Queue — ${queue.guild.name}` : `${EMOJI_TAG.queue} Hàng Chờ Âm Nhạc — ${queue.guild.name}`)
     .setColor('#2B7FFF')
     .setTimestamp();
 
@@ -627,9 +673,13 @@ function createQueueEmbed(queue, page = 1) {
 
   if (userSongs.length === 0) {
     embed.setDescription(is247
-      ? `${EMOJI_TAG.musicNote} Hàng chờ trống! Bot đang phát nhạc nền Lofi 24/7.\nDùng \`/play <tên_bài>\` hoặc **Web Player** để thêm nhạc.`
-      : `${EMOJI_TAG.musicNote} Hàng chờ hiện đang trống! Dùng lệnh \`/play <tên_bài>\` để thêm bài hát yêu thích.`);
-    embed.setFooter({ text: 'Anna Music Queue • 0 bài trong hàng chờ' });
+      ? (isEn
+          ? `${EMOJI_TAG.musicNote} Queue is empty! Bot is playing 24/7 Lofi radio.\nUse \`/play <song_name>\` or **Web Player** to add songs.`
+          : `${EMOJI_TAG.musicNote} Hàng chờ trống! Bot đang phát nhạc nền Lofi 24/7.\nDùng \`/play <tên_bài>\` hoặc **Web Player** để thêm nhạc.`)
+      : (isEn
+          ? `${EMOJI_TAG.musicNote} Queue is currently empty! Use \`/play <song_name>\` to add your favorite tracks.`
+          : `${EMOJI_TAG.musicNote} Hàng chờ hiện đang trống! Dùng lệnh \`/play <tên_bài>\` để thêm bài hát yêu thích.`));
+    embed.setFooter({ text: isEn ? 'Anna Music Queue • 0 tracks in queue' : 'Anna Music Queue • 0 bài trong hàng chờ' });
   } else {
     const pageSize = 10;
     const totalPages = Math.max(1, Math.ceil(userSongs.length / pageSize));
@@ -637,7 +687,9 @@ function createQueueEmbed(queue, page = 1) {
     const startIndex = (currentPage - 1) * pageSize;
     const listSlice = userSongs.slice(startIndex, startIndex + pageSize);
 
-    let desc = `${EMOJI_TAG.playlist} **Danh sách bài hát sắp phát (${userSongs.length} bài):**\n\n`;
+    let desc = isEn
+      ? `${EMOJI_TAG.playlist} **Upcoming tracks (${userSongs.length} songs):**\n\n`
+      : `${EMOJI_TAG.playlist} **Danh sách bài hát sắp phát (${userSongs.length} bài):**\n\n`;
     listSlice.forEach((s, idx) => {
       const realIndex = startIndex + idx + 1;
       let req = '';
@@ -659,7 +711,7 @@ function createQueueEmbed(queue, page = 1) {
 
     embed.setDescription(desc);
     embed.setFooter({
-      text: `Trang ${currentPage}/${totalPages} • Tổng cộng ${userSongs.length} bài • Dùng /move để đổi vị trí`
+      text: isEn ? `Page ${currentPage}/${totalPages} • Total ${userSongs.length} tracks • Use /move to reorder` : `Trang ${currentPage}/${totalPages} • Tổng cộng ${userSongs.length} bài • Dùng /move để đổi vị trí`
     });
   }
 
@@ -669,7 +721,14 @@ function createQueueEmbed(queue, page = 1) {
 
 function createQueueContainer(queue, page = 1) {
   if (!queue) return null;
-  const guildName = queue.guild?.name || 'Máy chủ';
+  const guildName = queue.guild?.name || 'Server';
+  const guildId = queue.guild?.id;
+  let isEn = false;
+  try {
+    const settingsManager = require('../structures/SettingsManager');
+    isEn = settingsManager.get(guildId)?.language === 'en';
+  } catch (e) {}
+
   const is247 = Boolean(
     queue.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)
   ) || Boolean(queue.mode247 && !queue.currentSong);
@@ -685,11 +744,14 @@ function createQueueContainer(queue, page = 1) {
   let thumbUrl = queue.currentSong?.thumbnail || queue.guild?.iconURL?.({ dynamic: true, size: 256 }) || global._discordClient?.user?.displayAvatarURL?.() || null;
 
   const headerContent = userSongs.length > 0
-    ? `### ${EMOJI_TAG.queue || '📑'} Hàng Chờ Âm Nhạc — ${guildName}\n**${EMOJI_TAG.playlist || '🎵'} Danh sách bài hát sắp phát (${userSongs.length} bài):**`
-    : `### ${EMOJI_TAG.queue || '📑'} Hàng Chờ Âm Nhạc — ${guildName}`;
+    ? (isEn
+        ? `### ${EMOJI_TAG.queue || '📑'} Music Queue — ${guildName}\n**${EMOJI_TAG.playlist || '🎵'} Upcoming tracks (${userSongs.length} songs):**`
+        : `### ${EMOJI_TAG.queue || '📑'} Hàng Chờ Âm Nhạc — ${guildName}\n**${EMOJI_TAG.playlist || '🎵'} Danh sách bài hát sắp phát (${userSongs.length} bài):**`)
+    : (isEn
+        ? `### ${EMOJI_TAG.queue || '📑'} Music Queue — ${guildName}`
+        : `### ${EMOJI_TAG.queue || '📑'} Hàng Chờ Âm Nhạc — ${guildName}`);
 
   if (is247) {
-    // Không bọc Section type: 9 và bỏ ảnh bìa khi ở chế độ 24/7 Lofi
     containerComponents.push({
       type: 10,
       content: headerContent
@@ -716,8 +778,12 @@ function createQueueContainer(queue, page = 1) {
   let desc = '';
   if (userSongs.length === 0) {
     desc += is247
-      ? `${EMOJI_TAG.musicNote || '🎵'} Hàng chờ trống! Bot đang phát nhạc nền Lofi 24/7.\nDùng \`/play <tên_bài>\` hoặc **Web Player** để thêm nhạc.`
-      : `${EMOJI_TAG.musicNote || '🎵'} Hàng chờ hiện đang trống! Dùng lệnh \`/play <tên_bài>\` để thêm bài hát yêu thích.`;
+      ? (isEn
+          ? `${EMOJI_TAG.musicNote || '🎵'} Queue is empty! Bot is playing 24/7 Lofi radio.\nUse \`/play <song_name>\` or **Web Player** to add songs.`
+          : `${EMOJI_TAG.musicNote || '🎵'} Hàng chờ trống! Bot đang phát nhạc nền Lofi 24/7.\nDùng \`/play <tên_bài>\` hoặc **Web Player** để thêm nhạc.`)
+      : (isEn
+          ? `${EMOJI_TAG.musicNote || '🎵'} Queue is currently empty! Use \`/play <song_name>\` to add your favorite tracks.`
+          : `${EMOJI_TAG.musicNote || '🎵'} Hàng chờ hiện đang trống! Dùng lệnh \`/play <tên_bài>\` để thêm bài hát yêu thích.`);
   } else {
     listSlice.forEach((s, idx) => {
       const realIndex = startIndex + idx + 1;
@@ -740,26 +806,32 @@ function createQueueContainer(queue, page = 1) {
   }
 
   if (is247) {
-    desc += `\n**${EMOJI_TAG.radio || '📻'} Đang phát hiện tại:**\n${EMOJI_TAG.autoplay || '♾️'} **Đài Phát Thanh Lofi 24/7** | \`LIVE 24/7\`\n`;
+    desc += isEn
+      ? `\n**${EMOJI_TAG.radio || '📻'} Currently Playing:**\n${EMOJI_TAG.autoplay || '♾️'} **24/7 Lofi Radio Station** | \`LIVE 24/7\`\n`
+      : `\n**${EMOJI_TAG.radio || '📻'} Đang phát hiện tại:**\n${EMOJI_TAG.autoplay || '♾️'} **Đài Phát Thanh Lofi 24/7** | \`LIVE 24/7\`\n`;
   } else if (queue.currentSong) {
     const curTitle = formatMarkdownTitle(queue.currentSong.title || 'Unknown', 48);
     const curLink = (queue.currentSong.url && queue.currentSong.url !== 'null')
       ? `[${curTitle}](${queue.currentSong.url})`
       : `**${curTitle}**`;
-    desc += `\n**${EMOJI_TAG.equalizer || '🎚️'} Đang phát hiện tại:**\n${curLink} | \`${queue.currentSong.duration || '??:??'}\`\n`;
+    desc += isEn
+      ? `\n**${EMOJI_TAG.equalizer || '🎚️'} Currently Playing:**\n${curLink} | \`${queue.currentSong.duration || '??:??'}\`\n`
+      : `\n**${EMOJI_TAG.equalizer || '🎚️'} Đang phát hiện tại:**\n${curLink} | \`${queue.currentSong.duration || '??:??'}\`\n`;
   }
 
-  desc += `\n-# Trang ${currentPage}/${totalPages} • Tổng cộng ${userSongs.length} bài • Dùng /move để đổi vị trí`;
+  desc += isEn
+    ? `\n-# Page ${currentPage}/${totalPages} • Total ${userSongs.length} songs • Use /move to reorder`
+    : `\n-# Trang ${currentPage}/${totalPages} • Tổng cộng ${userSongs.length} bài • Dùng /move để đổi vị trí`;
 
   containerComponents.push({
     type: 10,
     content: desc
   });
 
-  const btnRow = createQueuePaginationButtons(currentPage, totalPages);
+  const btnRow = createQueuePaginationButtons(currentPage, totalPages, isEn);
   containerComponents.push(btnRow.toJSON());
 
-  const deleteMenu = createQueueDeleteSelectMenu(queue, currentPage, pageSize);
+  const deleteMenu = createQueueDeleteSelectMenu(queue, currentPage, pageSize, isEn);
   if (deleteMenu) {
     containerComponents.push(deleteMenu.toJSON());
   }
@@ -771,7 +843,7 @@ function createQueueContainer(queue, page = 1) {
   };
 }
 
-function createQueuePaginationButtons(page = 1, totalPages = 1) {
+function createQueuePaginationButtons(page = 1, totalPages = 1, isEn = false) {
   const row = new ActionRowBuilder();
   const p = Math.max(1, parseInt(page, 10) || 1);
   const total = Math.max(1, parseInt(totalPages, 10) || 1);
@@ -780,7 +852,7 @@ function createQueuePaginationButtons(page = 1, totalPages = 1) {
     new ButtonBuilder()
       .setCustomId(`queue_page_${p - 1}`)
       .setEmoji(CUSTOM_EMOJIS.back)
-      .setLabel('Trước')
+      .setLabel(isEn ? 'Back' : 'Trước')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(p <= 1),
     new ButtonBuilder()
@@ -791,20 +863,20 @@ function createQueuePaginationButtons(page = 1, totalPages = 1) {
     new ButtonBuilder()
       .setCustomId(`queue_page_${p + 1}`)
       .setEmoji(CUSTOM_EMOJIS.skip)
-      .setLabel('Sau')
+      .setLabel(isEn ? 'Next' : 'Sau')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(p >= total),
     new ButtonBuilder()
       .setCustomId('queue_delete_modal')
       .setEmoji(CUSTOM_EMOJIS.trash)
-      .setLabel('Xóa theo số...')
+      .setLabel(isEn ? 'Remove by #...' : 'Xóa theo số...')
       .setStyle(ButtonStyle.Danger)
   );
 
   return row;
 }
 
-function createQueueDeleteSelectMenu(queue, page = 1, pageSize = 10) {
+function createQueueDeleteSelectMenu(queue, page = 1, pageSize = 10, isEn = false) {
   if (!queue) return null;
   const userSongs = queue.getUserSongs ? queue.getUserSongs() : (queue.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)' && s.requestedBy !== 'Auto (24/7 Lofi)');
   if (userSongs.length === 0) return null;
@@ -814,14 +886,18 @@ function createQueueDeleteSelectMenu(queue, page = 1, pageSize = 10) {
   const startIndex = (currentPage - 1) * pageSize;
   const optionsSlice = userSongs.slice(startIndex, startIndex + pageSize);
 
+  const placeholder = isEn
+    ? `🗑️ Remove track on Page ${currentPage}/${totalPages} (or Clear all)...`
+    : `🗑️ Xóa bài ở Trang ${currentPage}/${totalPages} (hoặc Xóa tất cả)...`;
+
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId(`menu_queue_remove_${currentPage}`)
-    .setPlaceholder(`🗑️ Xóa bài ở Trang ${currentPage}/${totalPages} (hoặc Xóa tất cả)...`);
+    .setPlaceholder(placeholder);
 
   selectMenu.addOptions(
     new StringSelectMenuOptionBuilder()
-      .setLabel('Xóa toàn bộ hàng chờ')
-      .setDescription(`Xóa sạch toàn bộ ${userSongs.length} bài hát trong danh sách chờ`)
+      .setLabel(isEn ? 'Clear Entire Queue' : 'Xóa toàn bộ hàng chờ')
+      .setDescription(isEn ? `Remove all ${userSongs.length} songs from queue` : `Xóa sạch toàn bộ ${userSongs.length} bài hát trong danh sách chờ`)
       .setValue('remove_all')
       .setEmoji(CUSTOM_EMOJIS.trash)
   );
@@ -833,7 +909,7 @@ function createQueueDeleteSelectMenu(queue, page = 1, pageSize = 10) {
     selectMenu.addOptions(
       new StringSelectMenuOptionBuilder()
         .setLabel(`${realIndex}. ${songTitle}`)
-        .setDescription(`Thời lượng: ${song.duration || '??:??'} • Nhấn để xóa bài này`)
+        .setDescription(isEn ? `Duration: ${song.duration || '??:??'} • Click to remove` : `Thời lượng: ${song.duration || '??:??'} • Nhấn để xóa bài này`)
         .setValue(`remove_${realIndex - 1}`)
         .setEmoji(CUSTOM_EMOJIS.trash)
     );
@@ -843,143 +919,161 @@ function createQueueDeleteSelectMenu(queue, page = 1, pageSize = 10) {
 }
 
 function createSettingsEmbed(guild, settings) {
-  const mode247Text = settings.mode247 ? '`Bật`' : '`Tắt`';
-  const autoplayText = settings.autoplay ? '`Bật`' : '`Tắt`';
-  const voiceLockText = settings.lockedVoiceChannelId ? `<#${settings.lockedVoiceChannelId}>` : '`Mọi phòng`';
-  const textLockText = settings.musicChannelId ? `<#${settings.musicChannelId}>` : '`Mọi kênh`';
-  const logChannelText = settings.logChannelId ? `<#${settings.logChannelId}>` : '`Tắt`';
-  const voiceStatusText = settings.updateVoiceStatus !== false ? '`Bật`' : '`Tắt`';
+  const isEn = settings.language === 'en';
+  const onText = isEn ? '`On`' : '`Bật`';
+  const offText = isEn ? '`Off`' : '`Tắt`';
+
+  const mode247Text = settings.mode247 ? onText : offText;
+  const autoplayText = settings.autoplay ? onText : offText;
+  const voteSkipText = settings.voteSkipEnabled ? onText : offText;
+  const voiceLockText = settings.lockedVoiceChannelId ? `<#${settings.lockedVoiceChannelId}>` : (isEn ? '`Any Channel`' : '`Mọi phòng`');
+  const textLockText = settings.musicChannelId ? `<#${settings.musicChannelId}>` : (isEn ? '`Any Channel`' : '`Mọi kênh`');
+  const logChannelText = settings.logChannelId ? `<#${settings.logChannelId}>` : offText;
+  const voiceStatusText = settings.updateVoiceStatus !== false ? onText : offText;
   const djText = settings.djOnly
-    ? (settings.djRoleId ? `<@&${settings.djRoleId}> (\`Bật\`)` : '`Bật (Cần Role DJ)`')
-    : '`Tắt (Mọi người)`';
-  const crossfadeText = settings.crossfadeDuration > 0 ? `\`${settings.crossfadeDuration} giây\`` : '`Tắt (0s)`';
-  const timeoutText = settings.mode247 ? '`Vô hiệu hóa (24/7 Bật)`' : `\`${settings.emptyChannelTimeout || 60} giây\``;
+    ? (settings.djRoleId ? `<@&${settings.djRoleId}> (${onText})` : (isEn ? '`On (DJ Role Required)`' : '`Bật (Cần Role DJ)`'))
+    : (isEn ? '`Off (Everyone)`' : '`Tắt (Mọi người)`');
+  const crossfadeText = settings.crossfadeDuration > 0 ? `\`${settings.crossfadeDuration} ${isEn ? 'sec' : 'giây'}\`` : (isEn ? '`Off (0s)`' : '`Tắt (0s)`');
+  const timeoutText = settings.mode247 ? (isEn ? '`Disabled (24/7 On)`' : '`Vô hiệu hóa (24/7 Bật)`') : `\`${settings.emptyChannelTimeout || 60} ${isEn ? 'sec' : 'giây'}\``;
   const volumeText = `\`${settings.defaultVolume}%\``;
-  const loopText = settings.loopMode === 'song' ? '`Lặp bài hát`' : settings.loopMode === 'queue' ? '`Lặp hàng chờ`' : '`Tắt`';
-  const announceText = settings.announceSongs ? '`Bật`' : '`Tắt`';
-  const skipOfftopicText = settings.autoSkipOfftopic !== false ? '`Bật`' : '`Tắt`';
+  const loopText = settings.loopMode === 'song' ? (isEn ? '`Loop Track`' : '`Lặp bài hát`') : settings.loopMode === 'queue' ? (isEn ? '`Loop Queue`' : '`Lặp hàng chờ`') : offText;
+  const announceText = settings.announceSongs ? onText : offText;
+  const skipOfftopicText = settings.autoSkipOfftopic !== false ? onText : offText;
   const languageText = settings.language === 'vi' ? '`Tiếng Việt (VI)`' : '`English (EN)`';
 
+  const title = isEn
+    ? `${EMOJI_TAG.settings} Music Settings Panel — ${guild.name}`
+    : `${EMOJI_TAG.settings} Bảng Cài Đặt Âm Nhạc — ${guild.name}`;
+
+  const description = isEn
+    ? 'Select an option from the **Dropdown Menu** below to quickly modify server settings:'
+    : 'Chọn một mục từ danh sách **Dropdown** bên dưới để thay đổi cài đặt nhanh chóng:';
+
+  const currentPrefix = isEn ? 'Current:' : 'Cài đặt hiện tại:';
+
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI_TAG.settings} Bảng Cài Đặt Âm Nhạc — ${guild.name}`)
-    .setDescription('Chọn một mục từ danh sách **Dropdown** bên dưới để thay đổi cài đặt nhanh chóng:')
+    .setTitle(title)
+    .setDescription(description)
     .setColor('#2B7FFF')
     .addFields(
-      { name: 'Ngôn ngữ hiển thị (Language)', value: `Cài đặt hiện tại: ${languageText}`, inline: true },
-      { name: 'Chế độ 24/7 (Luôn trực tuyến)', value: `Cài đặt hiện tại: ${mode247Text}`, inline: true },
-      { name: 'Tự động phát tương tự (Autoplay)', value: `Cài đặt hiện tại: ${autoplayText}`, inline: true },
+      { name: isEn ? 'Display Language' : 'Ngôn ngữ hiển thị (Language)', value: `${currentPrefix} ${languageText}`, inline: true },
+      { name: isEn ? '24/7 Mode (Always Online)' : 'Chế độ 24/7 (Luôn trực tuyến)', value: `${currentPrefix} ${mode247Text}`, inline: true },
+      { name: isEn ? 'Autoplay' : 'Tự động phát tương tự (Autoplay)', value: `${currentPrefix} ${autoplayText}`, inline: true },
+      { name: isEn ? 'Vote Skip' : 'Bỏ phiếu qua bài (Vote Skip)', value: `${currentPrefix} ${voteSkipText}`, inline: true },
       {
-        name: 'Tầng Autoplay kích hoạt',
+        name: isEn ? 'Active Autoplay Layers' : 'Tầng Autoplay kích hoạt',
         value: `\`${(Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0 ? settings.autoplayLayers : ['ytmix', 'lastfm', 'heuristic']).map(k => ({ ytmix: 'YouTube Mix', lastfm: 'Last.fm', heuristic: 'Heuristic' }[k] || k)).join(' ➔ ')}\``,
         inline: true
       },
       {
-        name: 'Tầng Lời bài hát (Lyrics)',
+        name: isEn ? 'Active Lyrics Layers' : 'Tầng Lời bài hát (Lyrics)',
         value: `\`${(Array.isArray(settings.lyricsLayers) && settings.lyricsLayers.length > 0 ? settings.lyricsLayers : ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics']).map(k => ({ youtube_cc: 'YouTube CC', zingmp3: 'Zing MP3', lrclib: 'LRCLIB', syncedlyrics: 'Microservice' }[k] || k)).join(' ➔ ')}\``,
         inline: true
       },
-      { name: 'Tự cắt kịch MV YouTube (SponsorBlock)', value: `Cài đặt hiện tại: ${skipOfftopicText}`, inline: true },
-      { name: 'Khóa phòng Voice cố định', value: `Cài đặt hiện tại: ${voiceLockText}`, inline: true },
-      { name: 'Khóa kênh lệnh chat', value: `Cài đặt hiện tại: ${textLockText}`, inline: true },
-      { name: 'Kênh nhật ký hoạt động (Log)', value: `Cài đặt hiện tại: ${logChannelText}`, inline: true },
-      { name: 'Trạng thái kênh Voice (Voice Status)', value: `Cài đặt hiện tại: ${voiceStatusText}`, inline: true },
-      { name: 'Chế độ DJ (Cần Role mới phát được)', value: `Cài đặt hiện tại: ${djText}`, inline: true },
-      { name: 'Hòa âm chuyển bài (Crossfade)', value: `Cài đặt hiện tại: ${crossfadeText}`, inline: true },
-      { name: 'Tự rời khi phòng trống', value: `Cài đặt hiện tại: ${timeoutText}`, inline: true },
-      { name: 'Âm lượng mặc định', value: `Cài đặt hiện tại: ${volumeText}`, inline: true },
-      { name: 'Chế độ lặp lại', value: `Cài đặt hiện tại: ${loopText}`, inline: true },
-      { name: 'Thông báo bài hát', value: `Cài đặt hiện tại: ${announceText}`, inline: true },
-      { name: 'Khôi phục mặc định', value: 'Đặt lại toàn bộ cài đặt gốc', inline: true }
+      { name: isEn ? 'SponsorBlock Auto-Trim' : 'Tự cắt kịch MV YouTube (SponsorBlock)', value: `${currentPrefix} ${skipOfftopicText}`, inline: true },
+      { name: isEn ? 'Locked Voice Channel' : 'Khóa phòng Voice cố định', value: `${currentPrefix} ${voiceLockText}`, inline: true },
+      { name: isEn ? 'Dedicated Commands Channel' : 'Khóa kênh lệnh chat', value: `${currentPrefix} ${textLockText}`, inline: true },
+      { name: isEn ? 'Activity Log Channel' : 'Kênh nhật ký hoạt động (Log)', value: `${currentPrefix} ${logChannelText}`, inline: true },
+      { name: isEn ? 'Voice Channel Status' : 'Trạng thái kênh Voice (Voice Status)', value: `${currentPrefix} ${voiceStatusText}`, inline: true },
+      { name: isEn ? 'DJ Only Mode' : 'Chế độ DJ (Cần Role mới phát được)', value: `${currentPrefix} ${djText}`, inline: true },
+      { name: isEn ? 'Crossfade Duration' : 'Hòa âm chuyển bài (Crossfade)', value: `${currentPrefix} ${crossfadeText}`, inline: true },
+      { name: isEn ? 'Empty Channel Timeout' : 'Tự rời khi phòng trống', value: `${currentPrefix} ${timeoutText}`, inline: true },
+      { name: isEn ? 'Default Volume' : 'Âm lượng mặc định', value: `${currentPrefix} ${volumeText}`, inline: true },
+      { name: isEn ? 'Loop Mode' : 'Chế độ lặp lại', value: `${currentPrefix} ${loopText}`, inline: true },
+      { name: isEn ? 'Song Announcements' : 'Thông báo bài hát', value: `${currentPrefix} ${announceText}`, inline: true }
     )
-    .setFooter({ text: 'Anna Music Settings • Thay đổi áp dụng ngay lập tức' })
+    .setFooter({ text: isEn ? 'Anna Music Settings • Changes apply instantly' : 'Anna Music Settings • Thay đổi áp dụng ngay lập tức' })
     .setTimestamp();
 
   return embed;
 }
 
 function createSettingsSelectMenu(settings) {
+  const isEn = settings.language === 'en';
+  const onText = isEn ? 'ON' : 'BẬT';
+  const offText = isEn ? 'OFF' : 'TẮT';
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('menu_settings')
-    .setPlaceholder('Chọn một cài đặt bên dưới để thay đổi...')
+    .setPlaceholder(isEn ? 'Select a setting below to modify...' : 'Chọn một cài đặt bên dưới để thay đổi...')
     .addOptions(
       new StringSelectMenuOptionBuilder()
-        .setLabel('Ngôn ngữ hiển thị (Language)')
-        .setDescription(`Chuyển đổi Tiếng Việt / English (Hiện tại: ${settings.language === 'vi' ? 'Tiếng Việt' : 'English'})`)
+        .setLabel(isEn ? 'Display Language' : 'Ngôn ngữ hiển thị (Language)')
+        .setDescription(isEn ? `Toggle Vietnamese / English (Current: ${settings.language === 'vi' ? 'Tiếng Việt' : 'English'})` : `Chuyển đổi Tiếng Việt / English (Hiện tại: ${settings.language === 'vi' ? 'Tiếng Việt' : 'English'})`)
         .setValue('set_language')
         .setEmoji(CUSTOM_EMOJIS.web),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Chế độ 24/7 (Luôn trực tuyến)')
-        .setDescription(`Bật/Tắt giữ bot ở phòng Voice (Hiện tại: ${settings.mode247 ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? '24/7 Mode (Always Online)' : 'Chế độ 24/7 (Luôn trực tuyến)')
+        .setDescription(isEn ? `Keep bot in voice channel (Current: ${settings.mode247 ? onText : offText})` : `Bật/Tắt giữ bot ở phòng Voice (Hiện tại: ${settings.mode247 ? onText : offText})`)
         .setValue('set_247')
         .setEmoji(CUSTOM_EMOJIS.radio),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Tự động phát tương tự (Autoplay)')
-        .setDescription(`Tự động tìm bài tương tự khi hết nhạc (Hiện tại: ${settings.autoplay ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'Autoplay' : 'Tự động phát tương tự (Autoplay)')
+        .setDescription(isEn ? `Find similar tracks automatically (Current: ${settings.autoplay ? onText : offText})` : `Tự động tìm bài tương tự khi hết nhạc (Hiện tại: ${settings.autoplay ? onText : offText})`)
         .setValue('set_autoplay')
         .setEmoji(CUSTOM_EMOJIS.autoplay),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Cấu hình tầng Autoplay (Autoplay Layers)')
-        .setDescription('Tích chọn & tùy chỉnh thứ tự các tầng: YouTube Mix, Gemini AI...')
+        .setLabel(isEn ? 'Autoplay Layers Configuration' : 'Cấu hình tầng Autoplay (Autoplay Layers)')
+        .setDescription(isEn ? 'Select & customize recommendation layers' : 'Tích chọn & tùy chỉnh thứ tự các tầng: YouTube Mix, Gemini AI...')
         .setValue('set_autoplay_layers')
         .setEmoji(CUSTOM_EMOJIS.equalizer),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Tự cắt kịch MV YouTube (SponsorBlock)')
-        .setDescription(`Bỏ qua phân đoạn kịch mở đầu/kết thúc MV (Hiện tại: ${settings.autoSkipOfftopic !== false ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'SponsorBlock Auto-Trim' : 'Tự cắt kịch MV YouTube (SponsorBlock)')
+        .setDescription(isEn ? `Auto-skip video intro/outro sketches (Current: ${settings.autoSkipOfftopic !== false ? onText : offText})` : `Bỏ qua phân đoạn kịch mở đầu/kết thúc MV (Hiện tại: ${settings.autoSkipOfftopic !== false ? onText : offText})`)
         .setValue('set_skip_offtopic')
         .setEmoji(CUSTOM_EMOJIS.equalizer),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Khóa phòng Voice cố định')
-        .setDescription(`Chỉ phát nhạc tại phòng voice chỉ định (Hiện tại: ${settings.lockedVoiceChannelId ? 'ĐÃ KHÓA' : 'MỌI PHÒNG'})`)
+        .setLabel(isEn ? 'Lock Voice Channel' : 'Khóa phòng Voice cố định')
+        .setDescription(isEn ? `Bind bot to specific voice room (Current: ${settings.lockedVoiceChannelId ? 'LOCKED' : 'ANY'})` : `Chỉ phát nhạc tại phòng voice chỉ định (Hiện tại: ${settings.lockedVoiceChannelId ? 'ĐÃ KHÓA' : 'MỌI PHÒNG'})`)
         .setValue('set_voice_lock')
         .setEmoji(CUSTOM_EMOJIS.padlock),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Khóa kênh văn bản dùng lệnh')
-        .setDescription(`Chỉ nhận lệnh tại kênh chat chỉ định (Hiện tại: ${settings.musicChannelId ? 'ĐÃ KHÓA' : 'MỌI KÊNH'})`)
+        .setLabel(isEn ? 'Lock Commands Channel' : 'Khóa kênh văn bản dùng lệnh')
+        .setDescription(isEn ? `Accept commands in dedicated channel only (Current: ${settings.musicChannelId ? 'LOCKED' : 'ANY'})` : `Chỉ nhận lệnh tại kênh chat chỉ định (Hiện tại: ${settings.musicChannelId ? 'ĐÃ KHÓA' : 'MỌI KÊNH'})`)
         .setValue('set_channel_lock')
         .setEmoji(CUSTOM_EMOJIS.settings),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Kênh ghi nhật ký hoạt động (Log)')
-        .setDescription(`Ghi toàn bộ nhật ký bot vào kênh Discord (Hiện tại: ${settings.logChannelId ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'Activity Log Channel' : 'Kênh ghi nhật ký hoạt động (Log)')
+        .setDescription(isEn ? `Log playback events to Discord channel (Current: ${settings.logChannelId ? onText : offText})` : `Ghi toàn bộ nhật ký bot vào kênh Discord (Hiện tại: ${settings.logChannelId ? onText : offText})`)
         .setValue('set_log_channel')
         .setEmoji(CUSTOM_EMOJIS.settings),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Trạng thái kênh Voice (Voice Status)')
-        .setDescription(`Bật/Tắt đổi tên bài hát trên kênh Voice (Hiện tại: ${settings.updateVoiceStatus !== false ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'Voice Channel Status' : 'Trạng thái kênh Voice (Voice Status)')
+        .setDescription(isEn ? `Update song title in voice channel status (Current: ${settings.updateVoiceStatus !== false ? onText : offText})` : `Bật/Tắt đổi tên bài hát trên kênh Voice (Hiện tại: ${settings.updateVoiceStatus !== false ? onText : offText})`)
         .setValue('set_voice_status')
         .setEmoji(CUSTOM_EMOJIS.signal),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Chế độ DJ (Cần Role mới phát được)')
-        .setDescription(`Chỉ người có vai trò DJ mới dùng được lệnh (Hiện tại: ${settings.djOnly ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'DJ Only Mode' : 'Chế độ DJ (Cần Role mới phát được)')
+        .setDescription(isEn ? `Restricted command access to DJ role (Current: ${settings.djOnly ? onText : offText})` : `Chỉ người có vai trò DJ mới dùng được lệnh (Hiện tại: ${settings.djOnly ? onText : offText})`)
         .setValue('set_dj_only')
         .setEmoji(CUSTOM_EMOJIS.settings),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Hòa âm chuyển bài (Crossfade)')
-        .setDescription(`Hiệu ứng mượt mà khi đổi bài (Hiện tại: ${settings.crossfadeDuration}s)`)
+        .setLabel(isEn ? 'Crossfade Duration' : 'Hòa âm chuyển bài (Crossfade)')
+        .setDescription(isEn ? `Smooth transition effect (Current: ${settings.crossfadeDuration}s)` : `Hiệu ứng mượt mà khi đổi bài (Hiện tại: ${settings.crossfadeDuration}s)`)
         .setValue('set_crossfade')
         .setEmoji(CUSTOM_EMOJIS.equalizer),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Thời gian tự rời khi phòng trống')
-        .setDescription(`Số giây chờ trước khi out nếu không có ai (Hiện tại: ${settings.emptyChannelTimeout || 60}s)`)
+        .setLabel(isEn ? 'Empty Room Disconnect Timeout' : 'Thời gian tự rời khi phòng trống')
+        .setDescription(isEn ? `Seconds to wait before leaving (Current: ${settings.emptyChannelTimeout || 60}s)` : `Số giây chờ trước khi out nếu không có ai (Hiện tại: ${settings.emptyChannelTimeout || 60}s)`)
         .setValue('set_timeout')
         .setEmoji(CUSTOM_EMOJIS.disconnect),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Âm lượng mặc định')
-        .setDescription(`Chuyển đổi âm lượng 30% / 50% / 80% / 100% (Hiện tại: ${settings.defaultVolume}%)`)
+        .setLabel(isEn ? 'Default Volume' : 'Âm lượng mặc định')
+        .setDescription(isEn ? `Volume level 30% / 50% / 80% / 100% (Current: ${settings.defaultVolume}%)` : `Chuyển đổi âm lượng 30% / 50% / 80% / 100% (Hiện tại: ${settings.defaultVolume}%)`)
         .setValue('set_volume')
         .setEmoji(CUSTOM_EMOJIS.volumeHigh),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Chế độ lặp lại')
-        .setDescription(`Tắt / Lặp bài hát / Lặp hàng chờ (Hiện tại: ${settings.loopMode})`)
+        .setLabel(isEn ? 'Loop Mode' : 'Chế độ lặp lại')
+        .setDescription(isEn ? `Off / Track / Queue (Current: ${settings.loopMode})` : `Tắt / Lặp bài hát / Lặp hàng chờ (Hiện tại: ${settings.loopMode})`)
         .setValue('set_loop')
         .setEmoji(CUSTOM_EMOJIS.loop),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Thông báo bài hát')
-        .setDescription(`Gửi Embed thông báo khi chuyển bài (Hiện tại: ${settings.announceSongs ? 'BẬT' : 'TẮT'})`)
+        .setLabel(isEn ? 'Song Announcements' : 'Thông báo bài hát')
+        .setDescription(isEn ? `Send embed when track changes (Current: ${settings.announceSongs ? onText : offText})` : `Gửi Embed thông báo khi chuyển bài (Hiện tại: ${settings.announceSongs ? onText : offText})`)
         .setValue('set_announce')
         .setEmoji(CUSTOM_EMOJIS.musicNote),
       new StringSelectMenuOptionBuilder()
-        .setLabel('Khôi phục mặc định')
-        .setDescription('Đặt lại toàn bộ cài đặt gốc')
+        .setLabel(isEn ? 'Reset to Defaults' : 'Khôi phục mặc định')
+        .setDescription(isEn ? 'Restore all original settings' : 'Đặt lại toàn bộ cài đặt gốc')
         .setValue('set_reset')
         .setEmoji(CUSTOM_EMOJIS.trash)
     );
@@ -1011,6 +1105,7 @@ const AUTOPLAY_LAYER_INFO = {
 };
 
 function createAutoplayLayersEmbed(guild, settings) {
+  const isEn = settings.language === 'en';
   const activeLayers = (Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0)
     ? settings.autoplayLayers
     : ['ytmix', 'lastfm', 'heuristic'];
@@ -1023,7 +1118,10 @@ function createAutoplayLayersEmbed(guild, settings) {
   activeLayers.forEach((key, idx) => {
     const info = AUTOPLAY_LAYER_INFO[key] || { name: key, badge: EMOJI_TAG.musicNote, desc: '' };
     const num = numberEmojis[idx] || `${idx + 1}.`;
-    activeListText += `${num} ${info.badge} **${info.name}**\n↳ *${info.desc}*\n`;
+    const descText = isEn
+      ? (key === 'ytmix' ? 'YouTube official Radio Mix algorithm' : (key === 'lastfm' ? 'Global similar tracks library' : 'Same artist or popular fallback'))
+      : info.desc;
+    activeListText += `${num} ${info.badge} **${info.name}**\n↳ *${descText}*\n`;
   });
 
   let inactiveListText = '';
@@ -1033,52 +1131,62 @@ function createAutoplayLayersEmbed(guild, settings) {
       inactiveListText += `• ❌ ~~${info.name}~~\n`;
     });
   } else {
-    inactiveListText = '*Không có (Tất cả 3 tầng đều đang bật)*\n';
+    inactiveListText = isEn ? '*None (All 3 layers are active)*\n' : '*Không có (Tất cả 3 tầng đều đang bật)*\n';
   }
 
+  const desc = isEn
+    ? ('When the queue ends, the bot automatically selects the next track using active layers in order:\n\n' +
+       `${EMOJI_TAG.play} **Active Layers (By Priority):**\n` +
+       activeListText + '\n' +
+       `${EMOJI_TAG.stop} **Disabled Layers:**\n` +
+       inactiveListText + '\n' +
+       '💡 **Guide:**\n' +
+       '• Open **Dropdown Menu** below to select your desired layers (1 to 3 layers).\n' +
+       '• Or use the **Quick Presets** below for 1-click configuration.')
+    : ('Khi hàng chờ phát hết nhạc, bot sẽ tự động tìm bài hát tiếp theo lần lượt theo các tầng được tích chọn bên dưới:\n\n' +
+       `${EMOJI_TAG.play} **Các tầng đang kích hoạt (Theo thứ tự ưu tiên):**\n` +
+       activeListText + '\n' +
+       `${EMOJI_TAG.stop} **Các tầng đã tắt:**\n` +
+       inactiveListText + '\n' +
+       '💡 **Hướng dẫn:**\n' +
+       '• Mở **Dropdown Menu** bên dưới để **tích chọn những tầng bạn muốn** (chọn từ 1 đến 3 tầng).\n' +
+       '• Hoặc dùng các nút **Preset nhanh** bên dưới để chuyển đổi 1 chạm.');
+
   return new EmbedBuilder()
-    .setTitle(`${EMOJI_TAG.equalizer} Cấu Hình Thứ Tự Tầng Gợi Ý Autoplay — ${guild.name}`)
+    .setTitle(isEn ? `${EMOJI_TAG.equalizer} Autoplay Layers Configuration — ${guild.name}` : `${EMOJI_TAG.equalizer} Cấu Hình Thứ Tự Tầng Gợi Ý Autoplay — ${guild.name}`)
     .setColor('#2B7FFF')
-    .setDescription(
-      'Khi hàng chờ phát hết nhạc, bot sẽ tự động tìm bài hát tiếp theo lần lượt theo các tầng được tích chọn bên dưới:\n\n' +
-      `${EMOJI_TAG.play} **Các tầng đang kích hoạt (Theo thứ tự ưu tiên):**\n` +
-      activeListText + '\n' +
-      `${EMOJI_TAG.stop} **Các tầng đã tắt:**\n` +
-      inactiveListText + '\n' +
-      '💡 **Hướng dẫn:**\n' +
-      '• Mở **Dropdown Menu** bên dưới để **tích chọn những tầng bạn muốn** (chọn từ 1 đến 3 tầng).\n' +
-      '• Hoặc dùng các nút **Preset nhanh** bên dưới để chuyển đổi 1 chạm.'
-    )
-    .setFooter({ text: 'Chỉ Quản trị viên máy chủ mới có quyền thay đổi • Cập nhật tức thì' })
+    .setDescription(desc)
+    .setFooter({ text: isEn ? 'Server Administrators only • Instant update' : 'Chỉ Quản trị viên máy chủ mới có quyền thay đổi • Cập nhật tức thì' })
     .setTimestamp();
 }
 
 function createAutoplayLayersComponents(settings) {
+  const isEn = settings.language === 'en';
   const activeLayers = (Array.isArray(settings.autoplayLayers) && settings.autoplayLayers.length > 0)
     ? settings.autoplayLayers
     : ['ytmix', 'lastfm', 'heuristic'];
 
   const selectMenu = new StringSelectMenuBuilder()
     .setCustomId('menu_autoplay_layers')
-    .setPlaceholder('🔽 Bấm vào đây để tích chọn các tầng Autoplay...')
+    .setPlaceholder(isEn ? '🔽 Click here to select Autoplay layers...' : '🔽 Bấm vào đây để tích chọn các tầng Autoplay...')
     .setMinValues(1)
     .setMaxValues(3)
     .addOptions(
       new StringSelectMenuOptionBuilder()
         .setLabel('YouTube Mix (RD)')
-        .setDescription('Thuật toán Radio Mix chuẩn gu của YouTube')
+        .setDescription(isEn ? 'YouTube official Radio Mix algorithm' : 'Thuật toán Radio Mix chuẩn gu của YouTube')
         .setValue('ytmix')
         .setEmoji(CUSTOM_EMOJIS.playCircle)
         .setDefault(activeLayers.includes('ytmix')),
       new StringSelectMenuOptionBuilder()
         .setLabel('Last.fm Similar')
-        .setDescription('Kho dữ liệu bài hát tương tự quốc tế')
+        .setDescription(isEn ? 'Global similar tracks library' : 'Kho dữ liệu bài hát tương tự quốc tế')
         .setValue('lastfm')
         .setEmoji(CUSTOM_EMOJIS.radio)
         .setDefault(activeLayers.includes('lastfm')),
       new StringSelectMenuOptionBuilder()
         .setLabel('Heuristic Fallback')
-        .setDescription('Tìm kiếm bài cùng ca sĩ hoặc bài nổi bật')
+        .setDescription(isEn ? 'Same artist or popular tracks search' : 'Tìm kiếm bài cùng ca sĩ hoặc bài nổi bật')
         .setValue('heuristic')
         .setEmoji(CUSTOM_EMOJIS.search)
         .setDefault(activeLayers.includes('heuristic'))
@@ -1090,22 +1198,22 @@ function createAutoplayLayersComponents(settings) {
     new ButtonBuilder()
       .setCustomId('btn_layer_yt_only')
       .setEmoji(CUSTOM_EMOJIS.playCircle)
-      .setLabel('Chỉ YouTube Mix')
+      .setLabel(isEn ? 'YouTube Mix Only' : 'Chỉ YouTube Mix')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('btn_layer_yt_ai')
       .setEmoji(CUSTOM_EMOJIS.ai)
-      .setLabel('YouTube Mix + AI')
+      .setLabel(isEn ? 'YouTube Mix + AI' : 'YouTube Mix + AI')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('btn_layer_default')
       .setEmoji(CUSTOM_EMOJIS.loop)
-      .setLabel('Mặc định (4 tầng)')
+      .setLabel(isEn ? 'Default (3 Layers)' : 'Mặc định (3 tầng)')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('btn_settings_back')
       .setEmoji(CUSTOM_EMOJIS.back)
-      .setLabel('Quay lại Cài đặt')
+      .setLabel(isEn ? 'Back to Settings' : 'Quay lại Cài đặt')
       .setStyle(ButtonStyle.Secondary)
   );
 

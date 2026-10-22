@@ -4,6 +4,7 @@ const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'volume',
@@ -28,33 +29,36 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+    const guildId = ctx.guild.id;
 
     if (!hasMusicPermission(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
+      const guildSettings = settingsManager.get(guildId);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.reply({ embeds: [createErrorEmbed(`Bạn cần có vai trò ${roleText} để chỉnh âm lượng.`)] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.dj_only', { role: roleText }))] });
     }
 
-    const queue = musicManager.get(ctx.guild.id);
+    const queue = musicManager.get(guildId);
     if (!queue) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bot hiện không ở trong kênh Voice!')] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_queue'))] });
     }
 
-    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!')] });
+    const botVoice = ctx.guild.members.me?.voice?.channel;
+    const memberVoice = ctx.member?.voice?.channel;
+    if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.different_voice', { channel: botVoice.name }))] });
     }
 
     const level = ctx.options.getInteger('level');
     if (level === null && (!args || args.length === 0)) {
-      return ctx.reply({ embeds: [createSuccessEmbed(`🔊 Âm lượng hiện tại: **${queue.volume}%**`)] });
+      return ctx.reply({ embeds: [createSuccessEmbed(`🔊 ${t(guildId, 'player.volume_set', { volume: queue.volume })}`)] });
     }
 
     const vol = level !== null ? level : parseInt(args[0], 10);
     if (isNaN(vol) || vol < 1 || vol > 100) {
-      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng nhập âm lượng hợp lệ từ 1 đến 100!')] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'player.volume_invalid'))] });
     }
 
     queue.setVolume(vol);
-    return ctx.reply({ embeds: [createSuccessEmbed(`🔊 Đã chỉnh âm lượng thành **${vol}%**`)] });
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'player.volume_set', { volume: vol }))] });
   }
 };

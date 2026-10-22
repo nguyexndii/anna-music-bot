@@ -11,6 +11,7 @@ const userPlaylistManager = require('../structures/UserPlaylistManager');
 const historyManager = require('../structures/HistoryManager');
 const { logAction } = require('../utils/debugLogger');
 const { EMOJI_TAG } = require('../utils/embed');
+const { t } = require('../utils/i18n');
 
 const playlistHistoryManager = require('../structures/PlaylistHistoryManager');
 const ytdlp = require('yt-dlp-exec');
@@ -159,10 +160,9 @@ module.exports = function createApiRouter(client) {
     return false;
   }
 
-  // Helper kiểm tra quyền Admin của User trong máy chủ (Kiểm tra nghiêm ngặt thời gian thực)
+  // Helper kiểm tra quyền Admin của User trong máy chủ (Kiểm tra nghiêm ngặt quyền thực tế tại máy chủ đó)
   async function checkIsAdmin(guildId, userId) {
     if (!guildId || !userId) return false;
-    if (config.adminId && userId === config.adminId) return true;
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return false;
     try {
@@ -188,6 +188,31 @@ module.exports = function createApiRouter(client) {
     } catch (e) {
       return false;
     }
+  }
+
+  // Helper gửi thông báo Mini Embed công khai vào kênh Discord khi người dùng nạp bài/playlist từ Web
+  async function sendWebQueueNotification(guild, queue, guildSettings, descriptionText) {
+    try {
+      const botMember = guild.members.me || await guild.members.fetch(client.user.id).catch(() => null);
+      let targetChannel = queue?.textChannel;
+      if (!targetChannel && guildSettings?.musicChannelId) {
+        const ch = guild.channels.cache.get(guildSettings.musicChannelId);
+        if (ch?.isTextBased?.() && ch.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) {
+          targetChannel = ch;
+        }
+      }
+      if (!targetChannel) {
+        targetChannel = guild.channels.cache.find(c => c.isTextBased?.() && c.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages']));
+      }
+      if (targetChannel) {
+        const { EmbedBuilder } = require('discord.js');
+        const embed = new EmbedBuilder()
+          .setColor('#2B7FFF')
+          .setDescription(descriptionText)
+          .setTimestamp();
+        await targetChannel.send({ embeds: [embed], flags: 4096 }).catch(() => {});
+      }
+    } catch (_) {}
   }
 
   // Helper chuẩn hóa thông tin người order bài hát cho Web UI (tránh hiện ID raw / mention <@...>)
@@ -281,25 +306,18 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    // Chủ bot (Super Admin) luôn có quyền hỗ trợ quản trị
-    if (config.adminId && user.userId === config.adminId) {
-      req.guild = guild;
-      req.member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
-      return next();
-    }
-
     // Chặn IDOR: Thành viên chỉ được thao tác trên đúng máy chủ được cấp token
     if (String(user.guildId) !== String(targetGuildId)) {
       return res.status(403).json({
         success: false,
         code: 'CROSS_GUILD_FORBIDDEN',
-        error: 'Quyền bị từ chối: Phiên đăng nhập của bạn không thuộc máy chủ này!'
+        error: 'Quyền bị từ chối: Phiên đăng nhập của bạn không thuộc máy chủ này! Vui lòng lấy mã PIN mới tại máy chủ này.'
       });
     }
 
     // Kiểm tra thực tế xem User có còn là thành viên của Discord Server hay không
     const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
-    if (!member) {
+    if (!member && (!config.adminId || user.userId !== config.adminId)) {
       return res.status(403).json({
         success: false,
         code: 'NOT_GUILD_MEMBER',
@@ -838,6 +856,10 @@ module.exports = function createApiRouter(client) {
           t.requestedById = member.id;
         }
         await queue.addSongs(validTracks, requesterObj);
+        sendWebQueueNotification(req.guild, queue, guildSettings, t(guildId, 'web_notify.added_tracks', {
+          user: member.displayName || user.username,
+          count: validTracks.length
+        }));
         return res.json({
           success: true,
           isPlaylist: true,
@@ -921,11 +943,15 @@ module.exports = function createApiRouter(client) {
 
           if (notifyChannel?.isTextBased?.()) {
             const { EmbedBuilder } = require('discord.js');
-            const playlistTitle = sanitizeDiscordText(rawResults[0]?.playlistTitle || `Danh sách phát (${rawResults.length} bài)`, 100);
+            const isEn = guildSettings?.language === 'en';
+            const playlistTitle = sanitizeDiscordText(rawResults[0]?.playlistTitle || (isEn ? `Playlist (${rawResults.length} tracks)` : `Danh sách phát (${rawResults.length} bài)`), 100);
             const userDisplayName = member.displayName || user.username;
+            const notifDesc = isEn
+              ? `${EMOJI_TAG.playlist || '📂'} **${userDisplayName}** added: [**${playlistTitle}**](${requestedUrl}) • \`${rawResults.length} songs\``
+              : `${EMOJI_TAG.playlist || '📂'} **${userDisplayName}** đã thêm: [**${playlistTitle}**](${requestedUrl}) • \`${rawResults.length} bài\``;
             const notifEmbed = new EmbedBuilder()
               .setColor('#2B7FFF')
-              .setDescription(`${EMOJI_TAG.playlist || '📂'} **${userDisplayName}** đã thêm: [**${playlistTitle}**](${requestedUrl}) • \`${rawResults.length} bài\``);
+              .setDescription(notifDesc);
             notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).catch(() => {});
           }
         } catch (e) {}
@@ -980,16 +1006,20 @@ module.exports = function createApiRouter(client) {
 
         if (notifyChannel?.isTextBased?.()) {
           const { EmbedBuilder } = require('discord.js');
+          const isEn = guildSettings?.language === 'en';
           const safeMarkdownTitle = targetTrack.title.replace(/\[/g, '(').replace(/\]/g, ')');
           const userDisplayName = user.displayName || user.username || member.displayName;
           const posText = typeof addRes?.position === 'number' ? ` • \`#${addRes.position}\`` : '';
+          const notifDesc = isEn
+            ? (isFirst
+                ? `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** is playing: [**${safeMarkdownTitle}**](${targetTrack.url})`
+                : `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** added to queue: [**${safeMarkdownTitle}**](${targetTrack.url})${posText}`)
+            : (isFirst
+                ? `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** đang phát: [**${safeMarkdownTitle}**](${targetTrack.url})`
+                : `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** đã thêm: [**${safeMarkdownTitle}**](${targetTrack.url})${posText}`);
           const notifEmbed = new EmbedBuilder()
             .setColor('#2B7FFF')
-            .setDescription(
-              isFirst
-                ? `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** đang phát: [**${safeMarkdownTitle}**](${targetTrack.url})`
-                : `${EMOJI_TAG.web || '🌐'} **${userDisplayName}** đã thêm: [**${safeMarkdownTitle}**](${targetTrack.url})${posText}`
-            );
+            .setDescription(notifDesc);
           logAction('MESSAGE_SEND', {
             type: 'WEB_PLAYER_NOTIFY',
             channelId: notifyChannel.id,
@@ -1210,10 +1240,41 @@ module.exports = function createApiRouter(client) {
           resultMessage = `Đã tua đến ${formatted}`;
           break;
         }
-        case 'skip':
-          queue.skip();
-          resultMessage = `Đã chuyển bài hát tiếp theo bởi @${user.displayName || user.username}`;
+        case 'skip': {
+          const member = req.member || (req.guild ? await req.guild.members.fetch(user.userId).catch(() => null) : null);
+          if (member) {
+            const skipResult = queue.checkOrCastSkipVote(member);
+            if (skipResult.status === 'skipped') {
+              resultMessage = `Đã chuyển bài hát tiếp theo bởi @${user.displayName || user.username}`;
+              if (skipResult.reason === 'vote_passed') {
+                queue.textChannel?.send(t(guildId, 'skip.vote_passed', {
+                  title: skipResult.title,
+                  current: skipResult.current,
+                  required: skipResult.required
+                })).catch(() => {});
+              }
+            } else if (skipResult.status === 'vote_progress') {
+              resultMessage = `Đã bỏ phiếu qua bài (${skipResult.current}/${skipResult.required}) — Cần thêm ${skipResult.needed} phiếu!`;
+              queue.textChannel?.send(t(guildId, 'skip.vote_progress', {
+                user: skipResult.user,
+                current: skipResult.current,
+                required: skipResult.required,
+                needed: skipResult.needed
+              })).catch(() => {});
+            } else if (skipResult.status === 'vote_retracted') {
+              resultMessage = `Đã rút phiếu bỏ qua (${skipResult.current}/${skipResult.required})`;
+              queue.textChannel?.send(t(guildId, 'skip.vote_retracted', {
+                user: skipResult.user,
+                current: skipResult.current,
+                required: skipResult.required
+              })).catch(() => {});
+            }
+          } else {
+            queue.skip();
+            resultMessage = `Đã chuyển bài hát tiếp theo bởi @${user.displayName || user.username}`;
+          }
           break;
+        }
         case 'previous': {
           const ok = await queue.playPrevious();
           resultMessage = ok ? 'Đã quay lại bài hát trước đó ⏮️' : 'Không có bài hát trước đó để quay lại';
@@ -1353,6 +1414,10 @@ module.exports = function createApiRouter(client) {
             avatar: memberAvatar
           };
           await targetQueue.addSongs(validTracks, requesterObj);
+          sendWebQueueNotification(req.guild, targetQueue, guildSettings, t(guildId, 'web_notify.added_favorites', {
+            user: req.member.displayName || user.username,
+            count: validTracks.length
+          }));
           resultMessage = `Đã nạp toàn bộ ${validTracks.length} bài hát yêu thích vào hàng chờ ❤️`;
           break;
         }
@@ -1412,6 +1477,11 @@ module.exports = function createApiRouter(client) {
             avatar: memberAvatar
           };
           await targetQueue.addSongs(validTracks, requesterObj);
+          sendWebQueueNotification(req.guild, targetQueue, guildSettings, t(guildId, 'web_notify.added_playlist', {
+            user: req.member.displayName || user.username,
+            name: targetPlaylist.name,
+            count: validTracks.length
+          }));
           resultMessage = `Đã nạp toàn bộ ${validTracks.length} bài hát từ playlist "${targetPlaylist.name}" vào hàng chờ 🎵`;
           break;
         }
@@ -1760,6 +1830,33 @@ module.exports = function createApiRouter(client) {
         queryArtist = '';
       }
       const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl);
+
+      let activeSyncedLyrics = lyricsData?.syncedLyrics || null;
+      let activeAutoOffsetMs = lyricsData?.autoOffsetMs || 0;
+      const callerQueue = req.user?.guildId && client.musicManager ? client.musicManager.get(req.user.guildId) : null;
+      const currentTrack = callerQueue?.currentSong;
+      if (currentTrack && lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0) && (!targetUrl || targetUrl === currentTrack.url)) {
+        const trimStartMs = (currentTrack.trimStart || 0) * 1000;
+        const realDurMs = currentTrack.durationMs || 0;
+        if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
+          activeSyncedLyrics = lyricsData.syncedLyrics
+            .map(line => ({
+              ...line,
+              time: line.time - trimStartMs,
+              time_ms: (line.time_ms ?? line.time) - trimStartMs
+            }))
+            .filter(line => line.time >= -500 && (realDurMs <= 0 || line.time <= realDurMs + 2000))
+            .map(line => ({
+              ...line,
+              time: Math.max(0, line.time),
+              time_ms: Math.max(0, line.time_ms)
+            }));
+          activeAutoOffsetMs = 0;
+        } else {
+          activeAutoOffsetMs = 0;
+        }
+      }
+
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
         success: hasLyrics,
@@ -1767,12 +1864,12 @@ module.exports = function createApiRouter(client) {
         artist: lyricsData?.artist || artist,
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
-        autoOffsetMs: lyricsData?.autoOffsetMs || 0,
+        autoOffsetMs: activeAutoOffsetMs,
         userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
         trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
-        syncedLyrics: lyricsData?.syncedLyrics || null,
-        synced: !!lyricsData?.syncedLyrics,
+        syncedLyrics: activeSyncedLyrics,
+        synced: !!activeSyncedLyrics,
         source: lyricsData?.source || 'lrclib',
         isRemixOrDurationMismatch: Boolean(lyricsData?.isRemixOrDurationMismatch),
         isExternalSource: Boolean(lyricsData?.source && lyricsData.source !== 'youtube_cc')

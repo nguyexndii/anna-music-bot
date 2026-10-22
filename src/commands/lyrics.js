@@ -1,8 +1,10 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
+const settingsManager = require('../structures/SettingsManager');
 const { fetchLyrics } = require('../utils/lyricsHelper');
 const { createEmbed, createErrorEmbed, parseDurationToMs, EMOJI_TAG } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'lyrics',
@@ -25,7 +27,10 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
-    const queue = musicManager.get(ctx.guild.id);
+    const guildId = ctx.guild.id;
+    const isEn = settingsManager.get(guildId)?.language === 'en';
+
+    const queue = musicManager.get(guildId);
     let targetTitle = '';
     let targetArtist = '';
     let targetDurationMs = 0;
@@ -42,40 +47,49 @@ module.exports = {
       targetDurationMs = queue.currentSong.durationMs || (queue.currentSong.duration ? parseDurationToMs(queue.currentSong.duration) : 0);
       targetUrl = queue.currentSong.url || null;
     } else {
-      return ctx.reply({ content: 'Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`', flags: 64 });
+      const prompt = isEn
+        ? 'Please enter a song name or play a song to view lyrics!\nExample: `/lyrics stay the kid laroi`'
+        : 'Vui lòng nhập tên bài hát hoặc đang phát một bài hát để xem lời!\nVí dụ: `/lyrics có em madihu`';
+      return ctx.reply({ content: prompt, flags: 64 });
     }
 
     if (targetArtist === 'YouTube Music' || targetArtist === 'YouTube' || targetArtist === 'Unknown') {
       targetArtist = '';
     }
 
-    await ctx.deferReply({ flags: 64 });
+    await ctx.deferReply();
 
     try {
-      const settingsManager = require('../structures/SettingsManager');
-      const guildSettings = ctx.guild?.id ? settingsManager.get(ctx.guild.id) : null;
-      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl, guildSettings?.lyricsLayers);
+      const layers = settingsManager.get(guildId).lyricsLayers;
+      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl, layers);
 
-      if (!result || !result.lyrics || result.lyrics.trim().length === 0) {
-        const notFoundEmbed = createErrorEmbed(`Không tìm thấy lời bài hát cho **${targetTitle}**!\nHãy thử nhập đầy đủ tên bài hát kèm tên ca sĩ (vd: \`/lyrics Có Em Madihu\`).`);
-        return ctx.editReply({ embeds: [notFoundEmbed] });
+      if (!result || !result.lyrics) {
+        return ctx.editReply({
+          embeds: [createErrorEmbed(t(guildId, 'commands.lyrics_not_found', { title: targetTitle }))]
+        });
       }
 
       let lyricsText = result.lyrics.trim();
-      if (lyricsText.length > 4000) {
-        lyricsText = lyricsText.slice(0, 3950) + '\n\n*... (Lời bài hát quá dài đã được rút gọn)*';
+      const truncatedNotice = isEn ? '\n\n*... (Lyrics truncated)*' : '\n\n*... (Lời bài hát đã được rút gọn)*';
+      if (lyricsText.length > 3900) {
+        lyricsText = lyricsText.slice(0, 3900) + truncatedNotice;
       }
 
-      const lyricsEmbed = createEmbed(
-        `${EMOJI_TAG.lyrics} ${result.title} — ${result.artist}`,
-        lyricsText,
-        '#5865F2'
-      ).setFooter({ text: `Anna Music 24/7 • ${ctx.guild.name}` });
+      const lyricsTitle = isEn
+        ? `${EMOJI_TAG.lyrics} Lyrics • ${result.title || targetTitle}`
+        : `${EMOJI_TAG.lyrics} Lời Bài Hát • ${result.title || targetTitle}`;
 
-      return ctx.editReply({ embeds: [lyricsEmbed] });
+      const embed = createEmbed(
+        lyricsTitle,
+        lyricsText
+      );
+
+      return ctx.editReply({ embeds: [embed] });
     } catch (err) {
-      console.error('[Lyrics Command Error]:', err);
-      return ctx.editReply({ embeds: [createErrorEmbed(`Đã xảy ra lỗi khi tìm lời bài hát: ${err.message}`)] });
+      console.error('Lỗi khi tra cứu lyrics:', err);
+      return ctx.editReply({
+        embeds: [createErrorEmbed(t(guildId, 'commands.lyrics_not_found', { title: targetTitle }))]
+      });
     }
   }
 };

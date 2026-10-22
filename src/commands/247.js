@@ -1,8 +1,10 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed, createErrorEmbed, EMOJI_TAG } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: '247',
@@ -31,57 +33,55 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
-    // Chỉ Admin máy chủ mới được phép cấu hình chế độ 24/7
-    // Chỉ Admin máy chủ mới được phép cấu hình chế độ 24/7
     const isOwner = ctx.guild.ownerId === ctx.user.id;
-    const hasAdminPerm = ctx.member?.permissions.has('Administrator') || ctx.member?.permissions.has('ManageGuild');
+    const hasAdminPerm = isStrictAdmin(ctx.member);
     if (!isOwner && !hasAdminPerm) {
       return ctx.reply({
-        embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt 24/7!')]
+        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))]
       });
     }
 
-    // Hoãn phản hồi ngay lập tức để chống lỗi Discord timeout quá 3s (DiscordAPIError 10062)
     await ctx.deferReply();
 
     const voiceChannel = ctx.member?.voice?.channel;
-    let queue = musicManager.get(ctx.guild.id);
+    let queue = musicManager.get(guildId);
     const statusOption = ctx.options.getString('status');
 
     if (!queue) {
       if (!voiceChannel) {
-        return ctx.reply({ embeds: [createErrorEmbed('Bạn cần vào một phòng Voice trước để bật chế độ 24/7!')] });
+        return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_voice'))] });
       }
       queue = musicManager.getOrCreate(ctx.guild, ctx.channel, voiceChannel);
       await queue.connect();
       queue.set247(true);
-      settingsManager.update(ctx.guild.id, { mode247: true });
+      settingsManager.update(guildId, { mode247: true });
       await queue._play247BackgroundLofi();
-      return ctx.reply({ embeds: [createSuccessEmbed(`${EMOJI_TAG.infinity} Đã kết nối vào Voice và BẬT chế độ 24/7 (Đang phát nhạc Lofi thư giãn)!`)] });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.mode247_enabled'))] });
     }
 
     let is247;
     if (statusOption === 'on') {
       is247 = true;
       queue.set247(true);
-      settingsManager.update(ctx.guild.id, { mode247: true });
+      settingsManager.update(guildId, { mode247: true });
     } else if (statusOption === 'off') {
       is247 = false;
       queue.set247(false);
-      settingsManager.update(ctx.guild.id, { mode247: false });
+      settingsManager.update(guildId, { mode247: false });
     } else {
       is247 = queue.toggle247();
-      settingsManager.update(ctx.guild.id, { mode247: is247 });
+      settingsManager.update(guildId, { mode247: is247 });
     }
 
     if (is247) {
       if (!queue.currentSong) {
         await queue._play247BackgroundLofi();
       }
-      return ctx.reply({ embeds: [createSuccessEmbed(`${EMOJI_TAG.infinity} Đã **BẬT** chế độ 24/7 (Bot sẽ duy trì trong phòng và phát Lofi khi trống)!`)] });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.mode247_enabled'))] });
     } else {
-      return ctx.reply({ embeds: [createSuccessEmbed(`${EMOJI_TAG.infinity} Đã **TẮT** chế độ 24/7 (Bot sẽ tự rời phòng khi hết nhạc hoặc phòng trống sau 1 phút)!`)] });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.mode247_disabled'))] });
     }
   }
 };

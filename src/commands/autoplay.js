@@ -1,7 +1,9 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed, createAutoplayLayersEmbed, createAutoplayLayersComponents } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'autoplay',
@@ -31,19 +33,19 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
     const isOwner = ctx.guild.ownerId === ctx.user.id;
-    const hasAdminPerm = ctx.member?.permissions.has('Administrator') || ctx.member?.permissions.has('ManageGuild');
+    const hasAdminPerm = isStrictAdmin(ctx.member);
     if (!isOwner && !hasAdminPerm) {
       return ctx.reply({
-        embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên (Administrator / Manage Server)** mới có quyền thay đổi Cài đặt Autoplay!')]
+        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))]
       });
     }
 
-    const current = settingsManager.get(ctx.guild.id);
+    const current = settingsManager.get(guildId);
     const statusOption = ctx.options.getString('status');
 
-    // Mở giao diện cấu hình tầng Autoplay nếu chọn 'layers'
     if (statusOption === 'layers' || (args && (args[0]?.toLowerCase() === 'layers' || args[0]?.toLowerCase() === 'layer'))) {
       const layersEmbed = createAutoplayLayersEmbed(ctx.guild, current);
       const layersComponents = createAutoplayLayersComponents(current);
@@ -59,16 +61,9 @@ module.exports = {
       newVal = !current.autoplay;
     }
 
-    settingsManager.update(ctx.guild.id, { autoplay: newVal });
+    settingsManager.update(guildId, { autoplay: newVal });
 
-    const statusText = newVal ? '🟢 BẬT (Tự động phát bài tương tự khi hết hàng chờ)' : '🔴 TẮT (Dừng lại khi phát hết nhạc)';
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('btn_open_autoplay_layers')
-        .setLabel('🎛️ Cấu hình tầng Autoplay')
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    return ctx.reply({ embeds: [createSuccessEmbed(`Chế độ Tự động phát (Autoplay): **${statusText}**`)], components: [row] });
+    const msgKey = newVal ? 'commands.autoplay_enabled' : 'commands.autoplay_disabled';
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, msgKey))] });
   }
 };

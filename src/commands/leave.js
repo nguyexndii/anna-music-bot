@@ -3,6 +3,8 @@ const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
+const { EMOJI_TAG } = require('../utils/embed');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'leave',
@@ -25,25 +27,25 @@ module.exports = {
     // BẢO VỆ CHẾ ĐỘ 24/7
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247 && !isAdmin) {
-      return ctx.reply(`${EMOJI_TAG.warning} Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể yêu cầu bot rời phòng!`);
+      return ctx.reply(`${EMOJI_TAG.warning} ${t(ctx.guild.id, 'common.admin_only_247')}`);
     }
 
     if (!hasMusicPermission(ctx.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.reply(`Cần vai trò ${roleText} để mời bot rời phòng.`);
+      return ctx.reply(t(ctx.guild.id, 'common.dj_only', { role: roleText }));
     }
 
     if (!queue) {
-      return ctx.reply('Bot hiện không ở trong phòng Voice nào!');
+      return ctx.reply(t(ctx.guild.id, 'common.no_queue'));
     }
 
     const botVoice = ctx.guild.members.me?.voice?.channel;
     const memberVoice = ctx.member?.voice?.channel;
     if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id) && !isAdmin) {
-      return ctx.reply('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!');
+      return ctx.reply(t(ctx.guild.id, 'common.different_voice', { channel: botVoice.name }));
     }
     if (!memberVoice && !isAdmin) {
-      return ctx.reply('Bạn cần vào phòng Voice trước!');
+      return ctx.reply(t(ctx.guild.id, 'common.no_voice'));
     }
 
     // Nếu Admin đồng ý rời phòng, tắt 24/7
@@ -53,6 +55,6 @@ module.exports = {
     }
 
     queue.destroy();
-    return ctx.reply('👋 Đã ngắt kết nối và rời phòng Voice.');
+    return ctx.reply(guildSettings.language === 'en' ? '👋 Disconnected and left the voice channel.' : '👋 Đã ngắt kết nối và rời phòng Voice.');
   }
 };

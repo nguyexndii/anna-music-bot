@@ -3,6 +3,7 @@ const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'resume',
@@ -16,31 +17,34 @@ module.exports = {
     }),
   async execute(source, args) {
     const ctx = createContext(source, args);
+    const guildId = ctx.guild.id;
 
     if (!hasMusicPermission(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
+      const guildSettings = settingsManager.get(guildId);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.reply(`Bạn cần có vai trò ${roleText} để tiếp tục phát bài hát.`);
+      return ctx.reply(t(guildId, 'common.dj_only', { role: roleText }));
     }
 
-    const queue = musicManager.get(ctx.guild.id);
+    const queue = musicManager.get(guildId);
     if (!queue || !queue.currentSong) {
-      return ctx.reply('Hiện không có bài hát nào đang phát!');
+      return ctx.reply(t(guildId, 'common.no_song_playing'));
     }
 
-    if (queue.currentSong.is247 || queue.currentSong.requestedBy === 'Auto (24/7)' || (queue.mode247 && !queue.currentSong)) {
-      return ctx.reply('♾️ Bot đang phát Đài Radio Lofi 24/7 tự động. Bạn không thể dừng/tua/bỏ qua đài Radio, hãy dùng lệnh /play <tên bài> để phát nhạc của bạn nhé!');
+    if (queue.isCurrentSongLofi()) {
+      return ctx.reply(t(guildId, 'player.radio_cannot_control'));
     }
 
-    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
-      return ctx.reply('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!');
+    const botVoice = ctx.guild.members.me?.voice?.channel;
+    const memberVoice = ctx.member?.voice?.channel;
+    if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id)) {
+      return ctx.reply(t(guildId, 'common.different_voice', { channel: botVoice.name }));
     }
 
     if (!queue.paused) {
-      return ctx.reply('Nhạc đang được phát bình thường!');
+      return ctx.reply(t(guildId, 'player.already_playing'));
     }
 
     queue.togglePause();
-    return ctx.reply('▶️ Đã tiếp tục phát nhạc.');
+    return ctx.reply(t(guildId, 'player.resumed', { title: queue.currentSong.title }));
   }
 };

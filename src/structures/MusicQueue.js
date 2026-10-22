@@ -27,11 +27,13 @@ const {
   clearVoiceChannelStatus
 } = require('../utils/embed');
 const settingsManager = require('./SettingsManager');
+const { t } = require('../utils/i18n');
 const historyManager = require('./HistoryManager');
 const sessionManager = require('./SessionManager');
 const lofiHistoryManager = require('./LofiHistoryManager');
 const { logAction } = require('../utils/debugLogger');
 const { hasEnoughMemoryToPreload, logMemoryUsage } = require('../utils/systemMonitor');
+const { isStrictAdmin } = require('../utils/permissionHelper');
 const config = require('../config');
 
 function parseDurationToSeconds(str) {
@@ -125,6 +127,7 @@ class MusicQueue {
     // Khóa thao tác & Optimistic Button State
     this._isProcessingAction = false;
     this._pendingButtonAction = null;
+    this.skipVotes = new Set();
 
     this._initSettings();
     this._setupPlayerEvents();
@@ -621,7 +624,7 @@ class MusicQueue {
       // Chỉ gửi vào textChannel nếu bài hát do user yêu cầu và không phải lỗi đóng luồng EPIPE/ECONNRESET
       if (this.textChannel && !is247Lofi && !isEpipe) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
+          embeds: [createErrorEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? `Playback error: ${error.message || 'Cannot play this track.'}` : `Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
           flags: 4096
         }).catch(() => {});
       }
@@ -632,6 +635,7 @@ class MusicQueue {
   async _handleSongEnd() {
     this.clearCrossfadeTimer();
     this.clearPreloadTimer();
+    this.skipVotes.clear();
     if (this._isPlayingNext || this.isDestroyed || this.isStopped || this._switchingTo247) return;
     const lastSong = this.currentSong;
     const wasExplicitSkip = Boolean(this._skipRequested);
@@ -704,7 +708,7 @@ class MusicQueue {
       this.preloadedResource = null;
       this.currentSong = null;
       if (this.player) this.player.stop();
-      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Chờ phát nhạc');
+      setVoiceChannelStatus(activeChannel, settingsManager.get(this.guild.id)?.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
       console.log(`[MusicQueue 24/7] Phòng trống (${this.guild.name}) - Đưa bot về chế độ 24/7 Sleep Mode (0% CPU)`);
       return;
     }
@@ -746,7 +750,8 @@ class MusicQueue {
         const nextTrack = this._sanitizeTrack(this.prefetchedSong);
         this.prefetchedSong = null;
         if (nextTrack) {
-          nextTrack.requestedBy = 'Tự động phát';
+          const isEnAutoplay = settingsManager.get(this.guild.id)?.language === 'en';
+          nextTrack.requestedBy = isEnAutoplay ? 'Autoplay' : 'Tự động phát';
           nextTrack.is247 = false;
           nextTrack.isUserRequest = false;
           this.songs.push(nextTrack);
@@ -763,7 +768,8 @@ class MusicQueue {
         if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== songToRelate?.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
           const sanitizedRel = this._sanitizeTrack(candidate);
           if (sanitizedRel) {
-            sanitizedRel.requestedBy = 'Tự động phát';
+            const isEnRel = settingsManager.get(this.guild.id)?.language === 'en';
+            sanitizedRel.requestedBy = isEnRel ? 'Autoplay' : 'Tự động phát';
             sanitizedRel.is247 = false;
             sanitizedRel.isUserRequest = false;
             this.songs.push(sanitizedRel);
@@ -790,7 +796,8 @@ class MusicQueue {
           if (pool && pool.length > 0) {
             relatedTrack = pool[0];
             this.autoplayPool = pool.slice(1).map(t => {
-              t.requestedBy = 'Tự động phát';
+              const isEnPool = settingsManager.get(this.guild.id)?.language === 'en';
+              t.requestedBy = isEnPool ? 'Autoplay' : 'Tự động phát';
               return t;
             });
             console.log(`[Autoplay Pool] Nạp bài "${relatedTrack.title}" và lưu ${this.autoplayPool.length} bài vào bộ đệm`);
@@ -1089,7 +1096,7 @@ class MusicQueue {
             content: 'Het nhac trong hang cho, bot da tu dong roi phong Voice.'
           });
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
+            embeds: [createEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? '👋 Disconnected' : '👋 Rời phòng', settingsManager.get(this.guild.id)?.language === 'en' ? 'Queue has ended, bot automatically left the Voice channel.' : 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
             flags: 4096
           }).catch(() => {});
         }
@@ -1122,7 +1129,7 @@ class MusicQueue {
             this.currentResource = null;
             this.loopMode = 'off';
             this.player.stop(true);
-            setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Chờ phát nhạc');
+            setVoiceChannelStatus(this.voiceChannel, settingsManager.get(this.guild.id)?.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
             await sessionManager.saveSession(this.guild.id, {
               voiceChannelId: this.voiceChannel.id,
               textChannelId: this.textChannel?.id,
@@ -1148,7 +1155,7 @@ class MusicQueue {
             content: `Phong Voice khong con ai trong ${timeoutSeconds}s`
           });
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
+            embeds: [createEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? '👋 Disconnected' : '👋 Rời phòng', settingsManager.get(this.guild.id)?.language === 'en' ? `No listeners in Voice channel for ${timeoutSeconds} seconds, bot automatically left.` : `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
             flags: 4096
           }).catch(() => {});
         }
@@ -1464,7 +1471,8 @@ class MusicQueue {
           while (this.autoplayPool.length > 0) {
             const candidate = this.autoplayPool.shift();
             if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== this.currentSong.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
-              candidate.requestedBy = 'Tự động phát';
+              const isEnCandidate = settingsManager.get(this.guild.id)?.language === 'en';
+            candidate.requestedBy = isEnCandidate ? 'Autoplay' : 'Tự động phát';
               this.prefetchedSong = candidate;
               nextTrack = candidate;
               console.log(`[Autoplay Preload Pool Hit (0ms)] Nạp sẵn bài từ bộ đệm: "${candidate.title}"`);
@@ -1501,6 +1509,7 @@ class MusicQueue {
   async playNext() {
     if (this._isPlayingNext) return;
     this._isPlayingNext = true;
+    this.skipVotes.clear();
 
     try {
       if (this.songs.length === 0) return;
@@ -1798,7 +1807,7 @@ class MusicQueue {
       // Chỉ gửi thông báo lỗi ra textChannel nếu là bài do user yêu cầu (không spam bài 24/7 nền)
       if (this.textChannel && !is247Lofi) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Không thể phát bài **${failedSong?.title || 'đã chọn'}**: ${error.message}`)],
+          embeds: [createErrorEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? `Could not play **${failedSong?.title || 'selected'}**: ${error.message}` : `Không thể phát bài **${failedSong?.title || 'đã chọn'}**: ${error.message}`)],
           flags: 4096
         }).catch(() => {});
       }
@@ -1924,6 +1933,104 @@ class MusicQueue {
     }
   }
 
+
+  /**
+   * Kiểm tra điều kiện bỏ qua bài hát hoặc ghi nhận phiếu Vote Skip
+   * @param {Object} member
+   * @returns {{ status: string, reason?: string, title?: string, current?: number, required?: number, needed?: number, user?: string }}
+   */
+  checkOrCastSkipVote(member) {
+    if (!this.currentSong) {
+      return { status: 'no_song' };
+    }
+    if (this.isCurrentSongLofi()) {
+      return { status: 'is_247' };
+    }
+
+    const settings = settingsManager.get(this.guild.id);
+    const voteSkipEnabled = settings.voteSkipEnabled === true;
+    const requesterCanForceSkip = settings.requesterCanForceSkip !== false;
+
+    // 1. Quản trị viên (Admin) luôn được quyền force skip ngay lập tức
+    const isAdmin = isStrictAdmin(member) || member?.guild?.ownerId === member?.id;
+    if (isAdmin) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_admin', title };
+    }
+
+    // 2. Vai trò DJ được cấu hình riêng trong máy chủ
+    const isDJ = settings.djRoleId && member?.roles?.cache?.has(settings.djRoleId);
+    if (isDJ) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_dj', title };
+    }
+
+    // 3. Người đã order (Requester) bài hát này
+    const isRequester = this.currentSong.requestedById && member?.id && (this.currentSong.requestedById === member.id);
+    if (requesterCanForceSkip && isRequester) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_requester', title };
+    }
+
+    // 4. Nếu chế độ Vote Skip đang TẮT -> Bất kỳ ai trong phòng đều được skip trực tiếp
+    if (!voteSkipEnabled) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_single', title };
+    }
+
+    // 5. Nếu phòng Voice có <= 2 người nghe thực tế (không tính bot và người đang tắt loa/deaf) -> Skip luôn
+    const activeVoiceChannel = this.getVoiceChannel();
+    const voiceMembers = activeVoiceChannel?.members?.filter(m =>
+      !m.user?.bot && !m.voice?.selfDeaf && !m.voice?.serverDeaf
+    ) || new Map();
+    const listenerCount = voiceMembers.size;
+    if (listenerCount <= 2) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_single', title };
+    }
+
+    // 6. Tính số phiếu yêu cầu (50% người nghe trong phòng, làm tròn lên)
+    const requiredVotes = Math.ceil(listenerCount * 0.5);
+    const userName = member?.displayName || member?.user?.username || 'User';
+
+    if (this.skipVotes.has(member.id)) {
+      this.skipVotes.delete(member.id);
+      return {
+        status: 'vote_retracted',
+        user: userName,
+        current: this.skipVotes.size,
+        required: requiredVotes
+      };
+    }
+
+    this.skipVotes.add(member.id);
+    if (this.skipVotes.size >= requiredVotes) {
+      const title = this.currentSong.title;
+      const current = this.skipVotes.size;
+      this.skip();
+      return {
+        status: 'skipped',
+        reason: 'vote_passed',
+        title,
+        current,
+        required: requiredVotes
+      };
+    }
+
+    return {
+      status: 'vote_progress',
+      user: userName,
+      current: this.skipVotes.size,
+      required: requiredVotes,
+      needed: requiredVotes - this.skipVotes.size
+    };
+  }
+
   skip() {
     const now = Date.now();
     if (this._lastSkipTime && (now - this._lastSkipTime < 800)) {
@@ -1937,6 +2044,7 @@ class MusicQueue {
 
     this.isQueueOnHold = false;
     this._skipRequested = true;
+    this.skipVotes.clear();
     this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
@@ -2070,6 +2178,24 @@ class MusicQueue {
     this._saveSessionState();
     this.refreshNowPlayingCard();
     return true;
+  }
+
+  moveSong(fromIndex, toIndex) {
+    return this.moveTrack(fromIndex, toIndex);
+  }
+
+  removeSong(index) {
+    const idx = parseInt(index, 10);
+    if (isNaN(idx) || idx < 0 || idx >= this.songs.length) return null;
+    if (idx === 0 && this.preloadedResource) {
+      this._cleanupResource(this.preloadedResource);
+      this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+    }
+    const [removed] = this.songs.splice(idx, 1);
+    this._saveSessionState();
+    this.refreshNowPlayingCard();
+    return removed || null;
   }
 
   stop() {

@@ -2,6 +2,8 @@ const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('disco
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'setchannel',
@@ -36,28 +38,21 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
-    if (!ctx.member.permissions.has('ManageGuild') && !ctx.member.permissions.has('Administrator')) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bạn cần có quyền `Quản Lý Máy Chủ` hoặc `Quản Trị Viên` để cài đặt kênh lệnh!')] });
+    if (!isStrictAdmin(ctx.member)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))] });
     }
 
     const resetOpt = ctx.options.getBoolean('reset');
     const firstArg = args?.[0]?.toLowerCase();
     if (resetOpt || ['reset', 'off', 'clear', 'tat'].includes(firstArg)) {
-      settingsManager.update(ctx.guild.id, { musicChannelId: null });
-      return ctx.reply({ embeds: [createSuccessEmbed('Đã bỏ khóa kênh! Bây giờ bạn có thể dùng lệnh bot ở mọi kênh chat.')] });
+      settingsManager.update(guildId, { musicChannelId: null });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setchannel_unlocked'))] });
     }
 
-    const channel = ctx.options.getChannel('channel')
-      || (ctx.isInteraction ? null : (ctx.message.mentions.channels.first() || ctx.guild.channels.cache.get(args[0]) || ctx.channel));
-
-    if (!channel || !channel.isTextBased()) {
-      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng tag hoặc chọn một kênh văn bản hợp lệ (ví dụ: `/setchannel #kenh-nhac`)!')] });
-    }
-
-    settingsManager.update(ctx.guild.id, { musicChannelId: channel.id });
-    return ctx.reply({
-      embeds: [createSuccessEmbed(`Đã khóa kênh âm nhạc thành công! Kể từ bây giờ bot chỉ nhận lệnh tại: <#${channel.id}>.`)]
-    });
+    const channel = ctx.options.getChannel('channel') || ctx.channel;
+    settingsManager.update(guildId, { musicChannelId: channel.id });
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setchannel_locked', { channelId: channel.id }))] });
   }
 };

@@ -2,6 +2,8 @@ const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('disco
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'lockvoice',
@@ -36,29 +38,30 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
-    if (!ctx.member.permissions.has('ManageGuild') && !ctx.member.permissions.has('Administrator')) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bạn cần có quyền `Quản Lý Máy Chủ` hoặc `Quản Trị Viên` để khóa phòng Voice!')] });
+    if (!isStrictAdmin(ctx.member)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))] });
     }
 
     const resetOpt = ctx.options.getBoolean('reset');
     const firstArg = args?.[0]?.toLowerCase();
     if (resetOpt || ['reset', 'off', 'tat', 'clear'].includes(firstArg)) {
-      settingsManager.update(ctx.guild.id, { lockedVoiceChannelId: null });
-      return ctx.reply({ embeds: [createSuccessEmbed('Đã mở khóa phòng Voice! Bây giờ bot có thể tham gia bất kỳ phòng Voice nào theo yêu cầu.')] });
+      settingsManager.update(guildId, { lockedVoiceChannelId: null });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.lockvoice_unlocked'))] });
     }
 
-    const channel = ctx.options.getChannel('channel')
-      || ctx.member?.voice?.channel
-      || (args?.[0] ? ctx.guild.channels.cache.get(args[0].replace(/[<#>]/g, '')) : null);
-
-    if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice && channel.type !== 2 && channel.type !== 13)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng tham gia vào một phòng Voice hoặc chọn phòng Voice hợp lệ (ví dụ: `/lockvoice #Chung-voice`)!')] });
+    const channelOpt = ctx.options.getChannel('channel');
+    let targetChannel = channelOpt;
+    if (!targetChannel && ctx.member.voice?.channel) {
+      targetChannel = ctx.member.voice.channel;
     }
 
-    settingsManager.update(ctx.guild.id, { lockedVoiceChannelId: channel.id });
-    return ctx.reply({
-      embeds: [createSuccessEmbed(`Đã khóa phòng Voice thành công! Kể từ bây giờ bot chỉ hoạt động cố định tại: **${channel.name}** (<#${channel.id}>).`)]
-    });
+    if (!targetChannel) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_voice'))] });
+    }
+
+    settingsManager.update(guildId, { lockedVoiceChannelId: targetChannel.id });
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.lockvoice_locked', { channelId: targetChannel.id }))] });
   }
 };

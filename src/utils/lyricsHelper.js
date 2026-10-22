@@ -134,6 +134,49 @@ function stripParentheses(str) {
   return str.replace(/[\(\[][^\(\)\[\]]*[\)\]]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+const VN_NUMBER_WORDS = {
+  '0': 'không', '1': 'một', '2': 'hai', '3': 'ba', '4': 'bốn',
+  '5': 'năm', '6': 'sáu', '7': 'bảy', '8': 'tám', '9': 'chín',
+  '10': 'mười'
+};
+
+function generateVietnameseNumberVariants(text) {
+  if (!text || typeof text !== 'string') return [text];
+  const variants = [text];
+  const boundaryLeft = '(^|[\\s\\-–—()\\[\\].,!?:;/])';
+  const boundaryRight = '(?=$|[\\s\\-–—()\\[\\].,!?:;/])';
+
+  // 1. Chuyển chữ số -> chữ tiếng Việt (ví dụ: "10" -> "mười")
+  let withWords = text;
+  let wordReplaced = false;
+  for (const [num, word] of Object.entries(VN_NUMBER_WORDS)) {
+    const reg = new RegExp(`${boundaryLeft}${num}${boundaryRight}`, 'gi');
+    if (reg.test(withWords)) {
+      withWords = withWords.replace(reg, `$1${word}`);
+      wordReplaced = true;
+    }
+  }
+  if (wordReplaced && withWords !== text) {
+    variants.push(withWords);
+  }
+
+  // 2. Chuyển chữ tiếng Việt -> chữ số (ví dụ: "mười" -> "10")
+  let withNums = text;
+  let numReplaced = false;
+  for (const [num, word] of Object.entries(VN_NUMBER_WORDS)) {
+    const reg = new RegExp(`${boundaryLeft}${word}${boundaryRight}`, 'gi');
+    if (reg.test(withNums)) {
+      withNums = withNums.replace(reg, `$1${num}`);
+      numReplaced = true;
+    }
+  }
+  if (numReplaced && withNums !== text) {
+    variants.push(withNums);
+  }
+
+  return [...new Set(variants)];
+}
+
 function cleanArtistName(str) {
   if (!str) return '';
   const cleaned = cleanTitle(str).replace(/(?:official\s*(?:channel)?|channel|topic|vevo|records|entertainment|youtube\s*music|youtube)/gi, '').trim();
@@ -232,6 +275,18 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
       titlesToProcess.unshift(origDeep);
     }
   }
+
+  // Mở rộng các biến thể số học tiếng Việt (ví dụ: "Nguyễn Văn 10" <-> "Nguyễn Văn Mười")
+  const numVariants = [];
+  for (const t of titlesToProcess) {
+    const nv = generateVietnameseNumberVariants(t);
+    for (const v of nv) {
+      if (!titlesToProcess.includes(v) && !numVariants.includes(v)) {
+        numVariants.push(v);
+      }
+    }
+  }
+  titlesToProcess.push(...numVariants);
 
   for (const t of titlesToProcess) {
     const rawSegments = t.split(/\s+[-–—|:/]\s+|\s*[|:]\s*/).map(s => cleanTitle(s)).filter(Boolean);
@@ -1664,24 +1719,26 @@ function formatLrcTimestamp(ms) {
 
 function findBestZingSong(songs, targetTitle, targetArtist) {
   if (!Array.isArray(songs) || songs.length === 0) return null;
-  const cleanTarget = normalizeStr(cleanTitle(targetTitle));
+  const variants = generateVietnameseNumberVariants(cleanTitle(targetTitle));
+  const cleanTargets = variants.map(v => normalizeStr(v)).filter(Boolean);
   const cleanTargetArtist = normalizeStr(targetArtist || '');
 
-  // 1. Tìm bài trùng cả tên và ca sĩ
+  // 1. Tìm bài trùng cả tên (theo bất kỳ biến thể nào) và ca sĩ
   if (cleanTargetArtist) {
     const exactMatch = songs.find(s => {
       const sName = normalizeStr(s.name);
       const sArtist = normalizeStr(s.artist || s.artistsNames || '');
-      return (sName === cleanTarget || sName.includes(cleanTarget) || cleanTarget.includes(sName)) &&
-             (sArtist.includes(cleanTargetArtist) || cleanTargetArtist.includes(sArtist));
+      const titleMatched = cleanTargets.some(ct => sName === ct || sName.includes(ct) || ct.includes(sName));
+      const artistMatched = sArtist.includes(cleanTargetArtist) || cleanTargetArtist.includes(sArtist);
+      return titleMatched && artistMatched;
     });
     if (exactMatch) return exactMatch;
   }
 
-  // 2. Tìm bài trùng tên bài hát
+  // 2. Tìm bài trùng tên bài hát (theo bất kỳ biến thể nào)
   const titleMatch = songs.find(s => {
     const sName = normalizeStr(s.name);
-    return sName === cleanTarget || sName.includes(cleanTarget) || cleanTarget.includes(sName);
+    return cleanTargets.some(ct => sName === ct || sName.includes(ct) || ct.includes(sName));
   });
   if (titleMatch) return titleMatch;
 
@@ -1695,14 +1752,21 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
     const cleanA = cleanArtistName(artist);
     if (!cleanT) return null;
 
-    // Thử truy vấn: 1) Tên bài + ca sĩ, 2) Tên bài đơn thuần
+    // Ưu tiên cao nhất: tất cả các biến thể kèm Tên ca sĩ trước
+    const titleVariants = generateVietnameseNumberVariants(cleanT);
     const queries = [];
     if (cleanA && cleanA !== 'Unknown') {
-      queries.push(`${cleanT} ${cleanA}`.trim());
+      for (const tv of titleVariants) {
+        queries.push(`${tv} ${cleanA}`.trim());
+      }
     }
-    queries.push(cleanT);
+    for (const tv of titleVariants) {
+      queries.push(tv);
+    }
 
     let songList = null;
+    let matchedSong = null;
+
     for (const q of queries) {
       const acUrl = `https://ac.zingmp3.vn/complete?type=artist,song,key,hub&num=5&query=${encodeURIComponent(q)}`;
       const acRes = await fetch(acUrl, {
@@ -1716,15 +1780,30 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
         const acData = await acRes.json().catch(() => null);
         const songs = acData?.data?.[0]?.song;
         if (Array.isArray(songs) && songs.length > 0) {
-          songList = songs;
-          break;
+          const candidate = findBestZingSong(songs, rawTitle, artist);
+          const variantsNorm = titleVariants.map(v => normalizeStr(v));
+          const sNameNorm = normalizeStr(candidate?.name || '');
+          const sArtistNorm = normalizeStr(candidate?.artist || candidate?.artistsNames || '');
+          const cleanANorm = normalizeStr(artist || '');
+          const isNameMatch = variantsNorm.some(v => sNameNorm === v || sNameNorm.includes(v) || v.includes(sNameNorm));
+          const isArtistMatch = cleanANorm && (sArtistNorm.includes(cleanANorm) || cleanANorm.includes(sArtistNorm));
+
+          if (isNameMatch && (isArtistMatch || !cleanANorm)) {
+            songList = songs;
+            matchedSong = candidate;
+            break;
+          } else if (!songList) {
+            songList = songs;
+            matchedSong = candidate;
+          }
         }
       }
     }
 
-    if (!songList || songList.length === 0) return null;
+    if (!matchedSong && songList && songList.length > 0) {
+      matchedSong = findBestZingSong(songList, rawTitle, artist);
+    }
 
-    const matchedSong = findBestZingSong(songList, rawTitle, artist);
     if (!matchedSong || !matchedSong.id) return null;
 
     const songId = matchedSong.id;
@@ -2377,6 +2456,8 @@ function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null,
 
 module.exports = {
   cleanSearchVariants: generateSearchVariants,
+  generateVietnameseNumberVariants,
+  fetchZingMp3Lyrics,
   fetchLyrics,
   fetchLyricsFallback,
   getLyrics: fetchLyrics,

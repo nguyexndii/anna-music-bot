@@ -4,6 +4,7 @@ const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'loop',
@@ -31,24 +32,27 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+    const guildId = ctx.guild.id;
 
     if (!hasMusicPermission(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
+      const guildSettings = settingsManager.get(guildId);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.reply({ embeds: [createErrorEmbed(`Bạn cần có vai trò ${roleText} để đổi chế độ lặp.`)] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.dj_only', { role: roleText }))] });
     }
 
-    const queue = musicManager.get(ctx.guild.id);
+    const queue = musicManager.get(guildId);
     if (!queue) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bot hiện không ở trong kênh Voice!')] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_queue'))] });
     }
 
-    if (queue.currentSong?.is247 || queue.currentSong?.requestedBy === 'Auto (24/7)' || (queue.mode247 && !queue.currentSong)) {
-      return ctx.reply({ embeds: [createErrorEmbed('♾️ Bot đang phát Đài Radio Lofi 24/7 tự động. Bạn không thể dừng/tua/bỏ qua đài Radio, hãy dùng lệnh /play <tên bài> để phát nhạc của bạn nhé!')] });
+    if (queue.isCurrentSongLofi()) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'player.radio_cannot_control'))] });
     }
 
-    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!')] });
+    const botVoice = ctx.guild.members.me?.voice?.channel;
+    const memberVoice = ctx.member?.voice?.channel;
+    if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.different_voice', { channel: botVoice.name }))] });
     }
 
     const modeOpt = ctx.options.getString('mode');
@@ -60,7 +64,7 @@ module.exports = {
       mode = queue.toggleLoop();
     }
 
-    const modeText = mode === 'song' ? '🔂 Bài hát hiện tại' : mode === 'queue' ? '🔁 Toàn bộ hàng chờ' : '➡️ Tắt';
-    return ctx.reply({ embeds: [createSuccessEmbed(`Đã thay đổi chế độ lặp: **${modeText}**`)] });
+    const msgKey = mode === 'song' ? 'player.loop_song' : mode === 'queue' ? 'player.loop_queue' : 'player.loop_off';
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, msgKey))] });
   }
 };

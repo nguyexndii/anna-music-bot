@@ -25,7 +25,9 @@ const DEFAULT_GUILD_SETTINGS = {
   lyricsLayers: ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'], // Thứ tự và danh sách tầng Lời bài hát (Lyrics) được kích hoạt
   autoSkipOfftopic: true,      // Tự động bỏ qua đoạn kịch mở đầu/credit kết thúc MV YouTube qua SponsorBlock
   useAiAssistant: true,        // Bật/Tắt trợ lý DJ AI (Gemini) gợi ý bài hát & trò chuyện
-  language: 'en'               // Ngôn ngữ hệ thống: 'en' (English) | 'vi' (Tiếng Việt)
+  voteSkipEnabled: false,      // Bật/Tắt cơ chế bỏ phiếu qua bài (Mặc định: TẮT để phòng nghe nhạc tự do)
+  requesterCanForceSkip: true, // Cho phép người yêu cầu bài hát luôn có quyền Force Skip bài của mình
+  language: 'vi'               // Ngôn ngữ hệ thống: 'vi' (Tiếng Việt) | 'en' (English)
 };
 
 const VALID_AUTOPLAY_LAYERS = ['ytmix', 'lastfm', 'heuristic'];
@@ -129,7 +131,7 @@ class SettingsManager {
     }
     if (toApply.defaultVolume !== undefined) {
       const vol = parseInt(toApply.defaultVolume, 10);
-      toApply.defaultVolume = (!isNaN(vol) && vol >= 1 && vol <= 150) ? vol : current.defaultVolume;
+      toApply.defaultVolume = (!isNaN(vol) && vol >= 1 && vol <= 100) ? vol : current.defaultVolume;
     }
     if (toApply.crossfadeDuration !== undefined) {
       const cf = parseInt(toApply.crossfadeDuration, 10);
@@ -161,7 +163,7 @@ class SettingsManager {
     }
 
     // Validate kiểu Boolean
-    const booleanFields = ['mode247', 'autoplay', 'djOnly', 'announceSongs', 'updateVoiceStatus', 'autoSkipOfftopic', 'useAiAssistant'];
+    const booleanFields = ['mode247', 'autoplay', 'djOnly', 'announceSongs', 'updateVoiceStatus', 'autoSkipOfftopic', 'useAiAssistant', 'voteSkipEnabled', 'requesterCanForceSkip'];
     for (const b of booleanFields) {
       if (toApply[b] !== undefined) {
         toApply[b] = Boolean(toApply[b]);

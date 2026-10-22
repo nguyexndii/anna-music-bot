@@ -4,6 +4,7 @@ const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'move',
@@ -37,75 +38,88 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+    const guildId = ctx.guild.id;
 
     if (!hasMusicPermission(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
+      const guildSettings = settingsManager.get(guildId);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
       return ctx.reply({
-        embeds: [createErrorEmbed(`Bạn cần có vai trò ${roleText} để di chuyển thứ tự bài hát.`)],
+        embeds: [createErrorEmbed(t(guildId, 'common.dj_only', { role: roleText }))],
         flags: 64
       });
     }
 
-    const queue = musicManager.get(ctx.guild.id);
+    const queue = musicManager.get(guildId);
 
     if (!queue) {
-      return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ âm nhạc hiện đang trống!')] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'player.queue_empty'))] });
     }
     const userSongs = queue.getUserSongs ? queue.getUserSongs() : (queue.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)' && s.requestedBy !== 'Auto (24/7 Lofi)');
     if (userSongs.length === 0) {
-      return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ hiện đang trống, không có bài hát nào của người dùng để di chuyển!')] });
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'player.queue_empty'))] });
     }
 
-    if (!ctx.member?.voice?.channel || (queue.voiceChannel && ctx.member.voice.channel.id !== queue.voiceChannel.id)) {
+    const botVoice = ctx.guild.members.me?.voice?.channel;
+    const memberVoice = ctx.member?.voice?.channel;
+    if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.different_voice', { channel: botVoice.name }))] });
+    }
+
+    let fromPos = ctx.options.getInteger('from');
+    let toPos = ctx.options.getInteger('to');
+
+    if (fromPos === null && args && args.length > 0) {
+      fromPos = parseInt(args[0], 10);
+      toPos = args[1] ? parseInt(args[1], 10) : 1;
+    }
+
+    if (isNaN(fromPos) || fromPos < 1 || fromPos > userSongs.length) {
       return ctx.reply({
-        embeds: [createErrorEmbed('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!')],
+        embeds: [createErrorEmbed(t(guildId, 'commands.move_invalid'))],
         flags: 64
       });
     }
 
-    const fromPos = ctx.options.getInteger('from');
-    const toPos = ctx.options.getInteger('to') || 1;
-
-    if (!fromPos || fromPos < 1 || fromPos > userSongs.length) {
-      return ctx.reply({
-        embeds: [createErrorEmbed(`Vị trí bài hát không hợp lệ! Hàng chờ hiện có từ 1 đến ${userSongs.length} bài.`)],
-        flags: 64
-      });
-    }
-
-    if (toPos < 1 || toPos > userSongs.length) {
-      return ctx.reply({
-        embeds: [createErrorEmbed(`Vị trí đích không hợp lệ! Vui lòng chọn trong khoảng từ 1 đến ${userSongs.length}.`)],
-        flags: 64
-      });
-    }
+    toPos = toPos === null || isNaN(toPos) ? 1 : toPos;
+    if (toPos < 1) toPos = 1;
+    if (toPos > userSongs.length) toPos = userSongs.length;
 
     if (fromPos === toPos) {
       return ctx.reply({
-        embeds: [createErrorEmbed('Bài hát đã nằm ở vị trí này rồi!')],
+        embeds: [createErrorEmbed(t(guildId, 'commands.move_invalid'))],
         flags: 64
       });
     }
 
-    const targetSong = userSongs[fromPos - 1];
-    const destSong = userSongs[toPos - 1];
-    const actualFrom = queue.songs.indexOf(targetSong);
-    const actualTo = queue.songs.indexOf(destSong);
-    if (actualFrom === -1 || actualTo === -1) {
-      return ctx.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát tương ứng trong hàng chờ!')], flags: 64 });
-    }
-    const ok = queue.moveTrack(actualFrom, actualTo);
-
-    if (ok) {
+    const fromTarget = userSongs[fromPos - 1];
+    const actualFrom = queue.songs.indexOf(fromTarget);
+    if (actualFrom === -1) {
       return ctx.reply({
-        embeds: [createSuccessEmbed(`Đã chuyển bài **${targetSong.title}** từ vị trí **#${fromPos}** sang vị trí **#${toPos}**!`)]
-      });
-    } else {
-      return ctx.reply({
-        embeds: [createErrorEmbed('Không thể di chuyển bài hát. Vui lòng thử lại!')],
+        embeds: [createErrorEmbed(t(guildId, 'commands.move_invalid'))],
         flags: 64
       });
     }
+
+    const toTarget = userSongs[toPos - 1];
+    let actualTo = queue.songs.indexOf(toTarget);
+    if (actualTo === -1) {
+      actualTo = toPos > fromPos ? queue.songs.length - 1 : 0;
+    }
+
+    const moved = queue.moveSong(actualFrom, actualTo);
+    if (!moved) {
+      return ctx.reply({
+        embeds: [createErrorEmbed(t(guildId, 'commands.move_invalid'))],
+        flags: 64
+      });
+    }
+
+    return ctx.reply({
+      embeds: [createSuccessEmbed(t(guildId, 'commands.move_success', {
+        title: fromTarget.title,
+        from: fromPos,
+        to: toPos
+      }))]
+    });
   }
 };

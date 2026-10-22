@@ -3,6 +3,8 @@ const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
+const { EMOJI_TAG } = require('../utils/embed');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'stop',
@@ -25,28 +27,31 @@ module.exports = {
     );
     const is247 = queue ? queue.mode247 : Boolean(guildSettings.mode247);
     if (is247 && !isAdmin) {
-      return ctx.reply(`${EMOJI_TAG.warning} Máy chủ đang bật chế độ 24/7. Chỉ Quản trị viên mới có thể dừng nhạc!`);
+      return ctx.reply(`${EMOJI_TAG.warning} ${t(ctx.guild.id, 'common.admin_only_247')}`);
     }
     if (!hasMusicPermission(ctx.member)) {
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.reply(`Bạn cần có vai trò ${roleText} để dừng nhạc.`);
+      return ctx.reply(t(ctx.guild.id, 'common.dj_only', { role: roleText }));
     }
 
     if (!queue) {
-      return ctx.reply('Bot hiện không phát nhạc trong máy chủ này!');
+      return ctx.reply(t(ctx.guild.id, 'common.no_queue'));
     }
 
     const botVoice = ctx.guild.members.me?.voice?.channel;
     const memberVoice = ctx.member?.voice?.channel;
     if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id)) {
-      return ctx.reply('Bạn phải ở trong cùng kênh Voice với bot để dùng lệnh này!');
+      return ctx.reply(t(ctx.guild.id, 'common.different_voice', { channel: botVoice.name }));
     }
     if (!memberVoice) {
-      return ctx.reply('Bạn cần tham gia vào phòng Voice để dừng nhạc!');
+      return ctx.reply(t(ctx.guild.id, 'common.no_voice'));
     }
 
     queue.stop();
-    const modeText = queue.mode247 ? ' (Bot vẫn duy trì trong voice vì đang bật chế độ 24/7)' : '';
-    return ctx.reply(`⏹️ Đã dừng phát nhạc và xóa toàn bộ hàng chờ.${modeText}`);
+    const isEn = guildSettings.language === 'en';
+    const modeText = queue.mode247 
+      ? (isEn ? ' (Bot remains in voice due to 24/7 mode)' : ' (Bot vẫn duy trì trong voice vì đang bật chế độ 24/7)') 
+      : '';
+    return ctx.reply(`${t(ctx.guild.id, 'player.stopped')}${modeText}`);
   }
 };

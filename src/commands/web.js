@@ -33,19 +33,21 @@ module.exports = {
     const member = ctx.member;
     const author = ctx.user;
 
+    const guildSettings = settingsManager.get(guild.id);
+    const isEn = guildSettings?.language === 'en';
+
     // 1. Kiểm tra User có trong kênh Voice hay không
     const userVoice = member?.voice?.channel;
     if (!userVoice) {
       return ctx.sendTemp({
-        embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
+        embeds: [createErrorEmbed(isEn ? 'You must be in a Voice channel to use Web Player!' : 'Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
       }, 7000);
     }
 
     // 2. Kiểm tra kênh Voice bị khóa
-    const guildSettings = settingsManager.get(guild.id);
     if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(member)) {
       return ctx.sendTemp({
-        embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)]
+        embeds: [createErrorEmbed(isEn ? `Server voice channel is locked! Please join <#${guildSettings.lockedVoiceChannelId}> to use Web Player.` : `Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)]
       }, 7000);
     }
 
@@ -70,7 +72,7 @@ module.exports = {
               components: [
                 {
                   type: 10,
-                  content: '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hiệu Lực\nMã PIN và liên kết đăng nhập này **đã hết hiệu lực** vì bạn vừa yêu cầu một mã mới qua lệnh `/web`.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
+                  content: isEn ? '### <:anna_warning:1562002803097083964> Web Player PIN Expired\nThis PIN and login link **has expired** because you requested a new one via `/web`.\n\nPlease use the latest PIN and link!' : '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hiệu Lực\nMã PIN và liên kết đăng nhập này **đã hết hiệu lực** vì bạn vừa yêu cầu một mã mới qua lệnh `/web`.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
                 }
               ],
               accessory: {
@@ -120,7 +122,7 @@ module.exports = {
           components: [
             {
               type: 10,
-              content: `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
+              content: isEn ? `### Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${guild.name}**.` : `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
             }
           ],
           accessory: {
@@ -130,7 +132,7 @@ module.exports = {
         },
         {
           type: 10,
-          content: `🔊 **Kênh Voice:** <#${userVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 3 phút)*`
+          content: isEn ? `🔊 **Voice Channel:** <#${userVoice.id}>\n🔑 **Connection PIN:** \`${pin}\` *(valid for 3 minutes)*` : `🔊 **Kênh Voice:** <#${userVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 3 phút)*`
         },
         {
           type: 1,
@@ -138,7 +140,7 @@ module.exports = {
             {
               type: 2,
               style: 5, // ButtonStyle.Link
-              label: 'Mở Trình Phát Web Player',
+              label: isEn ? 'Open Web Player' : 'Mở Trình Phát Web Player',
               url: webUrl,
               emoji: CUSTOM_EMOJIS.web || { name: '🌐' }
             }
@@ -146,7 +148,7 @@ module.exports = {
         },
         {
           type: 10,
-          content: '-# Mã PIN dùng 1 lần sẽ tự hủy sau khi mở • Hết hạn tự động sau 3 phút'
+          content: isEn ? '-# One-time PIN self-destructs after opening • Automatically expires in 3 minutes' : '-# Mã PIN dùng 1 lần sẽ tự hủy sau khi mở • Hết hạn tự động sau 3 phút'
         }
       ]
     };
@@ -176,7 +178,7 @@ module.exports = {
                 components: [
                   {
                     type: 10,
-                    content: '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hạn\nMã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\nNếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
+                    content: isEn ? '### <:anna_warning:1562002803097083964> Web Player PIN Expired\nPIN code and login link expired after **3 minutes** for security.\n\nPlease type `/web` again to get a fresh link!' : '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hạn\nMã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\nNếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
                   }
                 ],
                 accessory: {

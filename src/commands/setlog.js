@@ -2,6 +2,8 @@ const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('disco
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'setlog',
@@ -36,54 +38,24 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
-    const isOwner = ctx.guild.ownerId === ctx.user.id;
-    const hasAdminPerm = ctx.member?.permissions.has('Administrator') || ctx.member?.permissions.has('ManageGuild');
-
-    if (!isOwner && !hasAdminPerm) {
+    if (!isStrictAdmin(ctx.member)) {
       return ctx.reply({
-        embeds: [createErrorEmbed('Bạn cần quyền `Quản Trị Viên (Administrator)` hoặc `Quản Lý Máy Chủ` để cấu hình kênh nhật ký!')]
+        embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))]
       });
     }
 
     const resetOpt = ctx.options.getBoolean('reset');
     const firstArg = args?.[0]?.toLowerCase();
 
-    if (resetOpt || ['reset', 'off', 'clear', 'tat'].includes(firstArg)) {
-      settingsManager.update(ctx.guild.id, { logChannelId: null });
-      return ctx.reply({ embeds: [createSuccessEmbed('🔴 Đã TẮT kênh ghi nhật ký hoạt động của bot.')] });
+    if (resetOpt || ['off', 'tat', 'reset', 'clear'].includes(firstArg)) {
+      settingsManager.update(guildId, { logChannelId: null });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setlog_unset'))] });
     }
 
-    const channelOpt = ctx.options.getChannel('channel');
-    let channel = channelOpt;
-
-    if (!channel && args && args.length > 0) {
-      const rawInput = args[0].replace(/^[<#]+|>+$/g, '').trim();
-      channel = ctx.message?.mentions.channels.first()
-        || ctx.guild.channels.cache.get(rawInput)
-        || ctx.guild.channels.cache.find(c => c.name.toLowerCase() === rawInput.toLowerCase());
-    }
-
-    if (!channel) {
-      const current = settingsManager.get(ctx.guild.id);
-      const logText = current.logChannelId ? `<#${current.logChannelId}> (🟢 Đang BẬT)` : '🔴 Đang TẮT';
-      return ctx.reply({
-        embeds: [createSuccessEmbed(`📋 **Kênh Nhật Ký Hoạt Động (Log Channel)**:\n• Trạng thái hiện tại: ${logText}\n\n*Cách sử dụng:*\n• \`/setlog channel:#tên-kênh\` — Chọn kênh gửi nhật ký\n• \`/setlog reset:True\` — Tắt kênh nhật ký`)]
-      });
-    }
-
-    if (!channel.isTextBased()) {
-      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng chọn một kênh văn bản hợp lệ!')] });
-    }
-
-    const botMember = ctx.guild.members.me;
-    if (botMember && !channel.permissionsFor(botMember)?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
-      return ctx.reply({ embeds: [createErrorEmbed(`Bot không có đủ quyền (Xem kênh, Gửi tin nhắn, Chèn liên kết) trong kênh <#${channel.id}>!`)] });
-    }
-
-    settingsManager.update(ctx.guild.id, { logChannelId: channel.id });
-    return ctx.reply({
-      embeds: [createSuccessEmbed(`✅ Đã thiết lập kênh ghi nhật ký thành công: <#${channel.id}>!\nKể từ bây giờ, mọi hoạt động của bot (sửa/xóa tin nhắn, người vào/ra/stream/cam phòng voice, lệnh nhạc, web player...) sẽ được ghi nhận vào kênh này.`)]
-    });
+    const channel = ctx.options.getChannel('channel') || ctx.channel;
+    settingsManager.update(guildId, { logChannelId: channel.id });
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setlog_set', { channelId: channel.id }))] });
   }
 };

@@ -37,6 +37,7 @@ const favoriteManager = require('./structures/FavoriteManager');
 const userPlaylistManager = require('./structures/UserPlaylistManager');
 const { connectDatabase } = require('./database/mongoose');
 const { searchTrack } = require('./utils/musicExtractor');
+const { t } = require('./utils/i18n');
 const {
   is247Track,
   createNowPlayingCard,
@@ -599,7 +600,7 @@ client.on('interactionCreate', async (interaction) => {
   if (!isAllowedGuild(interaction.guild.id, interaction.user.id)) {
     if (interaction.isRepliable()) {
       return interaction.reply({
-        content: '❌ Máy chủ này chưa được cấp phép sử dụng Anna Music Bot. Vui lòng liên hệ Quản trị viên để được hỗ trợ!',
+        content: (settingsManager.get(interaction.guild?.id)?.language === 'en' ? '❌ This server is not whitelisted to use Anna Music Bot. Please contact an Administrator for support!' : '❌ Máy chủ này chưa được cấp phép sử dụng Anna Music Bot. Vui lòng liên hệ Quản trị viên để được hỗ trợ!'),
         ephemeral: true
       }).catch(() => {});
     }
@@ -651,7 +652,7 @@ client.on('interactionCreate', async (interaction) => {
       const hasAdminPerm = interaction.member?.permissions?.has('Administrator') || interaction.member?.permissions?.has('ManageGuild');
       if (!isOwner && !hasAdminPerm) {
         return interaction.reply({
-          content: `${EMOJI_TAG.warning} Bot chỉ nhận lệnh trong kênh <#${guildSettings.musicChannelId}>!`,
+          content: `${EMOJI_TAG.warning} ${t(interaction.guild.id, 'common.text_locked', { channelId: guildSettings.musicChannelId })}`,
           flags: 64
         });
       }
@@ -670,7 +671,8 @@ client.on('interactionCreate', async (interaction) => {
       await command.execute(interaction);
     } catch (err) {
       console.error(`[Slash Command Error - /${commandName}]:`, err);
-      const errMsg = `Đã xảy ra lỗi khi thực thi lệnh: ${err.message}`;
+      const isEnCmd = settingsManager.get(interaction.guild?.id)?.language === 'en';
+      const errMsg = (isEnCmd ? 'An error occurred while executing command: ' : 'Đã xảy ra lỗi khi thực thi lệnh: ') + err.message;
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply({ content: errMsg, embeds: [] }).catch(() => {});
       } else {
@@ -684,7 +686,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit()) {
     if (interaction.customId === 'modal_add_song') {
       if (!hasMusicPermission(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn không có quyền sử dụng bot âm nhạc!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))], flags: 64 });
       }
       const memberVoice = interaction.member?.voice?.channel;
       if (!memberVoice) {
@@ -694,15 +696,15 @@ client.on('interactionCreate', async (interaction) => {
           channelId: interaction.channelId,
           flags: 64
         });
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để thêm bài hát!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_voice'))], flags: 64 });
       }
       if (!isAllowedVoiceChannel(interaction.member)) {
         const guildSettings = settingsManager.get(interaction.guild.id);
-        return interaction.reply({ embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.voice_locked', { channelId: guildSettings.lockedVoiceChannelId }))], flags: 64 });
       }
       const botVoice = interaction.guild?.members?.me?.voice?.channel;
       if (botVoice && memberVoice.id !== botVoice.id && !isStrictAdmin(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed(`Bạn phải ở cùng kênh Voice [**${botVoice.name}**] với bot để thêm bài hát!`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.different_voice', { channel: botVoice.name }))], flags: 64 });
       }
 
       const query = interaction.fields.getTextInputValue('song_query')?.trim();
@@ -713,16 +715,15 @@ client.on('interactionCreate', async (interaction) => {
           channelId: interaction.channelId,
           flags: 64
         });
-        return interaction.reply({ embeds: [createErrorEmbed('Vui lòng nhập tên bài hát hoặc đường dẫn hợp lệ!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Please enter a valid song name or URL!' : 'Vui lòng nhập tên bài hát hoặc đường dẫn hợp lệ!')], flags: 64 });
       }
 
       logAction('INTERACTION_DEFER_REPLY', {
         type: 'MODAL_ADD_SONG',
         interactionId: interaction.id,
-        channelId: interaction.channelId,
-        flags: 64
+        channelId: interaction.channelId
       });
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply();
 
       try {
         const tracks = await searchTrack(query);
@@ -732,7 +733,7 @@ client.on('interactionCreate', async (interaction) => {
             interactionId: interaction.id,
             channelId: interaction.channelId
           });
-          return interaction.editReply({ embeds: [createErrorEmbed('Không tìm thấy bài hát hoặc Playlist phù hợp với từ khóa này!')] });
+          return interaction.editReply({ embeds: [createErrorEmbed(t(interaction.guildId, 'errors.track_not_found'))] });
         }
 
         const queue = musicManager.getOrCreate(interaction.guild, interaction.channel, memberVoice);
@@ -748,7 +749,12 @@ client.on('interactionCreate', async (interaction) => {
             content: track.title.slice(0, 60)
           });
           return interaction.editReply({
-            embeds: [createSuccessEmbed(`Đã thêm bài hát vào hàng chờ: [**${track.title}**](${track.url})`)]
+            embeds: [createSuccessEmbed(t(interaction.guildId, 'player.added_single', {
+              title: track.title,
+              url: track.url,
+              duration: track.duration || '3:30',
+              position: queue.songs.length
+            }))]
           });
         } else {
           await queue.addSongs(tracks, interaction.member || interaction.user);
@@ -759,7 +765,10 @@ client.on('interactionCreate', async (interaction) => {
             count: tracks.length
           });
           return interaction.editReply({
-            embeds: [createSuccessEmbed(`Đã thêm thành công **${tracks.length} bài hát** từ Playlist vào hàng chờ!`)]
+            embeds: [createSuccessEmbed(t(interaction.guildId, 'player.added_playlist', {
+              count: tracks.length,
+              title: tracks[0]?.playlistTitle || 'Playlist'
+            }))]
           });
         }
       } catch (err) {
@@ -770,19 +779,19 @@ client.on('interactionCreate', async (interaction) => {
           channelId: interaction.channelId,
           content: (err.message || '').slice(0, 60)
         });
-        return interaction.editReply({ embeds: [createErrorEmbed(`Lỗi khi thêm bài hát: ${err.message}`)] });
+        return interaction.editReply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `Error adding song: ${err.message}` : `Lỗi khi thêm bài hát: ${err.message}`)] });
       }
     }
 
     // Xóa bài theo số thứ tự (từ Modal)
     if (interaction.customId === 'modal_queue_delete_index') {
       if (!hasMusicPermission(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn không có quyền chỉnh sửa hàng chờ!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))], flags: 64 });
       }
       const memberVoice = interaction.member?.voice?.channel;
       const botVoice = interaction.guild?.members?.me?.voice?.channel;
       if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id) && !isStrictAdmin(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn phải ở cùng kênh Voice với bot để xóa bài hát!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.different_voice', { channel: botVoice?.name || '' }))], flags: 64 });
       }
 
       const posStr = interaction.fields.getTextInputValue('queue_song_position')?.trim();
@@ -790,23 +799,23 @@ client.on('interactionCreate', async (interaction) => {
       const queue = musicManager.get(interaction.guild.id);
       const userSongs = queue?.getUserSongs ? queue.getUserSongs() : (queue?.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)' && s.requestedBy !== 'Auto (24/7 Lofi)');
       if (!queue || userSongs.length === 0) {
-        return interaction.reply({ embeds: [createErrorEmbed('Hàng chờ hiện đang trống!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'player.queue_empty'))], flags: 64 });
       }
 
       if (isNaN(pos) || pos < 1 || pos > userSongs.length) {
-        return interaction.reply({ embeds: [createErrorEmbed(`Số thứ tự không hợp lệ! Vui lòng nhập từ 1 đến ${userSongs.length}.`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `Invalid track index! Please enter a number between 1 and ${userSongs.length}.` : `Số thứ tự không hợp lệ! Vui lòng nhập từ 1 đến ${userSongs.length}.`)], flags: 64 });
       }
 
       const target = userSongs[pos - 1];
       const actualIdx = queue.songs.indexOf(target);
       if (actualIdx === -1) {
-        return interaction.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát tương ứng trong hàng chờ!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Matching song not found in queue!' : 'Không tìm thấy bài hát tương ứng trong hàng chờ!')], flags: 64 });
       }
 
       const removed = queue.songs.splice(actualIdx, 1)[0];
       queue._saveSessionState?.();
       return interaction.reply({
-        embeds: [createSuccessEmbed(`🗑️ Đã xóa thành công bài số **${pos}**: **${removed.title}** khỏi hàng chờ.`)],
+        embeds: [createSuccessEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `🗑️ Successfully removed track **#${pos}**: **${removed.title}** from queue.` : `🗑️ Đã xóa thành công bài số **${pos}**: **${removed.title}** khỏi hàng chờ.`)],
         flags: 64
       });
     }
@@ -814,12 +823,12 @@ client.on('interactionCreate', async (interaction) => {
     // Điều chỉnh âm lượng nhanh từ Modal của nút btn_volume
     if (interaction.customId === 'modal_set_volume') {
       if (!hasMusicPermission(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn không có quyền điều chỉnh âm lượng!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))], flags: 64 });
       }
       const memberVoice = interaction.member?.voice?.channel;
       const botVoice = interaction.guild?.members?.me?.voice?.channel;
       if (botVoice && (!memberVoice || memberVoice.id !== botVoice.id) && !isStrictAdmin(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn phải ở cùng kênh Voice với bot để điều chỉnh âm lượng!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.different_voice', { channel: botVoice?.name || '' }))], flags: 64 });
       }
 
       const volStr = interaction.fields.getTextInputValue('volume_level_input')?.trim();
@@ -827,10 +836,10 @@ client.on('interactionCreate', async (interaction) => {
       const queue = musicManager.get(interaction.guild.id);
 
       if (!queue) {
-        return interaction.reply({ embeds: [createErrorEmbed('Hiện không có phiên phát nhạc nào đang hoạt động!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_queue'))], flags: 64 });
       }
       if (isNaN(vol) || vol < 1 || vol > 100) {
-        return interaction.reply({ embeds: [createErrorEmbed('Vui lòng nhập mức âm lượng hợp lệ từ **1** đến **100**!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Please enter a valid volume between **1** and **100**!' : 'Vui lòng nhập mức âm lượng hợp lệ từ **1** đến **100**!')], flags: 64 });
       }
 
       queue.setVolume(vol);
@@ -848,7 +857,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       return interaction.reply({
-        embeds: [createSuccessEmbed(`Đã điều chỉnh âm lượng phát nhạc thành **${vol}%**`)],
+        embeds: [createSuccessEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `Adjusted playback volume to **${vol}%**` : `Đã điều chỉnh âm lượng phát nhạc thành **${vol}%**`)],
         flags: 64
       });
     }
@@ -860,13 +869,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId.startsWith('menu_queue_remove')) {
       const queue = musicManager.get(interaction.guild.id);
       if (!queue) {
-        return interaction.reply({ embeds: [createErrorEmbed('Không tìm thấy phiên phát nhạc đang hoạt động!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_queue'))], flags: 64 });
       }
 
       if (!hasMusicPermission(interaction.member)) {
         const guildSettings = settingsManager.get(interaction.guild.id);
         const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
-        return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để xóa bài.`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.dj_only', { role: roleText }))], flags: 64 });
       }
 
       if (interaction.values[0] === 'remove_all') {
@@ -908,18 +917,18 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId.startsWith('menu_play_fav_song_')) {
       const targetUserId = interaction.customId.replace('menu_play_fav_song_', '');
       if (interaction.user.id !== targetUserId) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn chỉ có thể chọn bài từ danh sách yêu thích của chính mình!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'You can only select songs from your own favorites list!' : 'Bạn chỉ có thể chọn bài từ danh sách yêu thích của chính mình!')], flags: 64 });
       }
 
       const memberVoice = interaction.member?.voice?.channel;
       if (!memberVoice) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở trong một kênh Voice để phát nhạc!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_voice'))], flags: 64 });
       }
 
       if (!hasMusicPermission(interaction.member)) {
         const guildSettings = settingsManager.get(interaction.guild.id);
         const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
-        return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để thêm bài.`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.dj_only', { role: roleText }))], flags: 64 });
       }
 
       if (!isAllowedVoiceChannel(interaction.member)) {
@@ -932,7 +941,7 @@ client.on('interactionCreate', async (interaction) => {
       const selectedSong = favorites && favorites[songIdx];
 
       if (!selectedSong) {
-        return interaction.reply({ embeds: [createErrorEmbed('Không tìm thấy bài hát đã chọn!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Selected song not found!' : 'Không tìm thấy bài hát đã chọn!')], flags: 64 });
       }
 
       logAction('INTERACTION_DEFER_REPLY', {
@@ -956,14 +965,14 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       return interaction.editReply({
-        embeds: [createSuccessEmbed(`❤️ Đã nạp bài hát [**${formatMarkdownTitle(selectedSong.title, 60)}**](${selectedSong.url}) vào hàng chờ!`)]
+        embeds: [createSuccessEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `❤️ Added [**${formatMarkdownTitle(selectedSong.title, 60)}**](${selectedSong.url}) to queue!` : `❤️ Đã nạp bài hát [**${formatMarkdownTitle(selectedSong.title, 60)}**](${selectedSong.url}) vào hàng chờ!`)]
       });
     }
 
     // Bảng Cài đặt
     if (interaction.customId === 'menu_settings') {
       if (!isStrictAdmin(interaction.member)) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bạn cần quyền `Quản Trị Viên` hoặc `Quản Lý Máy Chủ` để thay đổi cài đặt!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))], flags: 64 });
       }
 
       const selectedValue = interaction.values[0];
@@ -1080,7 +1089,7 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId === 'menu_autoplay_layers') {
       if (!isStrictAdmin(interaction.member)) {
         return interaction.reply({
-          embeds: [createErrorEmbed('Bạn không có quyền thực hiện thao tác này! Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên** mới có quyền cấu hình tầng Autoplay.')],
+          embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))],
           flags: 64
         });
       }
@@ -1331,7 +1340,7 @@ client.on('interactionCreate', async (interaction) => {
     // Nút Yêu thích (Lưu bài hát đang phát vào MongoDB Atlas)
     if (customId === 'btn_favorite') {
       if (!queue || !queue.currentSong || queue.isPreparing || queue.isStopped) {
-        return interaction.reply({ embeds: [createErrorEmbed('Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!')], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Track is preparing or hasn\'t started yet, please wait a moment!' : 'Bài hát đang chuẩn bị phát hoặc chưa bắt đầu, vui lòng đợi giây lát!')], flags: 64 });
       }
 
       if (queue.currentSong?.is247 || queue.currentSong?.requestedBy === 'Auto (24/7)' || queue.currentSong?.requestedBy === 'Auto (24/7 Lofi)') {
@@ -1470,7 +1479,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!hasMusicPermission(interaction.member)) {
         const guildSettings = settingsManager.get(interaction.guild.id);
         const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
-        return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để thêm bài.`)], flags: 64 });
+        return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.dj_only', { role: roleText }))], flags: 64 });
       }
 
       if (!isAllowedVoiceChannel(interaction.member)) {
@@ -1520,13 +1529,13 @@ client.on('interactionCreate', async (interaction) => {
 
       const modal = new ModalBuilder()
         .setCustomId('modal_add_song')
-        .setTitle('➕ Thêm bài hát hoặc Playlist');
+        .setTitle(t(interaction.guildId, 'modal.add_song_title'));
 
       const songInput = new TextInputBuilder()
         .setCustomId('song_query')
-        .setLabel('Tên bài hát, Link bài hoặc Link Playlist')
+        .setLabel(t(interaction.guildId, 'modal.add_song_query_label').slice(0, 45))
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('Dán link YouTube/Spotify Playlist (tối đa 20 bài) hoặc tên bài...')
+        .setPlaceholder(t(interaction.guildId, 'modal.add_song_placeholder').slice(0, 100))
         .setRequired(true);
 
       const modalRow = new ActionRowBuilder().addComponents(songInput);
@@ -1552,29 +1561,30 @@ client.on('interactionCreate', async (interaction) => {
     if (!hasMusicPermission(interaction.member)) {
       const guildSettings = settingsManager.get(interaction.guild.id);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : '`DJ`';
-      return interaction.reply({ embeds: [createErrorEmbed(`Chế độ DJ đang bật! Bạn cần có vai trò ${roleText} để điều khiển.`)], flags: 64 });
+      return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.dj_only', { role: roleText }))], flags: 64 });
     }
 
     if (!queue || !queue.voiceChannel || !queue.connection) {
-      return interaction.reply({ embeds: [createErrorEmbed('Bot hiện chưa tham gia phòng Voice nào! Vui lòng dùng lệnh `/join` hoặc `/play <tên_bài>` để mời bot vào phòng trước.')], flags: 64 });
+      return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Bot is not in any Voice channel! Use `/join` or `/play <song>` first.' : 'Bot hiện chưa tham gia phòng Voice nào! Vui lòng dùng lệnh `/join` hoặc `/play <tên_bài>` để mời bot vào phòng trước.')], flags: 64 });
     }
 
     const memberVoice = interaction.member?.voice?.channel;
     if (queue.voiceChannel && memberVoice?.id !== queue.voiceChannel.id) {
-      return interaction.reply({ embeds: [createErrorEmbed('Bạn cần ở cùng phòng Voice với bot để điều khiển!')], flags: 64 });
+      return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'You need to be in the same Voice channel as the bot to control music!' : 'Bạn cần ở cùng phòng Voice với bot để điều khiển!')], flags: 64 });
     }
 
     // 1. Nút 🔊 Chỉnh âm lượng (Mở Popup Modal nhập % âm lượng trực tiếp, phải gọi trước deferUpdate)
     if (customId === 'btn_volume') {
+      const isEnVol = settingsManager.get(interaction.guildId)?.language === 'en';
       const modal = new ModalBuilder()
         .setCustomId('modal_set_volume')
-        .setTitle('🔊 Điều Chỉnh Âm Lượng (1 - 100%)');
+        .setTitle(isEnVol ? '🔊 Adjust Volume (1 - 100%)' : '🔊 Điều Chỉnh Âm Lượng (1 - 100%)');
 
       const volInput = new TextInputBuilder()
         .setCustomId('volume_level_input')
-        .setLabel('Nhập mức âm lượng mong muốn (%)')
+        .setLabel(isEnVol ? 'Desired volume level (%)' : 'Nhập mức âm lượng mong muốn (%)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder(`Âm lượng hiện tại: ${queue.volume || 80}% (Nhập số từ 1 đến 100)`)
+        .setPlaceholder(isEnVol ? `Current volume: ${queue.volume || 80}% (1-100)` : `Âm lượng hiện tại: ${queue.volume || 80}% (Nhập số từ 1 đến 100)`)
         .setValue(String(queue.volume || 80))
         .setMinLength(1)
         .setMaxLength(3)
@@ -1588,7 +1598,7 @@ client.on('interactionCreate', async (interaction) => {
     if (customId === 'btn_lyrics') {
       if (!queue.currentSong || queue.isPreparing || queue.isStopped) {
         return interaction.reply({
-          embeds: [createErrorEmbed('Hiện chưa có bài hát nào đang phát để tra cứu lời!')],
+          embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'No song is currently playing to fetch lyrics!' : 'Hiện chưa có bài hát nào đang phát để tra cứu lời!')],
           flags: 64
         });
       }
@@ -1605,13 +1615,13 @@ client.on('interactionCreate', async (interaction) => {
         const result = await fetchLyrics(song.title, artist, durMs, song.url);
         if (!result || !result.lyrics || !result.lyrics.trim()) {
           return interaction.editReply({
-            embeds: [createErrorEmbed(`Không tìm thấy lời bài hát cho **${song.title}**!`)]
+            embeds: [createErrorEmbed(t(interaction.guildId, 'commands.lyrics_not_found', { title: song.title }))]
           });
         }
 
         let lyricsText = result.lyrics.trim();
         if (lyricsText.length > 3900) {
-          lyricsText = lyricsText.slice(0, 3900) + '\n\n*... (Lời bài hát đã được rút gọn)*';
+          lyricsText = lyricsText.slice(0, 3900) + (settingsManager.get(interaction.guildId)?.language === 'en' ? '\n\n*... (Lyrics truncated)*' : '\n\n*... (Lời bài hát đã được rút gọn)*');
         }
 
         const lyricsEmbed = createEmbed(
@@ -1621,7 +1631,7 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply({ embeds: [lyricsEmbed] });
       } catch (lyErr) {
         return interaction.editReply({
-          embeds: [createErrorEmbed(`Lỗi khi tải lời bài hát: ${lyErr.message}`)]
+          embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `Error loading lyrics: ${lyErr.message}` : `Lỗi khi tải lời bài hát: ${lyErr.message}`)]
         });
       }
     }
@@ -1650,7 +1660,7 @@ client.on('interactionCreate', async (interaction) => {
       // Khóa thao tác cấp độ Guild: ngăn nhiều người bấm hoặc 1 người bấm liên hoàn khi thao tác trước chưa xong
       if (queue._isProcessingAction) {
         return interaction.reply({
-          content: '⏳ Hệ thống đang xử lý thao tác trước đó, vui lòng đợi giây lát!',
+          content: (settingsManager.get(interaction.guildId)?.language === 'en' ? '⏳ Action is being processed, please wait a moment!' : '⏳ Hệ thống đang xử lý thao tác trước đó, vui lòng đợi giây lát!'),
           flags: 64
         }).catch(() => {});
       }
@@ -1660,7 +1670,7 @@ client.on('interactionCreate', async (interaction) => {
       const lastClickTime = buttonCooldownMap.get(guildActionKey) || 0;
       if (Date.now() - lastClickTime < 1500) {
         return interaction.reply({
-          content: '⏳ Hệ thống đang xử lý thao tác trước đó, vui lòng đợi giây lát!',
+          content: (settingsManager.get(interaction.guildId)?.language === 'en' ? '⏳ Action is being processed, please wait a moment!' : '⏳ Hệ thống đang xử lý thao tác trước đó, vui lòng đợi giây lát!'),
           flags: 64
         }).catch(() => {});
       }
@@ -1681,7 +1691,7 @@ client.on('interactionCreate', async (interaction) => {
     ];
     if (is247Mode && blockedIn247.includes(customId)) {
       return interaction.reply({
-        embeds: [createErrorEmbed('♾️ Bot đang phát Đài Radio Lofi 24/7 tự động. Hãy bấm nút `➕` hoặc dùng `/play <tên bài>` để phát nhạc của bạn nhé!')],
+        embeds: [createErrorEmbed(t(interaction.guildId, 'player.radio_cannot_control'))],
         flags: 64
       });
     }
@@ -1692,14 +1702,14 @@ client.on('interactionCreate', async (interaction) => {
       if (is247Mode) {
         if (!isAdmin) {
           return interaction.reply({
-            embeds: [createErrorEmbed('Bot đang phát nhạc chế độ Lofi 24/7! Chỉ **Quản trị viên (Admin)** mới có quyền dừng phát nhạc.')],
+            embeds: [createErrorEmbed(t(interaction.guildId, 'common.admin_only_247'))],
             flags: 64
           });
         }
       } else {
         if (!hasMusicPermission(interaction.member)) {
           return interaction.reply({
-            embeds: [createErrorEmbed('Bạn không có quyền dừng phát nhạc trong máy chủ!')],
+            embeds: [createErrorEmbed(t(interaction.guildId, 'common.no_permission'))],
             flags: 64
           });
         }
@@ -1710,10 +1720,37 @@ client.on('interactionCreate', async (interaction) => {
     if (playbackButtons.includes(customId)) {
       queue._isProcessingAction = true;
       try {
-        const isOptimistic = (customId === 'btn_skip' || customId === 'btn_previous' || customId === 'btn_stop');
+        let skipResult = null;
+        if (customId === 'btn_skip') {
+          skipResult = queue.checkOrCastSkipVote(interaction.member);
+          if (skipResult.status === 'skipped') {
+            if (skipResult.reason === 'vote_passed') {
+              queue.textChannel?.send(t(interaction.guildId, 'skip.vote_passed', {
+                title: skipResult.title,
+                current: skipResult.current,
+                required: skipResult.required
+              })).catch(() => {});
+            }
+          } else if (skipResult.status === 'vote_progress') {
+            queue.textChannel?.send(t(interaction.guildId, 'skip.vote_progress', {
+              user: skipResult.user,
+              current: skipResult.current,
+              required: skipResult.required,
+              needed: skipResult.needed
+            })).catch(() => {});
+          } else if (skipResult.status === 'vote_retracted') {
+            queue.textChannel?.send(t(interaction.guildId, 'skip.vote_retracted', {
+              user: skipResult.user,
+              current: skipResult.current,
+              required: skipResult.required
+            })).catch(() => {});
+          }
+        }
+
+        const isOptimistic = ((customId === 'btn_skip' && skipResult?.status === 'skipped') || customId === 'btn_previous' || customId === 'btn_stop');
         if (isOptimistic) {
           queue._pendingButtonAction = customId === 'btn_skip' ? 'skip' : (customId === 'btn_previous' ? 'previous' : 'stop');
-          const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: 'Nhạc nền Lofi 24/7', is247: true } : null);
+          const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: t(interaction.guildId, 'player.radio_card_title'), is247: true } : null);
           if (songForEmbed) {
             const isV2Message = interaction.message?.components?.[0]?.type === 17 || interaction.message?.flags?.has?.(32768);
             if (isV2Message) {
@@ -1738,7 +1775,7 @@ client.on('interactionCreate', async (interaction) => {
           queue.togglePause();
         } else if (customId === 'btn_skip') {
           if (is247Mode) queue._is247Skipping = true;
-          queue.skip();
+          // Note: queue.skip() was already executed in checkOrCastSkipVote if conditions passed
         } else if (customId === 'btn_previous') {
           await queue.playPrevious();
         } else if (customId === 'btn_rewind') {
@@ -1777,7 +1814,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // Cập nhật lại giao diện NowPlaying message
-        const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: 'Nhạc nền Lofi 24/7', is247: true } : null);
+        const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: t(interaction.guildId, 'player.radio_card_title'), is247: true } : null);
         if (songForEmbed) {
           const isV2Message = interaction.message?.components?.[0]?.type === 17 || interaction.message?.flags?.has?.(32768);
           if (isV2Message) {
