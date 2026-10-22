@@ -992,6 +992,13 @@ client.on('interactionCreate', async (interaction) => {
         if (queue && typeof queue.refreshNowPlayingCard === 'function') {
           queue.refreshNowPlayingCard();
         }
+        if (queue?.voiceChannel && !queue.currentSong) {
+          if (queue.mode247) {
+            setVoiceChannelStatus(queue.voiceChannel, newLang === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
+          } else {
+            clearVoiceChannelStatus(queue.voiceChannel);
+          }
+        }
       } else if (selectedValue === 'set_ai') {
         const newVal = !(currentSettings.useAiAssistant !== false);
         updatedSettings = settingsManager.update(guildId, { useAiAssistant: newVal });

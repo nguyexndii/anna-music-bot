@@ -2252,6 +2252,13 @@ class MusicQueue {
     } else {
       this.clear247IdleTimer();
       sessionManager.clearSession(this.guild.id);
+      const humanCount = typeof this.getHumanMemberCount === 'function' ? this.getHumanMemberCount() : 1;
+      const guildSettings = settingsManager.get(this.guild.id);
+      if (humanCount === 0) {
+        this.startEmptyRoomTimer(guildSettings?.emptyChannelTimeout || 60);
+      } else if (!this.currentSong && (!this.songs || this.songs.length === 0)) {
+        this.startDisconnectTimer((guildSettings?.emptyChannelTimeout || 60) * 1000);
+      }
     }
   }
 

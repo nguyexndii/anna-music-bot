@@ -1849,8 +1849,17 @@ module.exports = function createApiRouter(client) {
       const updated = settingsManager.update(guildId, req.body);
       const queue = client.musicManager ? client.musicManager.get(guildId) : null;
       if (queue) {
-        if (req.body.language !== undefined && typeof queue.refreshNowPlayingCard === 'function') {
-          queue.refreshNowPlayingCard();
+        if (req.body.language !== undefined) {
+          if (typeof queue.refreshNowPlayingCard === 'function') {
+            queue.refreshNowPlayingCard();
+          }
+          if (queue.voiceChannel && !queue.currentSong) {
+            if (queue.mode247) {
+              setVoiceChannelStatus(queue.voiceChannel, updated.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
+            } else {
+              clearVoiceChannelStatus(queue.voiceChannel);
+            }
+          }
         }
         if (updated.crossfadeDuration !== undefined) {
           queue.crossfadeDuration = updated.crossfadeDuration;
