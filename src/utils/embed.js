@@ -188,6 +188,24 @@ function formatMarkdownTitle(title, maxLength = 58) {
  * Tạo thanh tiến trình âm nhạc liền mạch chuẩn Bản 2: `2:48 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬🔘 2:48`
  * Đối với chế độ Lofi 24/7 hoặc luồng Live vô hạn: hiển thị `LIVE` 🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ `∞`
  */
+/**
+ * Kiểm tra nhất quán xem bài hát hoặc queue có đang ở chế độ Đài Radio Lofi 24/7 hay không
+ */
+function is247Track(song, queue) {
+  if (song?.is247) return true;
+  if (song?.requestedBy === 'Auto (24/7)' || song?.requestedBy === 'Auto (24/7 Lofi)') return true;
+  if (typeof song?.requestedBy === 'string' && song.requestedBy.includes('24/7')) return true;
+  if (typeof queue?.isCurrentSongLofi === 'function' && queue.isCurrentSongLofi()) return true;
+  if (queue?.mode247) {
+    if (!song) return true;
+    if (song.is247) return true;
+    if (!song.requestedById && (!song.requestedBy || song.requestedBy === 'Auto' || song.requestedBy === 'Auto (24/7)')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function createProgressBar(currentMs, totalMs, size = 15, is247Mode = false) {
   if (is247Mode) {
     return '`LIVE` 🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ `∞`';
@@ -261,9 +279,7 @@ function createWarningEmbed(description) {
 }
 
 function createNowPlayingBanner(song, queue) {
-  const is247Mode = Boolean(
-    song && (song.requestedBy === 'Auto (24/7)' || song.is247 || (queue?.mode247 && (!song || song.is247)))
-  );
+  const is247Mode = is247Track(song, queue);
   const rawTitle = String(song?.title || '')
     .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '')
     .trim();
@@ -308,13 +324,7 @@ function createQueueAddedEmbed(song, position = 1) {
  * ============================================================================
  */
 function createNowPlayingCard(song, queue) {
-  const is247Mode = Boolean(
-    song?.is247 ||
-    song?.requestedBy === 'Auto (24/7)' ||
-    song?.requestedBy === 'Auto (24/7 Lofi)' ||
-    (typeof song?.requestedBy === 'string' && song.requestedBy.includes('24/7')) ||
-    (queue?.mode247 && (!song || song.is247))
-  );
+  const is247Mode = is247Track(song, queue);
 
   const safeTitle = formatMarkdownTitle(song?.title || (is247Mode ? 'Đài Phát Thanh Lofi 24/7' : 'Bài hát đang phát'), 58);
   const songUrl = (song?.url && song.url.startsWith('http')) ? song.url : 'https://discord.com';
@@ -484,13 +494,7 @@ function createNowPlayingCard(song, queue) {
  * Fallback Embed truyền thống nếu có chỗ cần dùng
  */
 function createNowPlayingEmbed(song, queue) {
-  const is247Mode = Boolean(
-    song?.is247 ||
-    song?.requestedBy === 'Auto (24/7)' ||
-    song?.requestedBy === 'Auto (24/7 Lofi)' ||
-    (typeof song?.requestedBy === 'string' && song.requestedBy.includes('24/7')) ||
-    (queue?.mode247 && (!song || song.is247))
-  );
+  const is247Mode = is247Track(song, queue);
 
   const safeTitle = formatMarkdownTitle(song?.title || (is247Mode ? 'Đài Phát Thanh Lofi 24/7' : 'Bài hát đang phát'), 58);
   const songUrl = (song?.url && song.url.startsWith('http')) ? song.url : 'https://discord.com';
@@ -512,9 +516,7 @@ function createNowPlayingEmbed(song, queue) {
 }
 
 function createMusicControls(queue) {
-  const is247Mode = Boolean(
-    queue?.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)
-  ) || Boolean(queue?.mode247 && !queue?.currentSong);
+  const is247Mode = is247Track(queue?.currentSong, queue);
 
   const pendingAction = queue?._pendingButtonAction;
   const isPendingSkip = pendingAction === 'skip';
@@ -1164,6 +1166,7 @@ module.exports = {
   createSettingsSelectMenu,
   createAutoplayLayersEmbed,
   createAutoplayLayersComponents,
+  is247Track,
   createProgressBar,
   formatDurationMs,
   parseDurationToMs,

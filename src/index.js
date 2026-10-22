@@ -38,6 +38,7 @@ const userPlaylistManager = require('./structures/UserPlaylistManager');
 const { connectDatabase } = require('./database/mongoose');
 const { searchTrack } = require('./utils/musicExtractor');
 const {
+  is247Track,
   createNowPlayingCard,
   createNowPlayingEmbed,
   createMusicControls,
@@ -1074,9 +1075,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const queue = musicManager.get(interaction.guild.id);
     const customId = interaction.customId;
-    const is247Mode = Boolean(
-      queue?.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)
-    ) || Boolean(queue?.mode247 && !queue?.currentSong);
+    const is247Mode = is247Track(queue?.currentSong, queue);
 
     // Cấu hình tầng Autoplay qua Preset Buttons, nút Mở nhanh hoặc Quay lại
     if (customId === 'btn_open_autoplay_layers' || customId === 'btn_layer_yt_only' || customId === 'btn_layer_yt_ai' || customId === 'btn_layer_default' || customId === 'btn_settings_back') {
