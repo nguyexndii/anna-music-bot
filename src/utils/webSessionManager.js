@@ -8,6 +8,7 @@
  */
 
 const { t } = require('./i18n');
+const { EMOJI_TAG } = require('./embed');
 
 // Map lưu trữ: key = `${guildId}_${userId}` => { interaction, replyMsg, timer, pin, token, guildId, userId, isEn }
 global._userActiveWebMessages = global._userActiveWebMessages || new Map();
@@ -52,8 +53,8 @@ function registerWebSession({ guildId, userId, interaction, replyMsg, pin, token
               {
                 type: 10,
                 content: prevSession.isEn
-                  ? '### <:anna_warning:1562002803097083964> Web Player PIN Invalidated\n⚠️ **This PIN and link have been invalidated** because you requested a new one.\n\nPlease use the latest PIN and link message!'
-                  : '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Bị Vô Hiệu Hóa\n⚠️ **Mã PIN này đã bị vô hiệu hóa** do bạn vừa yêu cầu cấp mã mới.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
+                  ? `### ${EMOJI_TAG.warning} Web Player PIN Invalidated\n${EMOJI_TAG.warning} **This PIN and link have been invalidated** because you requested a new one.\n\nPlease use the latest PIN and link message!`
+                  : `### ${EMOJI_TAG.warning} Mã PIN Web Player Đã Bị Vô Hiệu Hóa\n${EMOJI_TAG.warning} **Mã PIN này đã bị vô hiệu hóa** do bạn vừa yêu cầu cấp mã mới.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!`
               }
             ],
             accessory: client ? {
@@ -95,8 +96,8 @@ function registerWebSession({ guildId, userId, interaction, replyMsg, pin, token
                 {
                   type: 10,
                   content: isEn
-                    ? '### <:anna_warning:1562002803097083964> Web Player PIN Expired\n⏰ **This PIN and link have expired (2 minutes).** Please type `/web` or click the button to generate a new one.'
-                    : '### <:anna_warning:1562002803097083964> Mã PIN Web Player Đã Hết Hạn\n⏰ **Mã PIN và liên kết này đã hết hạn hiệu lực (2 phút).** Vui lòng gõ `/web` hoặc bấm nút để lấy mã mới.'
+                    ? `### ${EMOJI_TAG.warning} Web Player PIN Expired\n${EMOJI_TAG.warning} **This PIN and link have expired (2 minutes).** Please type \`/web\` or click the button to generate a new one.`
+                    : `### ${EMOJI_TAG.warning} Mã PIN Web Player Đã Hết Hạn\n${EMOJI_TAG.warning} **Mã PIN và liên kết này đã hết hạn hiệu lực (2 phút).** Vui lòng gõ \`/web\` hoặc bấm nút để lấy mã mới.`
                 }
               ],
               accessory: client ? {
@@ -183,8 +184,8 @@ function notifyWebSessionSuccess(userId, guildId, pin = null) {
             {
               type: 10,
               content: isEn
-                ? '### <:anna_sparkles:1562002773229441064> Web Player Connected\n✅ **Successfully connected to Web Player!** Session is active.'
-                : '### <:anna_sparkles:1562002773229441064> Đã Kết Nối Web Player\n✅ **Đã kết nối Web Player thành công!** Phiên đăng nhập đang hoạt động.'
+                ? `### ${EMOJI_TAG.correct} Web Player Connected\n${EMOJI_TAG.correct} **Successfully connected to Web Player!** Session is active.`
+                : `### ${EMOJI_TAG.correct} Đã Kết Nối Web Player\n${EMOJI_TAG.correct} **Đã kết nối Web Player thành công!** Phiên đăng nhập đang hoạt động.`
             }
           ],
           accessory: client ? {
