@@ -133,6 +133,18 @@ class MusicQueue {
 
     this._initSettings();
     this._setupPlayerEvents();
+
+    // Đăng ký lắng nghe sự kiện Lời bài hát về muộn (Hot-Attach)
+    const { lyricsEvents } = require('../utils/lyricsHelper');
+    this._onLyricsFound = (event) => {
+      if (!this.currentSong || this.isDestroyed || this.isStopped) return;
+      if (this.hasSyncedLyrics) return; // Đã có lyrics rồi thì không cần nạp đè
+      const currentUrl = this.currentSong.url;
+      if (event && event.url && currentUrl && event.url === currentUrl && event.lyricsData) {
+        this.attachLateLyrics(this.currentSong, event.lyricsData);
+      }
+    };
+    lyricsEvents.on('lyricsFound', this._onLyricsFound);
   }
 
   _clearBufferingWatchdog() {
@@ -2498,6 +2510,70 @@ class MusicQueue {
     } catch (e) {}
   }
 
+  _applySyncedLyrics(song, lyricsData) {
+    if (!song || !lyricsData || !Array.isArray(lyricsData.syncedLyrics) || lyricsData.syncedLyrics.length < 3) {
+      return false;
+    }
+
+    let activeSyncedLyrics = lyricsData.syncedLyrics;
+    let activeAutoOffsetMs = lyricsData.autoOffsetMs || 0;
+
+    // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, chống Double-Offset Mutation)
+    if (song.trimStart > 0 || song.trimEnd > 0) {
+      const trimStartMs = (song.trimStart || 0) * 1000;
+      const realDurMs = song.durationMs || 0;
+
+      if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
+        activeSyncedLyrics = lyricsData.syncedLyrics
+          .map(line => ({
+            ...line,
+            time: line.time - trimStartMs,
+            time_ms: (line.time_ms ?? line.time) - trimStartMs
+          }))
+          .filter(line => line.time >= -500 && (realDurMs <= 0 || line.time <= realDurMs + 2000))
+          .map(line => ({
+            ...line,
+            time: Math.max(0, line.time),
+            time_ms: Math.max(0, line.time_ms)
+          }));
+        activeAutoOffsetMs = 0;
+      } else {
+        activeAutoOffsetMs = 0;
+      }
+    }
+
+    this.cachedSyncedLyrics = activeSyncedLyrics;
+    this.hasSyncedLyrics = true;
+    this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
+    this._lastLyricsEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
+    return true;
+  }
+
+  /**
+   * Cơ chế Nạp Nóng Lời Bài Hát (Hot-Attach / Late-Arriving Lyrics)
+   * Kích hoạt khi phụ đề YouTube CC hoặc nguồn ngoài hoàn tất sau khi card đã phát
+   */
+  async attachLateLyrics(song, lyricsData) {
+    if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;
+    if (this.hasSyncedLyrics) return;
+
+    const applied = this._applySyncedLyrics(song, lyricsData);
+    if (!applied) return;
+
+    console.log(`[Live Lyrics Hot-Attach] Đã nạp nóng thành công ${lyricsData.syncedLyrics?.length} câu lời (nguồn: ${lyricsData.source}) cho "${song.title}"`);
+    this.scheduleNextLyricUpdate(song);
+
+    if (this.nowPlayingMessage) {
+      try {
+        const { createNowPlayingCard } = require('../utils/embed');
+        const cardPayload = createNowPlayingCard(song, this);
+        await this.nowPlayingMessage.edit(cardPayload).catch(() => {});
+      } catch (e) {}
+    }
+  }
+
   async startLiveLyrics() {
     this.clearLiveLyrics();
     const song = this.currentSong;
@@ -2520,41 +2596,7 @@ class MusicQueue {
       if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;
 
       if (lyricsData && Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length >= 3) {
-        let activeSyncedLyrics = lyricsData.syncedLyrics;
-        let activeAutoOffsetMs = lyricsData.autoOffsetMs || 0;
-
-        // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, chống Double-Offset Mutation)
-        if (song.trimStart > 0 || song.trimEnd > 0) {
-          const trimStartMs = (song.trimStart || 0) * 1000;
-          const realDurMs = song.durationMs || 0;
-
-          if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
-            // 1. Với YouTube CC: Dịch lùi timestamp về mốc 0 của phần nhạc đã cắt
-            activeSyncedLyrics = lyricsData.syncedLyrics
-              .map(line => ({
-                ...line,
-                time: line.time - trimStartMs,
-                time_ms: (line.time_ms ?? line.time) - trimStartMs
-              }))
-              .filter(line => line.time >= -500 && (realDurMs <= 0 || line.time <= realDurMs + 2000))
-              .map(line => ({
-                ...line,
-                time: Math.max(0, line.time),
-                time_ms: Math.max(0, line.time_ms)
-              }));
-            activeAutoOffsetMs = 0;
-          } else {
-            // 2. Với Zing MP3 / LRCLIB / Musixmatch: Âm thanh đã cắt khớp sẵn với bản thu phòng thu
-            activeAutoOffsetMs = 0;
-          }
-        }
-
-        this.cachedSyncedLyrics = activeSyncedLyrics;
-        this.hasSyncedLyrics = true;
-        this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
-        this._lastLyricsEditTime = 0; // Đặt về 0 để câu đầu tiên xuất hiện tức thì không bị cooldown ban đầu
-        this._lastRenderedLyricIdx = -1;
-        this._lastRenderedChunkIdx = -1;
+        this._applySyncedLyrics(song, lyricsData);
         console.log(`[Live Lyrics] Hiển thị tức thì (${lyricsData.syncedLyrics.length} câu, offset: ${this.currentLyricOffsetMs}ms, nguồn: ${lyricsData.source}) cho "${song.title}"`);
         this.scheduleNextLyricUpdate(song);
       } else {
@@ -2788,6 +2830,13 @@ class MusicQueue {
     this.isStopped = true;
     this._pendingButtonAction = null;
     this._isProcessingAction = false;
+    if (this._onLyricsFound) {
+      try {
+        const { lyricsEvents } = require('../utils/lyricsHelper');
+        lyricsEvents.off('lyricsFound', this._onLyricsFound);
+      } catch (e) {}
+      this._onLyricsFound = null;
+    }
     this.clearLiveLyrics();
     this._clearBufferingWatchdog();
     this.clearPlayCountTimer();

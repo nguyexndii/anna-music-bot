@@ -1,7 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { EventEmitter } = require('events');
 const fetch = globalThis.fetch || require('node-fetch');
+
+// Hệ thống Event Bus thông báo Lời bài hát về muộn (Hot-Attach Pub/Sub)
+const lyricsEvents = new EventEmitter();
+lyricsEvents.setMaxListeners(50);
 
 // Bộ đệm RAM lưu sẵn danh sách phụ đề CC trích xuất từ yt-dlp lúc tải bài
 const youtubeSubtitlesMetaCache = new Map();
@@ -100,7 +105,9 @@ function cleanTitle(str) {
   let s = str
     .replace(/\(\s*#[^)]*\)/g, ' ')
     .replace(/#[\w\d_]+/g, ' ')
-    .replace(/\[.*?\]|【.*?】/g, ' ')
+    .replace(/\[.*?\]|【.*?】|『.*?』|《.*?》/g, ' ')
+    .replace(/\*+[^*]*\*+/g, ' ') // Xóa cụm trang trí trong dấu sao như *OFFICIAL FRIENDZONE ANTHEM*, *MV*
+    .replace(/[★☆✧✦~]/g, ' ')    // Xóa ký tự trang trí YouTube phổ biến
     .trim();
   s = s.replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
   s = s.replace(/\((?:piano|acoustic|live|remix|official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?|version|ver|catena|vinahouse|sped\s*up|slowed|reverb|cover).*?\)/gi, ' ');
@@ -110,6 +117,7 @@ function cleanTitle(str) {
   s = s.replace(/(?:^|\s)(?:feat\.?|ft\.?)\s+[^-–—|()\[\]]+/gi, ' ');
   s = s.replace(/\s*[-|:/\\–—]\s*$/g, '').trim();
   s = s.replace(/^\s*[-|:/\\–—]\s*/g, '').trim();
+  s = s.replace(/[*~]/g, ' '); // Xóa dấu sao hoặc tilde lẻ loi
   s = s.replace(/\s+/g, ' ').trim();
   return s;
 }
@@ -2206,6 +2214,15 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
     if (!firstCandidateTimestamp) {
       firstCandidateTimestamp = Date.now();
     }
+    // Cập nhật RAM Cache & phát event Hot-Attach cho bài đang phát
+    setCachedLyrics(cacheKey, res);
+    lyricsEvents.emit('lyricsFound', {
+      url: normalizedUrl || targetUrl,
+      cacheKey,
+      trackKey,
+      lyricsData: res
+    });
+
     // Nếu là nguồn ưu tiên số 1 của người dùng VÀ không bị thủng đoạn -> Chốt thắng ngay (0ms delay)
     if (candidate.priority === 0 && !candidate.quality.hasAbnormalGap) {
       hasTopPriorityPerfectWinner = true;
@@ -2311,10 +2328,11 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
         }
       }, 30);
 
+      const maxTimeoutMs = (activeLayers.includes('youtube_cc') && isYouTube) ? 4500 : 3500;
       setTimeout(() => {
         clearInterval(interval);
         resolve();
-      }, 3500);
+      }, maxTimeoutMs);
     }),
     Promise.allSettled(racePromises)
   ]);
@@ -2465,12 +2483,21 @@ function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null,
     .then(res => {
       if (res && !res.notFound) {
         console.log(`[Lyrics Pre-fetch Cache] Đã nạp sẵn lời bài hát vào RAM: "${rawTitle}" (Source: ${res.source}, AutoOffset: ${res.autoOffsetMs || 0}ms)`);
+        if (res.syncedLyrics && targetUrl) {
+          lyricsEvents.emit('lyricsFound', {
+            url: normalizeTargetUrl(targetUrl) || targetUrl,
+            cacheKey: normalizeTargetUrl(targetUrl) || targetUrl,
+            trackKey: res.trackKey,
+            lyricsData: res
+          });
+        }
       }
     })
     .catch(() => {});
 }
 
 module.exports = {
+  lyricsEvents,
   cleanSearchVariants: generateSearchVariants,
   generateVietnameseNumberVariants,
   fetchZingMp3Lyrics,

@@ -1914,6 +1914,11 @@ module.exports = function createApiRouter(client) {
       const guildSettings = settingsManager.get(guildId);
       const lyricsData = await getLyrics(safeTitle, queryArtist, durMs || 0, currentTrack.url, guildSettings?.lyricsLayers);
 
+      // Nếu bài hát đang phát chưa có Live Lyrics trên Discord mà API vừa tìm thấy lời -> Tự động nạp nóng (Hot-Attach)
+      if (queue && queue.currentSong && !queue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
+        queue.attachLateLyrics(queue.currentSong, lyricsData);
+      }
+
       let activeSyncedLyrics = lyricsData?.syncedLyrics || null;
       let activeAutoOffsetMs = lyricsData?.autoOffsetMs || 0;
 
@@ -1979,6 +1984,10 @@ module.exports = function createApiRouter(client) {
         queryArtist = '';
       }
       const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl);
+
+      if (callerQueue && callerQueue.currentSong && !callerQueue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
+        callerQueue.attachLateLyrics(callerQueue.currentSong, lyricsData);
+      }
 
       let activeSyncedLyrics = lyricsData?.syncedLyrics || null;
       let activeAutoOffsetMs = lyricsData?.autoOffsetMs || 0;
