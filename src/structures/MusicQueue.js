@@ -1722,6 +1722,7 @@ class MusicQueue {
       this._startSessionSaveInterval();
 
       // Gửi hoặc Cập nhật Card Now Playing bài đang phát (Công khai cho cả phòng xem và điều khiển)
+      this._pendingButtonAction = null;
       const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
       if (this.textChannel && guildSettings.announceSongs !== false && !is247Lofi) {
         try {
@@ -2590,6 +2591,9 @@ class MusicQueue {
     }
 
     // Nếu đang xử lý thao tác người dùng (bấm nút), hoãn lại để nhường băng thông REST API
+    if (this._pendingButtonAction && this._pendingButtonActionTime && (Date.now() - this._pendingButtonActionTime > 2500)) {
+      this._pendingButtonAction = null;
+    }
     if (this._isProcessingAction || this._pendingButtonAction) {
       this.liveLyricsTimer = setTimeout(() => this.scheduleProgressBarUpdate(song), 1500);
       return;
@@ -2640,6 +2644,9 @@ class MusicQueue {
     }
 
     // Nếu đang xử lý thao tác người dùng (bấm nút), hoãn lại để nhường băng thông REST API
+    if (this._pendingButtonAction && this._pendingButtonActionTime && (Date.now() - this._pendingButtonActionTime > 2500)) {
+      this._pendingButtonAction = null;
+    }
     if (this._isProcessingAction || this._pendingButtonAction) {
       this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), 1500);
       return;

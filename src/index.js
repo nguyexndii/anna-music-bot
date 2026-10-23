@@ -1797,6 +1797,12 @@ client.on('interactionCreate', async (interaction) => {
         const isOptimistic = ((customId === 'btn_skip' && skipResult?.status === 'skipped') || customId === 'btn_previous' || customId === 'btn_stop');
         if (isOptimistic) {
           queue._pendingButtonAction = customId === 'btn_skip' ? 'skip' : (customId === 'btn_previous' ? 'previous' : 'stop');
+          queue._pendingButtonActionTime = Date.now();
+          setTimeout(() => {
+            if (queue && queue._pendingButtonAction) {
+              queue._pendingButtonAction = null;
+            }
+          }, 2500);
           const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: t(interaction.guildId, 'player.radio_card_title'), is247: true } : null);
           if (songForEmbed) {
             const isV2Message = interaction.message?.components?.[0]?.type === 17 || interaction.message?.flags?.has?.(32768);

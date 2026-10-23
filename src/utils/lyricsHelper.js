@@ -114,7 +114,23 @@ function cleanTitle(str) {
   return s;
 }
 
-const TECHNICAL_PAREN_REGEX = /^(?:official(?:\s+(?:music\s+)?video|\s+mv|\s+audio|\s+lyric(?:s)?)?|mv|audio|video|lyrics?|remix|live(?:\s+session)?|prod\.?(?:\s+by\s+[\w\d_]+)?|feat\.?|ft\.?|beat|karaoke|4k|hd|mp3|full(?:\s+audio|\s+mv)?|teaser|trailer|acoustic(?:\s+version)?|cover)$/i;
+const TECHNICAL_PAREN_REGEX = /^(?:official(?:\s+(?:music\s+)?video|\s+mv|\s+audio|\s+lyric(?:s)?)?|mv|audio|video|lyrics?|remix|live(?:\s+session)?|prod\.?(?:\s+by\s+[\w\d_]+)?|(?:feat\.?|ft\.?)\b.*?|beat|karaoke|4k|hd|mp3|full(?:\s+audio|\s+mv)?|teaser|trailer|acoustic(?:\s+version)?|cover|.*?\b(?:ep|album|the album|mini album|single|ost|soundtrack|vol\.?\s*\d+|tập\s*\d+|version|ver|bản\s+thu|cd\s*\d+|tape|vinyl)\b.*?)$/i;
+
+function isLyricLanguageConsistent(rawTitle, artist, lyricText) {
+  if (!lyricText || typeof lyricText !== 'string' || lyricText.length < 20) return true;
+  const isVN = isVietnameseTrack({ rawTitle, artist });
+  if (isVN) {
+    const hasVnAccents = VIETNAMESE_REGEX.test(lyricText);
+    if (!hasVnAccents) {
+      const englishStopWords = /\b(the|and|you|that|with|have|this|from|they|will|would|there|their|what|about|which|when|make|like|time|just|know|take|people|into|year|your|good|some|could|them|other|than|then|now|look|only|come|over|think|also|back|after|use|two|how|our|work|first|well|way|even|new|want|because|any|these|give|day|most|us)\b/gi;
+      const engMatches = lyricText.match(englishStopWords);
+      if (engMatches && engMatches.length >= 8) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 function extractParentheticalTitles(str) {
   if (!str) return [];
@@ -259,9 +275,9 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
   const parenTitles = extractParentheticalTitles(rawTitle);
   for (const pt of parenTitles) {
     const cleanPt = cleanTitle(pt);
-    if (cleanPt && !titlesToProcess.includes(cleanPt)) {
-      // Ưu tiên cao nhất: tên trong ngoặc thường là tên tiếng Việt chính xác của bài
-      titlesToProcess.unshift(cleanPt);
+    if (cleanPt && !/(?:\b(?:ep|album|single|ost|soundtrack)\b)/i.test(cleanPt) && !titlesToProcess.includes(cleanPt)) {
+      // Bổ sung làm biến thể phụ (không unshift đè lên tên chính)
+      titlesToProcess.push(cleanPt);
     }
   }
 
@@ -508,11 +524,11 @@ function isValidMatch(match, expectedTrack, expectedArtist) {
     if (!artistMatched) return false;
   } else if (expectedTrack) {
     const eTrack = normalizeStr(stripParentheses(cleanTitle(expectedTrack)));
-    const eWords = eTrack.split(' ').filter(w => w.length >= 2);
     const isFullTrackExact = candidateTrackNorms.some(cand => {
       if (!cand) return false;
       if (cand === eTrack) return true;
-      if (eWords.length >= 2 && eWords.every(w => cand.includes(w))) return true;
+      // Khớp theo cụm từ liên tục hoặc độ tương đồng cao (tránh đảo từ như 'Muốn anh đau' vs 'Anh đâu muốn')
+      if (cand.includes(eTrack) || eTrack.includes(cand)) return true;
       return false;
     });
     if (!isFullTrackExact) return false;
@@ -1911,7 +1927,7 @@ async function fetchLrclibLyrics(rawTitle, artist = '', targetDurationSec = 0, t
         if (res && res.ok) {
           const match = await res.json().catch(() => null);
           if (match && (match.plainLyrics || match.syncedLyrics)) {
-            if (!isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics)) {
+            if (!isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics)) {
               if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
                 const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
                 const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
@@ -1974,7 +1990,7 @@ async function fetchLrclibLyrics(rawTitle, artist = '', targetDurationSec = 0, t
               const hasSynced = Boolean(match?.syncedLyrics && match.syncedLyrics.trim().length > 10);
               const hasPlain = Boolean(match?.plainLyrics && match.plainLyrics.trim().length > 10);
 
-              if ((hasSynced || hasPlain) && !isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+              if ((hasSynced || hasPlain) && !isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics) && isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
                 const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
                 const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
 
