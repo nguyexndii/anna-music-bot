@@ -42,7 +42,8 @@ module.exports = {
 
     const result = queue.checkOrCastSkipVote(ctx.member);
     if (result.status === 'skipped') {
-      const key = `skip.${result.reason}` in require('../utils/i18n').dictionaries.vi.skip ? `skip.${result.reason}` : 'skip.force_single';
+      const skipDict = require('../utils/i18n').dictionaries.vi.skip || {};
+      const key = (result.reason in skipDict) ? `skip.${result.reason}` : 'skip.force_single';
       return ctx.reply(t(guildId, key, {
         title: result.title,
         current: result.current,

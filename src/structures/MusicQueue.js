@@ -123,6 +123,7 @@ class MusicQueue {
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
 
     // Khóa thao tác & Optimistic Button State
     this._isProcessingAction = false;
@@ -2459,6 +2460,7 @@ class MusicQueue {
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
   }
 
   /**
@@ -2548,6 +2550,7 @@ class MusicQueue {
         this.hasSyncedLyrics = true;
         this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
         this._lastLyricsEditTime = 0; // Đặt về 0 để câu đầu tiên xuất hiện tức thì không bị cooldown ban đầu
+        this._lastRenderedLyricIdx = -1;
         console.log(`[Live Lyrics] Hiển thị tức thì (${lyricsData.syncedLyrics.length} câu, offset: ${this.currentLyricOffsetMs}ms, nguồn: ${lyricsData.source}) cho "${song.title}"`);
         this.scheduleNextLyricUpdate(song);
       } else {
@@ -2646,17 +2649,21 @@ class MusicQueue {
       const { createNowPlayingCard, EMOJI_TAG } = require('../utils/embed');
       const seekMs = (song.seekPosition || 0) * 1000;
       const offsetMs = this.currentLyricOffsetMs || 0;
-      const playbackMs = seekMs + (this.currentResource?.playbackDuration || 0) + offsetMs + 400; // Bù trễ mạng +400ms và offset người dùng chỉnh
+      const rawCurrentMs = seekMs + (this.currentResource?.playbackDuration || 0);
+      const effectiveCurrentMs = rawCurrentMs + offsetMs;
+
+      // 1. Thuật toán Đón Đầu (Look-Ahead +1200ms) bù trễ mạng Discord API (~400ms-600ms) và chu kỳ render
+      const embedEffectiveMs = effectiveCurrentMs + 1200;
 
       const lyrics = this.cachedSyncedLyrics;
-      // Binary search tìm vị trí câu hát hiện tại
+      // Binary search tìm vị trí câu hát tương ứng với mốc embedEffectiveMs
       let low = 0;
       let high = lyrics.length - 1;
       let activeIdx = -1;
 
       while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        if (lyrics[mid].time <= playbackMs) {
+        if (lyrics[mid].time <= embedEffectiveMs) {
           activeIdx = mid;
           low = mid + 1;
         } else {
@@ -2664,40 +2671,56 @@ class MusicQueue {
         }
       }
 
-      // 1. Trường hợp bài hát chưa vào câu đầu tiên (phần Intro nhạc dạo)
+      // Trường hợp bài hát chưa vào câu đầu tiên (phần Intro nhạc dạo)
       if (activeIdx < 0) {
         const firstLineTime = lyrics[0]?.time || 5000;
-        const msUntilFirst = Math.max(1000, firstLineTime - playbackMs);
-        this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.min(msUntilFirst, 5000));
+        const msUntilFirst = Math.max(1000, (firstLineTime - 1200) - effectiveCurrentMs);
+        this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.min(msUntilFirst, 4000));
         return;
       }
 
-      // 2. Định dạng cửa sổ 3 dòng (làm sạch markdown link, backtick, @everyone/@here)
-      const lyricIcon = EMOJI_TAG.lyricNext || '<:anna_lyric_next:1562334338593325147>';
+      // 2. Next-Line Promotion: Nếu câu kế tiếp tồn tại và thời gian còn lại trước khi bước sang câu đó <= 1400ms tính theo thời gian thực (effectiveCurrentMs)
+      const nextLine = lyrics[activeIdx + 1];
+      if (nextLine && (nextLine.time - effectiveCurrentMs <= 1400)) {
+        activeIdx = activeIdx + 1;
+      }
 
-      const lineCurrent = this._sanitizeDiscordLyricLine(lyrics[activeIdx]?.text || '');
-      const lineNext1 = this._sanitizeDiscordLyricLine(lyrics[activeIdx + 1]?.text || '');
-      const lineNext2 = this._sanitizeDiscordLyricLine(lyrics[activeIdx + 2]?.text || '');
+      // 3. Phân cấp thị giác 4 dòng (WINDOW_SIZE = 4):
+      // - Dòng 1 (activeIdx): In Đậm nổi bật kèm icon mũi tên sáng (lyricNext)
+      // - Dòng 2, 3, 4 (activeIdx+1, +2, +3): In Nghiêng kèm icon dotNext để người nghe đón đầu
+      const lyricIconActive = EMOJI_TAG.lyricNext || '<:anna_lyric_next:1562334338593325147>';
+      const lyricIconNext = EMOJI_TAG.dotNext || EMOJI_TAG.lyricNext || '▸';
 
       const lines = [];
-      if (lineCurrent) lines.push(`> ${lyricIcon} *${lineCurrent}*`);
-      if (lineNext1) lines.push(`> ${lyricIcon} *${lineNext1}*`);
-      if (lineNext2) lines.push(`> ${lyricIcon} *${lineNext2}*`);
-      const newLyricText = lines.join('\n');
+      const currentText = this._sanitizeDiscordLyricLine(lyrics[activeIdx]?.text || '');
+      if (currentText) {
+        lines.push(`> ${lyricIconActive} **${currentText}**`);
+      }
 
+      for (let i = 1; i <= 3; i++) {
+        const nextIdx = activeIdx + i;
+        if (nextIdx < lyrics.length) {
+          const nextText = this._sanitizeDiscordLyricLine(lyrics[nextIdx]?.text || '');
+          if (nextText) {
+            lines.push(`> ${lyricIconNext} *${nextText}*`);
+          }
+        }
+      }
+
+      const newLyricText = lines.join('\n');
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastLyricsEditTime || 0);
 
-      // Nếu câu hát thay đổi hoặc chưa có lyric text
-      if (activeIdx !== this.currentLyricIndex || !this.currentLyricText) {
-        if (timeSinceLastEdit >= 3500) {
-          // Bỏ qua edit nếu nội dung text hoàn toàn không đổi so với lần trước
+      // 4. Kiểm tra điều kiện cập nhật Embed
+      if (activeIdx !== this._lastRenderedLyricIdx || !this.currentLyricText) {
+        if (timeSinceLastEdit >= 3300) {
           if (newLyricText !== this.currentLyricText) {
             this.currentLyricText = newLyricText;
             this.currentLyricIndex = activeIdx;
+            this._lastRenderedLyricIdx = activeIdx;
             this._lastLyricsEditTime = now;
 
-            // Re-render card: Tự động tính lại thanh tiến trình MM:SS và dòng footer Next: (+X in queue)
+            // Re-render card: Tự động tính lại thanh tiến trình MM:SS và các thông tin liên quan
             const cardPayload = createNowPlayingCard(this.currentSong, this);
             await this.nowPlayingMessage.edit(cardPayload).catch(editErr => {
               if (editErr?.code === 10008) {
@@ -2707,26 +2730,33 @@ class MusicQueue {
             });
           } else {
             this.currentLyricIndex = activeIdx;
+            this._lastRenderedLyricIdx = activeIdx;
           }
         } else {
-          // Nếu câu mới đến nhưng chưa hết cooldown, hẹn giờ cập nhật ngay khi hết cooldown (không bỏ qua câu)
-          const waitCooldown = 3500 - timeSinceLastEdit;
+          // Chưa đủ 3300ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown (không bỏ qua câu)
+          const waitCooldown = 3300 - timeSinceLastEdit;
           this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.max(300, waitCooldown));
           return;
         }
       }
 
-      // Nếu đã đến câu hát cuối cùng của bài
+      // Nếu đã đến hoặc vượt quá câu cuối cùng của bài
       if (activeIdx >= lyrics.length - 1) {
         return;
       }
 
-      // Tính thời gian chờ đến câu tiếp theo
-      const nextTime = lyrics[activeIdx + 1]?.time || (playbackMs + 3500);
-      let delay = Math.max(500, nextTime - playbackMs);
-      delay = Math.min(Math.max(delay, 500), 7000);
+      // 5. Đồng bộ bộ hẹn giờ động theo mốc câu tiếp theo:
+      // Câu hát kế tiếp (activeIdx + 1) sẽ được kích hoạt khi effectiveCurrentMs chạm mốc (lyrics[activeIdx + 1].time - 1400)
+      // Hẹn giờ kích hoạt sớm hơn mốc đó 400ms để trừ hao trễ mạng
+      const nextTargetStart = (lyrics[activeIdx + 1]?.time || (effectiveCurrentMs + 4000)) - 1400;
+      const msUntilTarget = Math.max(500, nextTargetStart - effectiveCurrentMs - 400);
 
-      this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), delay);
+      // Luôn đảm bảo khoảng cách tối thiểu giữa 2 lần edit là >= 3300ms để tránh Rate Limit 429 Discord
+      const minCooldownRemaining = Math.max(0, 3300 - (Date.now() - (this._lastLyricsEditTime || 0)));
+      let dynamicDelay = Math.max(msUntilTarget, minCooldownRemaining);
+      dynamicDelay = Math.min(Math.max(dynamicDelay, 500), 7000);
+
+      this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), dynamicDelay);
     } catch (schedErr) {
       // Bỏ qua lỗi ngầm
     }
