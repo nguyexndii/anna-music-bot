@@ -1453,22 +1453,15 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
 
     for (const query of searchQueries) {
       try {
-        const relOpts = {
-          dumpSingleJson: true,
-          noWarnings: true,
-          flatPlaylist: true,
-          extractorArgs: YTDLP_EXTRACTOR_ARGS
-        };
-        const cFile = getCookiesFile();
-        if (cFile) relOpts.cookies = cFile;
-        const res = await ytdlp(query, relOpts);
+        const cleanQ = query.replace(/^ytsearch\d+:/, '').trim();
+        const results = await executeSearch(cleanQ, 8, 'official');
 
-        if (res && res.entries && res.entries.length > 0) {
-          for (const entry of res.entries) {
+        if (results && results.length > 0) {
+          for (const entry of results) {
             if (!entry || !entry.title) continue;
 
-            const trackUrl = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
-            if (trackUrl === lastSong.url) continue;
+            const trackUrl = entry.url || (entry.videoId ? `https://www.youtube.com/watch?v=${entry.videoId}` : null);
+            if (!trackUrl || trackUrl === lastSong.url) continue;
             if (isTrackInHistory(entry, guildId, playedList, 25)) continue;
 
             if (!isCandidateMatchingRegion(entry, region, seedMeta)) {
@@ -1478,9 +1471,9 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
             return {
               title: entry.title,
               url: trackUrl,
-              duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(entry.duration % 60).padStart(2, '0')}` : '3:30',
-              thumbnail: entry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
-              isLive: false,
+              duration: entry.duration || '3:30',
+              thumbnail: entry.thumbnail || (entry.videoId ? `https://i.ytimg.com/vi/${entry.videoId}/hqdefault.jpg` : null),
+              isLive: Boolean(entry.isLive),
               requestedBy: 'Auto'
             };
           }
@@ -1621,11 +1614,6 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
-    try {
-      if (ffmpegProcess.pid && process.platform === 'linux') {
-        os.setPriority(ffmpegProcess.pid, 10);
-      }
-    } catch (e) {}
 
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
@@ -1639,7 +1627,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1723,7 +1711,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       noProgress: true,
       socketTimeout: 10,
       retries: 2,
-      bufferSize: '16K',
+      bufferSize: '64K',
       concurrentFragments: 1,
       noCheckCertificates: true,
       jsRuntimes: `node:${process.execPath}`
@@ -1744,11 +1732,6 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     try {
       ytdlpStreamProcess = ytdlp.exec('', ytdlpOptions);
       if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
-      try {
-        if (ytdlpStreamProcess && ytdlpStreamProcess.pid && process.platform === 'linux') {
-          os.setPriority(ytdlpStreamProcess.pid, 10);
-        }
-      } catch (e) {}
     } catch (err) {
       return reject(err);
     }
@@ -1782,11 +1765,6 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
-    try {
-      if (ffmpegProcess.pid && process.platform === 'linux') {
-        os.setPriority(ffmpegProcess.pid, 10);
-      }
-    } catch (e) {}
 
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
@@ -1827,7 +1805,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);

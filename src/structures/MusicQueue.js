@@ -124,6 +124,7 @@ class MusicQueue {
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
     this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
 
     // Khóa thao tác & Optimistic Button State
     this._isProcessingAction = false;
@@ -2462,6 +2463,7 @@ class MusicQueue {
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
     this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
   }
 
   /**
@@ -2552,6 +2554,7 @@ class MusicQueue {
         this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
         this._lastLyricsEditTime = 0; // Đặt về 0 để câu đầu tiên xuất hiện tức thì không bị cooldown ban đầu
         this._lastRenderedLyricIdx = -1;
+        this._lastRenderedChunkIdx = -1;
         console.log(`[Live Lyrics] Hiển thị tức thì (${lyricsData.syncedLyrics.length} câu, offset: ${this.currentLyricOffsetMs}ms, nguồn: ${lyricsData.source}) cho "${song.title}"`);
         this.scheduleNextLyricUpdate(song);
       } else {
@@ -2659,8 +2662,9 @@ class MusicQueue {
       const rawCurrentMs = seekMs + (this.currentResource?.playbackDuration || 0);
       const effectiveCurrentMs = rawCurrentMs + offsetMs;
 
-      // 1. Thuật toán Đón Đầu (Look-Ahead +1200ms) bù trễ mạng Discord API (~400ms-600ms) và chu kỳ render
-      const embedEffectiveMs = effectiveCurrentMs + 1200;
+      // 1. Thuật toán Đón Đầu (LOOKAHEAD_MS = 1500) canh hiện Cụm 4 câu sớm trước 1.5 giây
+      const LOOKAHEAD_MS = 1500;
+      const embedEffectiveMs = effectiveCurrentMs + LOOKAHEAD_MS;
 
       const lyrics = this.cachedSyncedLyrics;
       // Binary search tìm vị trí câu hát tương ứng với mốc embedEffectiveMs
@@ -2681,36 +2685,25 @@ class MusicQueue {
       // Trường hợp bài hát chưa vào câu đầu tiên (phần Intro nhạc dạo)
       if (activeIdx < 0) {
         const firstLineTime = lyrics[0]?.time || 5000;
-        const msUntilFirst = Math.max(1000, (firstLineTime - 1200) - effectiveCurrentMs);
+        const msUntilFirst = Math.max(1000, (firstLineTime - LOOKAHEAD_MS) - effectiveCurrentMs);
         this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.min(msUntilFirst, 4000));
         return;
       }
 
-      // 2. Next-Line Promotion: Nếu câu kế tiếp tồn tại và thời gian còn lại trước khi bước sang câu đó <= 1400ms tính theo thời gian thực (effectiveCurrentMs)
-      const nextLine = lyrics[activeIdx + 1];
-      if (nextLine && (nextLine.time - effectiveCurrentMs <= 1400)) {
-        activeIdx = activeIdx + 1;
-      }
+      // 2. Cơ chế phân trang theo CỤM 4 CÂU CỐ ĐỊNH (Paged 4-Line Blocks):
+      // - Cụm 0: các câu 0, 1, 2, 3 (câu 1 đến 4)
+      // - Cụm 1: các câu 4, 5, 6, 7 (câu 5 đến 8)
+      // - Cụm 2: các câu 8, 9, 10, 11 (câu 9 đến 12)...
+      const chunkIndex = Math.max(0, Math.floor(activeIdx / 4));
+      const startIdx = chunkIndex * 4;
+      const visibleLines = lyrics.slice(startIdx, startIdx + 4);
 
-      // 3. Phân cấp thị giác 4 dòng (WINDOW_SIZE = 4):
-      // - Dòng 1 (activeIdx): In Đậm nổi bật kèm icon mũi tên sáng (lyricNext)
-      // - Dòng 2, 3, 4 (activeIdx+1, +2, +3): In Nghiêng kèm icon dotNext để người nghe đón đầu
-      const lyricIconActive = EMOJI_TAG.lyricNext || '<:anna_lyric_next:1562334338593325147>';
-      const lyricIconNext = EMOJI_TAG.dotNext || EMOJI_TAG.lyricNext || '▸';
-
+      // 3. Định dạng 4 dòng đồng nhất: Dùng 4 dấu chấm tròn "•", in nghiêng nhẹ nhàng, KHÔNG in đậm, KHÔNG mũi tên
       const lines = [];
-      const currentText = this._sanitizeDiscordLyricLine(lyrics[activeIdx]?.text || '');
-      if (currentText) {
-        lines.push(`> ${lyricIconActive} **${currentText}**`);
-      }
-
-      for (let i = 1; i <= 3; i++) {
-        const nextIdx = activeIdx + i;
-        if (nextIdx < lyrics.length) {
-          const nextText = this._sanitizeDiscordLyricLine(lyrics[nextIdx]?.text || '');
-          if (nextText) {
-            lines.push(`> ${lyricIconNext} *${nextText}*`);
-          }
+      for (const line of visibleLines) {
+        const text = this._sanitizeDiscordLyricLine(line?.text || '');
+        if (text) {
+          lines.push(`> • *${text}*`);
         }
       }
 
@@ -2718,16 +2711,17 @@ class MusicQueue {
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastLyricsEditTime || 0);
 
-      // 4. Kiểm tra điều kiện cập nhật Embed
-      if (activeIdx !== this._lastRenderedLyricIdx || !this.currentLyricText) {
-        if (timeSinceLastEdit >= 3300) {
+      // 4. Chỉ sửa tin nhắn Discord khi CHUYỂN SANG CỤM 4 CÂU MỚI (Hết 4 câu mới đổi 1 lần!)
+      if (chunkIndex !== this._lastRenderedChunkIdx || !this.currentLyricText) {
+        if (timeSinceLastEdit >= 3500) {
           if (newLyricText !== this.currentLyricText) {
             this.currentLyricText = newLyricText;
-            this.currentLyricIndex = activeIdx;
+            this.currentLyricIndex = startIdx;
             this._lastRenderedLyricIdx = activeIdx;
+            this._lastRenderedChunkIdx = chunkIndex;
             this._lastLyricsEditTime = now;
 
-            // Re-render card: Tự động tính lại thanh tiến trình MM:SS và các thông tin liên quan
+            // Re-render card: Tự động lồng cụm 4 dòng vào Section sát dưới URL bài hát
             const cardPayload = createNowPlayingCard(this.currentSong, this);
             await this.nowPlayingMessage.edit(cardPayload).catch(editErr => {
               if (editErr?.code === 10008) {
@@ -2736,32 +2730,31 @@ class MusicQueue {
               }
             });
           } else {
-            this.currentLyricIndex = activeIdx;
+            this.currentLyricIndex = startIdx;
             this._lastRenderedLyricIdx = activeIdx;
+            this._lastRenderedChunkIdx = chunkIndex;
           }
         } else {
-          // Chưa đủ 3300ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown (không bỏ qua câu)
-          const waitCooldown = 3300 - timeSinceLastEdit;
+          // Chưa đủ 3500ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown
+          const waitCooldown = 3500 - timeSinceLastEdit;
           this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.max(300, waitCooldown));
           return;
         }
       }
 
-      // Nếu đã đến hoặc vượt quá câu cuối cùng của bài
-      if (activeIdx >= lyrics.length - 1) {
+      // 5. Tính toán thời điểm lật sang Cụm 4 câu tiếp theo:
+      // Cụm tiếp theo bắt đầu tại index: (chunkIndex + 1) * 4
+      const nextChunkIdx = (chunkIndex + 1) * 4;
+      if (nextChunkIdx >= lyrics.length) {
+        // Đã ở cụm 4 câu cuối cùng của bài hát -> Không cần hẹn giờ đổi cụm nữa
         return;
       }
 
-      // 5. Đồng bộ bộ hẹn giờ động theo mốc câu tiếp theo:
-      // Câu hát kế tiếp (activeIdx + 1) sẽ được kích hoạt khi effectiveCurrentMs chạm mốc (lyrics[activeIdx + 1].time - 1400)
-      // Hẹn giờ kích hoạt sớm hơn mốc đó 400ms để trừ hao trễ mạng
-      const nextTargetStart = (lyrics[activeIdx + 1]?.time || (effectiveCurrentMs + 4000)) - 1400;
-      const msUntilTarget = Math.max(500, nextTargetStart - effectiveCurrentMs - 400);
-
-      // Luôn đảm bảo khoảng cách tối thiểu giữa 2 lần edit là >= 3300ms để tránh Rate Limit 429 Discord
-      const minCooldownRemaining = Math.max(0, 3300 - (Date.now() - (this._lastLyricsEditTime || 0)));
-      let dynamicDelay = Math.max(msUntilTarget, minCooldownRemaining);
-      dynamicDelay = Math.min(Math.max(dynamicDelay, 500), 7000);
+      const nextChunkStartLine = lyrics[nextChunkIdx];
+      // Cụm tiếp theo sẽ được lật khi effectiveCurrentMs chạm mốc: (nextChunkStartLine.time - LOOKAHEAD_MS)
+      const msUntilNextChunk = Math.max(1000, (nextChunkStartLine.time - LOOKAHEAD_MS) - effectiveCurrentMs);
+      const minCooldownRemaining = Math.max(0, 3500 - (Date.now() - (this._lastLyricsEditTime || 0)));
+      const dynamicDelay = Math.max(msUntilNextChunk, minCooldownRemaining);
 
       this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), dynamicDelay);
     } catch (schedErr) {

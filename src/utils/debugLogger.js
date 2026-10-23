@@ -17,6 +17,13 @@ const EVENT_LOG_FILE = path.join(LOGS_DIR, 'events.log');
 const OLD_LOG_FILE = path.join(LOGS_DIR, 'events.old.log');
 const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
 
+try {
+  if (!fs.existsSync(LOGS_DIR)) {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
+  }
+} catch (e) {}
+let _logWriteCount = 0;
+
 function formatVietnamTime(date = new Date()) {
   try {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -47,17 +54,16 @@ function writeToEventLogFile(action, details = {}) {
   }
 
   try {
-    if (!fs.existsSync(LOGS_DIR)) {
-      fs.mkdirSync(LOGS_DIR, { recursive: true });
-    }
-
-    if (fs.existsSync(EVENT_LOG_FILE)) {
-      const stat = fs.statSync(EVENT_LOG_FILE);
-      if (stat.size >= MAX_LOG_SIZE) {
-        if (fs.existsSync(OLD_LOG_FILE)) {
-          try { fs.unlinkSync(OLD_LOG_FILE); } catch (e) {}
+    _logWriteCount++;
+    if (_logWriteCount % 100 === 0) {
+      if (fs.existsSync(EVENT_LOG_FILE)) {
+        const stat = fs.statSync(EVENT_LOG_FILE);
+        if (stat.size >= MAX_LOG_SIZE) {
+          if (fs.existsSync(OLD_LOG_FILE)) {
+            try { fs.unlinkSync(OLD_LOG_FILE); } catch (e) {}
+          }
+          try { fs.renameSync(EVENT_LOG_FILE, OLD_LOG_FILE); } catch (e) {}
         }
-        try { fs.renameSync(EVENT_LOG_FILE, OLD_LOG_FILE); } catch (e) {}
       }
     }
 

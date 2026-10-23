@@ -5,17 +5,30 @@ const fs = require('fs');
  * Đọc bộ nhớ khả dụng thực tế trên Linux từ /proc/meminfo (MemAvailable bao gồm cả buffers/cache sẵn sàng giải phóng)
  * Tránh đọc sai số liệu os.freemem() vốn chỉ tính MemFree thuần túy.
  */
+let _cachedAvailableMem = null;
+let _lastMemCheckTime = 0;
+
 function getSystemAvailableMemoryMb() {
+  const now = Date.now();
+  if (_cachedAvailableMem !== null && (now - _lastMemCheckTime < 5000)) {
+    return _cachedAvailableMem;
+  }
+  let result;
   if (process.platform === 'linux') {
     try {
       const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
       const m = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/i);
       if (m && m[1]) {
-        return Math.round(parseInt(m[1], 10) / 1024);
+        result = Math.round(parseInt(m[1], 10) / 1024);
       }
     } catch (e) {}
   }
-  return Math.round(os.freemem() / (1024 * 1024));
+  if (result === undefined) {
+    result = Math.round(os.freemem() / (1024 * 1024));
+  }
+  _cachedAvailableMem = result;
+  _lastMemCheckTime = now;
+  return result;
 }
 
 /**
@@ -32,12 +45,6 @@ function hasEnoughMemoryToPreload() {
   }
 
   const rssMb = process.memoryUsage().rss / (1024 * 1024);
-  if (rssMb >= 500) {
-    if (typeof global.gc === 'function') {
-      try { global.gc(); } catch (e) {}
-    }
-  }
-
   if (rssMb >= 650) {
     console.warn(`[RAM Guard] Tiến trình bot đang sử dụng ${rssMb.toFixed(0)}MB RAM (>= 650MB). Tạm hoãn preload để bảo vệ bộ nhớ.`);
     return false;

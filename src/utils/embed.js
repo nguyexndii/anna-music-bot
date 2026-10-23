@@ -419,36 +419,46 @@ function createNowPlayingCard(song, queue) {
     ? (isEn ? `Next: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} tracks in queue)` : `Tiếp theo: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} bài trong hàng chờ)`)
     : (isEn ? 'No more songs in the queue' : 'Hàng chờ hiện đang trống');
 
-  // 1. Header: Chế độ 24/7 không có ảnh và không có link clickable; Bài thường có Section + Thumbnail
+  // 1. Header & Lời bài hát: Gộp lời bài hát vào trong Section để lấp đầy khoảng trống cạnh Thumbnail
   const trimBadge = (song?.skippedIntroSec > 0)
     ? (isEn ? `\n-# ✂️ Automatically skipped ${song.skippedIntroSec}s of intro` : `\n-# ✂️ Đã tự động bỏ qua ${song.skippedIntroSec}s kịch mở đầu`)
     : '';
 
-  const headerComponent = is247Mode
-    ? {
-        type: 10,
-        content: isEn
-          ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Lofi Radio Station**\n*Relaxing 24/7 Lofi background music playing continuously*`
-          : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`
-      }
-    : {
-        type: 9, // Section
-        components: [
-          {
-            type: 10, // TextDisplay
-            content: `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}`
-          }
-        ],
-        accessory: {
-          type: 11, // Thumbnail
-          media: { url: thumbnailUrl }
-        }
-      };
+  const lyricsBlock = (!is247Mode && queue?.currentLyricText) ? queue.currentLyricText : '';
 
-  // 2. Nội dung lời bài hát + thanh tiến trình thời gian
-  const progressContent = (queue?.currentLyricText && !is247Mode)
-    ? `${queue.currentLyricText}\n\n${progressStr}`
-    : progressStr;
+  let headerComponent;
+  let progressContent;
+
+  if (is247Mode) {
+    headerComponent = {
+      type: 10,
+      content: isEn
+        ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Lofi Radio Station**\n*Relaxing 24/7 Lofi background music playing continuously*`
+        : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`
+    };
+    progressContent = lyricsBlock ? `${lyricsBlock}\n\n${progressStr}` : progressStr;
+  } else {
+    // Nếu có Lời bài hát, gộp trực tiếp vào Section ngay dưới URL bài hát
+    const sectionBody = lyricsBlock
+      ? `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}\n${lyricsBlock}`
+      : `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}`;
+
+    headerComponent = {
+      type: 9, // Section
+      components: [
+        {
+          type: 10, // TextDisplay
+          content: sectionBody
+        }
+      ],
+      accessory: {
+        type: 11, // Thumbnail
+        media: { url: thumbnailUrl }
+      }
+    };
+    // Khối phía dưới Section chỉ hiển thị thanh thời gian, triệt tiêu hoàn toàn khoảng trống
+    progressContent = progressStr;
+  }
 
   const container = {
     type: 17, // ComponentType.Container
