@@ -357,10 +357,21 @@ const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nế
  */
 async function checkWebPlayerHealth(client, adminId) {
   const webHealthUrl = 'https://anna-music-bot-ui.pages.dev/api/health';
+  const currentTunnel = getActiveTunnelUrl();
+  const secret = config.webJwtSecret || '';
+  const crypto = require('crypto');
+  const sig = currentTunnel && secret ? crypto.createHmac('sha256', secret).update(currentTunnel.trim().replace(/\/$/, '')).digest('hex') : '';
+
+  const headers = {};
+  if (currentTunnel) {
+    headers['x-vps-tunnel'] = currentTunnel;
+    if (sig) headers['x-vps-tunnel-sig'] = sig;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 7000);
-    const res = await fetch(webHealthUrl, { signal: controller.signal });
+    const res = await fetch(webHealthUrl, { headers, signal: controller.signal });
     clearTimeout(timeout);
 
     if (res.ok) {
