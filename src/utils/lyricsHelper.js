@@ -110,11 +110,15 @@ function cleanTitle(str) {
     .replace(/[★☆✧✦~]/g, ' ')    // Xóa ký tự trang trí YouTube phổ biến
     .trim();
   s = s.replace(/^(?:track\s*)?\d+[\.\/\-:]\s*/i, ' ').trim();
-  s = s.replace(/\((?:piano|acoustic|live|remix|official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?|version|ver|catena|vinahouse|sped\s*up|slowed|reverb|cover).*?\)/gi, ' ');
+  s = s.replace(/\((?:piano|acoustic|live|remix|official|mv|audio|visualizer|lyric|video|lyrics|4k|hd|1080p|prod\.?|beat|feat\.?|ft\.?|version|ver|catena|vinahouse|sped\s*up|slowed|reverb|cover|full|bản\s*full).*?\)/gi, ' ');
   s = s.replace(/(?:official\s*music\s*video|official\s*video|official\s*audio|official\s*mv|lyric\s*video|visualizer\s*video|video\s*lyric|music\s*video|visualizer|audio|lyrics?|mv\s*official|official)/gi, ' ');
+  s = s.replace(/\b(?:bản\s+full|full\s+(?:audio|mv|hd|video|version|ver|track|song)|hd\s+full)\b/gi, ' ');
+  s = s.replace(/\s+full\s*(?=[-–—|:/()]|$)/gi, ' ');
   s = s.replace(/prod\.?\s*(?:by)?\s*[\w\d_]+/gi, ' ');
   s = s.replace(/4k|hd|1080p/gi, ' ');
   s = s.replace(/(?:^|\s)(?:feat\.?|ft\.?)\s+[^-–—|()\[\]]+/gi, ' ');
+  s = s.replace(/\s*\([^)a-zA-Z0-9]*\)/g, ' ');
+  s = s.replace(/\s*\[[^\]a-zA-Z0-9]*\]/g, ' ');
   s = s.replace(/\s*[-|:/\\–—]\s*$/g, '').trim();
   s = s.replace(/^\s*[-|:/\\–—]\s*/g, '').trim();
   s = s.replace(/[*~]/g, ' '); // Xóa dấu sao hoặc tilde lẻ loi
@@ -1741,19 +1745,20 @@ function formatLrcTimestamp(ms) {
   return `[${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
 }
 
-function findBestZingSong(songs, targetTitle, targetArtist) {
+function findBestZingSong(songs, targetTitle, targetArtist, expectedArtists = []) {
   if (!Array.isArray(songs) || songs.length === 0) return null;
   const variants = generateVietnameseNumberVariants(cleanTitle(targetTitle));
   const cleanTargets = variants.map(v => normalizeStr(v)).filter(Boolean);
-  const cleanTargetArtist = normalizeStr(targetArtist || '');
+  const expArtList = (Array.isArray(expectedArtists) && expectedArtists.length > 0) ? expectedArtists : (targetArtist ? [targetArtist] : []);
+  const cleanTargetArtists = expArtList.map(a => normalizeStr(cleanArtistName(a))).filter(Boolean);
 
   // 1. Tìm bài trùng cả tên (theo bất kỳ biến thể nào) và ca sĩ
-  if (cleanTargetArtist) {
+  if (cleanTargetArtists.length > 0) {
     const exactMatch = songs.find(s => {
       const sName = normalizeStr(s.name);
       const sArtist = normalizeStr(s.artist || s.artistsNames || '');
       const titleMatched = cleanTargets.some(ct => sName === ct || sName.includes(ct) || ct.includes(sName));
-      const artistMatched = sArtist.includes(cleanTargetArtist) || cleanTargetArtist.includes(sArtist);
+      const artistMatched = cleanTargetArtists.some(cta => sArtist.includes(cta) || cta.includes(sArtist));
       return titleMatched && artistMatched;
     });
     if (exactMatch) return exactMatch;
@@ -1776,20 +1781,47 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
     const cleanA = cleanArtistName(artist);
     if (!cleanT) return null;
 
-    // Ưu tiên cao nhất: tất cả các biến thể kèm Tên ca sĩ trước
-    const titleVariants = generateVietnameseNumberVariants(cleanT);
+    // Tận dụng toàn bộ các biến thể tìm kiếm thông minh từ generateSearchVariants
+    const variants = generateSearchVariants(rawTitle, artist);
+    const titleVariants = [];
     const queries = [];
+    const expectedArtists = [];
+
     if (cleanA && cleanA !== 'Unknown') {
-      for (const tv of titleVariants) {
-        queries.push(`${tv} ${cleanA}`.trim());
+      expectedArtists.push(cleanA);
+    }
+
+    for (const v of variants) {
+      if (v.track && !titleVariants.includes(v.track)) {
+        titleVariants.push(v.track);
+      }
+      if (v.track && v.artist) {
+        const p = `${v.track} ${v.artist}`.trim();
+        if (!queries.includes(p)) queries.push(p);
+      }
+      if (v.q && !queries.includes(v.q)) {
+        queries.push(v.q);
+      }
+      if (Array.isArray(v.expectedArtist)) {
+        for (const a of v.expectedArtist) {
+          if (a && !expectedArtists.includes(a)) expectedArtists.push(a);
+        }
+      } else if (v.artist && !expectedArtists.includes(v.artist)) {
+        expectedArtists.push(v.artist);
       }
     }
+
+    if (titleVariants.length === 0) {
+      titleVariants.push(...generateVietnameseNumberVariants(cleanT));
+    }
     for (const tv of titleVariants) {
-      queries.push(tv);
+      if (!queries.includes(tv)) queries.push(tv);
     }
 
     let songList = null;
     let matchedSong = null;
+    const variantsNorm = titleVariants.map(v => normalizeStr(v)).filter(Boolean);
+    const expectedArtistsNorm = expectedArtists.map(a => normalizeStr(cleanArtistName(a))).filter(Boolean);
 
     for (const q of queries) {
       const acUrl = `https://ac.zingmp3.vn/complete?type=artist,song,key,hub&num=5&query=${encodeURIComponent(q)}`;
@@ -1804,15 +1836,13 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
         const acData = await acRes.json().catch(() => null);
         const songs = acData?.data?.[0]?.song;
         if (Array.isArray(songs) && songs.length > 0) {
-          const candidate = findBestZingSong(songs, rawTitle, artist);
-          const variantsNorm = titleVariants.map(v => normalizeStr(v));
+          const candidate = findBestZingSong(songs, rawTitle, artist, expectedArtists);
           const sNameNorm = normalizeStr(candidate?.name || '');
           const sArtistNorm = normalizeStr(candidate?.artist || candidate?.artistsNames || '');
-          const cleanANorm = normalizeStr(artist || '');
           const isNameMatch = variantsNorm.some(v => sNameNorm === v || sNameNorm.includes(v) || v.includes(sNameNorm));
-          const isArtistMatch = cleanANorm && (sArtistNorm.includes(cleanANorm) || cleanANorm.includes(sArtistNorm));
+          const isArtistMatch = expectedArtistsNorm.length === 0 || expectedArtistsNorm.some(ea => sArtistNorm.includes(ea) || ea.includes(sArtistNorm));
 
-          if (isNameMatch && (isArtistMatch || !cleanANorm)) {
+          if (isNameMatch && isArtistMatch) {
             songList = songs;
             matchedSong = candidate;
             break;
@@ -1825,7 +1855,7 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
     }
 
     if (!matchedSong && songList && songList.length > 0) {
-      matchedSong = findBestZingSong(songList, rawTitle, artist);
+      matchedSong = findBestZingSong(songList, rawTitle, artist, expectedArtists);
     }
 
     if (!matchedSong || !matchedSong.id) return null;
