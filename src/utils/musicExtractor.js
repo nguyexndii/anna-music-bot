@@ -1853,10 +1853,12 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         '-vn',
         '-c:a', 'libopus',
         '-b:a', '128k',
-        '-f', 'ogg',
-        '-y',
-        cacheOptions.tempPath
+        '-f', 'ogg'
       );
+      if (playDurationSec && Number(playDurationSec) > 0) {
+        ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+      }
+      ffmpegArgs.push('-y', cacheOptions.tempPath);
     }
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -2141,7 +2143,10 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
       // Lưu ý: File trong SSD Cache đã được cắt sẵn phần đầu trimStart lúc lưu.
       // Khi phát lại, vị trí 00:00 của file chính là đầu bài hát đã cắt.
       // Do đó chỉ seek theo yêu cầu tua của người dùng (userSeek), tuyệt đối không cộng trimStart!
-      return await createDirectFileStream(cachedEntry.filePath, userSeek, playDurationSec);
+      const cachePlayDurationSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+        ? Math.max(0, (cachedEntry.trimEnd - cachedEntry.trimStart) - userSeek)
+        : playDurationSec;
+      return await createDirectFileStream(cachedEntry.filePath, userSeek, cachePlayDurationSec);
     } catch (cachePlayErr) {
       console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
     }

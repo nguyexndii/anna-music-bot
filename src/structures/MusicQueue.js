@@ -339,9 +339,9 @@ class MusicQueue {
           nextTrack.trimStart = cachedEntry.trimStart;
           nextTrack.trimEnd = cachedEntry.trimEnd;
           if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
-            nextTrack.skippedIntroSec = cachedEntry.trimStart;
-            nextTrack.skippedOutroSec = cachedEntry.trimEnd;
             const rawDur = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
+            nextTrack.skippedIntroSec = cachedEntry.trimStart || 0;
+            nextTrack.skippedOutroSec = (rawDur > 0 && cachedEntry.trimEnd > 0 && rawDur > cachedEntry.trimEnd) ? (rawDur - cachedEntry.trimEnd) : 0;
             if (rawDur > 0) {
               const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
                 ? (cachedEntry.trimEnd - cachedEntry.trimStart)
@@ -1613,9 +1613,9 @@ class MusicQueue {
             this.currentSong.trimStart = cachedEntry.trimStart;
             this.currentSong.trimEnd = cachedEntry.trimEnd;
             if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
-              this.currentSong.skippedIntroSec = cachedEntry.trimStart;
-              this.currentSong.skippedOutroSec = cachedEntry.trimEnd;
               const rawDur = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
+              this.currentSong.skippedIntroSec = cachedEntry.trimStart || 0;
+              this.currentSong.skippedOutroSec = (rawDur > 0 && cachedEntry.trimEnd > 0 && rawDur > cachedEntry.trimEnd) ? (rawDur - cachedEntry.trimEnd) : 0;
               if (rawDur > 0) {
                 const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
                   ? (cachedEntry.trimEnd - cachedEntry.trimStart)
