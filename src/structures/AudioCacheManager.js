@@ -75,26 +75,34 @@ class AudioCacheManager {
   }
 
   /**
-   * Sinh cache key duy nhất dựa vào URL và mốc cắt SponsorBlock
+   * Lấy khóa cơ sở nhận diện bài hát (ID video YouTube hoặc SHA-1 URL)
    */
-  getCacheKey(song, trimStart = 0, trimEnd = 0) {
+  getBaseKey(song) {
     if (!song) return null;
     const url = typeof song === 'string' ? song : (song.url || song.searchQuery || '');
     if (!url) return null;
 
-    const tStart = Math.round(Number(trimStart) || 0);
-    const tEnd = Math.round(Number(trimEnd) || 0);
-    const trimSuffix = `t_${tStart}_${tEnd}`;
-
     // Nếu là liên kết YouTube: trích xuất video ID (11 ký tự)
     const ytMatch = url.match(/(?:v=|youtu\.be\/|vi\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
     if (ytMatch && ytMatch[1]) {
-      return `yt_${ytMatch[1]}_${trimSuffix}`;
+      return `yt_${ytMatch[1]}`;
     }
 
     // Các nguồn khác (SoundCloud, Spotify resolved, v.v.): Hash SHA-1 của URL
     const hash = crypto.createHash('sha1').update(url).digest('hex').substring(0, 16);
-    return `hash_${hash}_${trimSuffix}`;
+    return `hash_${hash}`;
+  }
+
+  /**
+   * Sinh cache key duy nhất dựa vào URL và mốc cắt SponsorBlock
+   */
+  getCacheKey(song, trimStart = 0, trimEnd = 0) {
+    const baseKey = this.getBaseKey(song);
+    if (!baseKey) return null;
+
+    const tStart = Math.round(Number(trimStart) || 0);
+    const tEnd = Math.round(Number(trimEnd) || 0);
+    return `${baseKey}_t_${tStart}_${tEnd}`;
   }
 
   /**
@@ -123,27 +131,65 @@ class AudioCacheManager {
   }
 
   /**
+   * Tìm kiếm bản ghi Cache thông minh:
+   * 1. Khớp chính xác theo mốc trimStart, trimEnd
+   * 2. Nếu không thấy (hoặc SponsorBlock bị lỗi timeout trả về 0_0), tự động tìm theo baseKey (yt_<videoId>_t_*)
+   * Trả về: { filePath, key, trimStart, trimEnd } hoặc null
+   */
+  findCachedEntry(song, trimStart = 0, trimEnd = 0) {
+    if (!this.isCacheable(song)) return null;
+
+    const exactKey = this.getCacheKey(song, trimStart, trimEnd);
+    if (exactKey) {
+      const exactEntry = this.cacheMap.get(exactKey);
+      if (exactEntry && fs.existsSync(exactEntry.filePath)) {
+        exactEntry.lastAccessedAt = Date.now();
+        fs.utimes(exactEntry.filePath, new Date(), new Date(), () => {});
+        return {
+          filePath: exactEntry.filePath,
+          key: exactKey,
+          trimStart: Math.round(Number(trimStart) || 0),
+          trimEnd: Math.round(Number(trimEnd) || 0)
+        };
+      }
+    }
+
+    // Fallback: Tìm theo tiền tố baseKey trong cacheMap
+    const baseKey = this.getBaseKey(song);
+    if (!baseKey) return null;
+
+    const prefix = `${baseKey}_t_`;
+    for (const [key, entry] of this.cacheMap.entries()) {
+      if (key.startsWith(prefix) && fs.existsSync(entry.filePath)) {
+        entry.lastAccessedAt = Date.now();
+        fs.utimes(entry.filePath, new Date(), new Date(), () => {});
+
+        let parsedStart = 0;
+        let parsedEnd = 0;
+        const match = key.match(/_t_(\d+)_(\d+)$/);
+        if (match) {
+          parsedStart = parseInt(match[1], 10) || 0;
+          parsedEnd = parseInt(match[2], 10) || 0;
+        }
+
+        return {
+          filePath: entry.filePath,
+          key,
+          trimStart: parsedStart,
+          trimEnd: parsedEnd
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Lấy đường dẫn file cache nếu có sẵn (Cache Hit) và cập nhật LRU timestamp
    */
   getCachedPath(song, trimStart = 0, trimEnd = 0) {
-    if (!this.isCacheable(song)) return null;
-    const key = this.getCacheKey(song, trimStart, trimEnd);
-    if (!key) return null;
-
-    const entry = this.cacheMap.get(key);
-    if (entry && fs.existsSync(entry.filePath)) {
-      // LRU Touch: Cập nhật mốc thời gian nghe gần nhất
-      entry.lastAccessedAt = Date.now();
-      fs.utimes(entry.filePath, new Date(), new Date(), () => {});
-      return entry.filePath;
-    }
-
-    if (entry) {
-      // File đã bị xóa ngoài luồng, dọn khỏi RAM map
-      this.totalCacheBytes = Math.max(0, this.totalCacheBytes - entry.size);
-      this.cacheMap.delete(key);
-    }
-    return null;
+    const entry = this.findCachedEntry(song, trimStart, trimEnd);
+    return entry?.filePath || null;
   }
 
   /**

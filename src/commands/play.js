@@ -11,6 +11,11 @@ const config = require('../config');
 
 const activePlaylistLoads = new Set();
 
+function isLikelyPlaylistQuery(queryStr) {
+  if (!queryStr || typeof queryStr !== 'string') return false;
+  return /(?:list=|playlist|\/album\/|\/sets\/)/i.test(queryStr);
+}
+
 module.exports = {
   name: 'play',
   aliases: ['p'],
@@ -120,6 +125,16 @@ module.exports = {
 
     await ctx.deferReply();
 
+    const isPlaylistCandidate = isLikelyPlaylistQuery(query);
+    if (isPlaylistCandidate && activePlaylistLoads.has(guildId)) {
+      return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
+    }
+    if (isPlaylistCandidate) {
+      activePlaylistLoads.add(guildId);
+    }
+
+    let isLockHeld = isPlaylistCandidate;
+
     try {
       const tracks = await searchTrack(query);
       if (!tracks || tracks.length === 0) {
@@ -135,44 +150,48 @@ module.exports = {
           embeds: [createQueueAddedEmbed(track, position, guildId)]
         });
       } else {
-        // Nhiều bài hát từ Playlist
-        if (activePlaylistLoads.has(guildId)) {
-          return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
-        }
-        activePlaylistLoads.add(guildId);
-        try {
-          await queue.addSongs(tracks, ctx.member || ctx.user);
-
-          // Lưu danh sách phát vào lịch sử server
-          try {
-            const userObj = ctx.member?.user || ctx.user;
-            const reqName = ctx.member?.displayName || userObj?.username || 'User';
-            const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
-
-            playlistHistoryManager.addPlaylist(guildId, {
-              url: query,
-              title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} tracks)`,
-              trackCount: tracks.length,
-              thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
-              addedBy: reqName,
-              addedByAvatar: reqAvatar,
-              tracks: tracks
-            });
-          } catch (plErr) {
-            console.error('Error saving playlist to history in play command:', plErr);
+        // Nhiều bài hát từ Playlist (Nếu query ban đầu không khớp pattern nhưng kết quả trả về nhiều bài)
+        if (!isLockHeld) {
+          if (activePlaylistLoads.has(guildId)) {
+            return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
           }
-
-          return ctx.editReply(t(guildId, 'player.added_playlist', {
-            count: tracks.length,
-            title: tracks[0]?.playlistTitle || 'Playlist'
-          }));
-        } finally {
-          activePlaylistLoads.delete(guildId);
+          activePlaylistLoads.add(guildId);
+          isLockHeld = true;
         }
+
+        await queue.addSongs(tracks, ctx.member || ctx.user);
+
+        // Lưu danh sách phát vào lịch sử server
+        try {
+          const userObj = ctx.member?.user || ctx.user;
+          const reqName = ctx.member?.displayName || userObj?.username || 'User';
+          const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
+
+          playlistHistoryManager.addPlaylist(guildId, {
+            url: query,
+            title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} tracks)`,
+            trackCount: tracks.length,
+            thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
+            addedBy: reqName,
+            addedByAvatar: reqAvatar,
+            tracks: tracks
+          });
+        } catch (plErr) {
+          console.error('Error saving playlist to history in play command:', plErr);
+        }
+
+        return ctx.editReply(t(guildId, 'player.added_playlist', {
+          count: tracks.length,
+          title: tracks[0]?.playlistTitle || 'Playlist'
+        }));
       }
     } catch (error) {
       console.error('Error executing play command:', error);
       return ctx.editReply(`${t(guildId, 'common.command_error')}: ${error.message}`);
+    } finally {
+      if (isLockHeld) {
+        activePlaylistLoads.delete(guildId);
+      }
     }
   }
 };

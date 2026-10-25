@@ -333,18 +333,39 @@ class MusicQueue {
     if (nextTrack && !nextTrack.trimStart && !nextTrack._sbChecked && guildSettings.autoSkipOfftopic !== false && !nextTrack.is247 && !nextTrack.isLive) {
       nextTrack._sbChecked = true;
       try {
-        const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
-        const trimInfo = await resolveSponsorBlockTrim(nextTrack);
-        if (trimInfo) {
-          nextTrack.trimStart = trimInfo.trimStart;
-          nextTrack.trimEnd = trimInfo.trimEnd;
-          nextTrack.realDurationSec = trimInfo.realDurationSec;
-          nextTrack.rawDurationSec = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
-          nextTrack.rawDuration = nextTrack.rawDuration || nextTrack.duration;
-          nextTrack.duration = formatSecondsToDuration(trimInfo.realDurationSec);
-          nextTrack.durationMs = trimInfo.realDurationSec * 1000;
-          nextTrack.skippedIntroSec = trimInfo.skippedIntroSec;
-          nextTrack.skippedOutroSec = trimInfo.skippedOutroSec;
+        const audioCacheManager = require('./AudioCacheManager');
+        const cachedEntry = audioCacheManager.findCachedEntry(nextTrack);
+        if (cachedEntry) {
+          nextTrack.trimStart = cachedEntry.trimStart;
+          nextTrack.trimEnd = cachedEntry.trimEnd;
+          if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
+            nextTrack.skippedIntroSec = cachedEntry.trimStart;
+            nextTrack.skippedOutroSec = cachedEntry.trimEnd;
+            const rawDur = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
+            if (rawDur > 0) {
+              const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+                ? (cachedEntry.trimEnd - cachedEntry.trimStart)
+                : Math.max(1, rawDur - cachedEntry.trimStart);
+              nextTrack.realDurationSec = realSec;
+              nextTrack.duration = formatSecondsToDuration(realSec);
+              nextTrack.durationMs = realSec * 1000;
+            }
+          }
+          console.log(`[AudioCache SB-Hit] "${nextTrack.title}": Tái sử dụng mốc cắt từ SSD Cache (${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s, bỏ qua mạng SponsorBlock)`);
+        } else {
+          const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
+          const trimInfo = await resolveSponsorBlockTrim(nextTrack);
+          if (trimInfo) {
+            nextTrack.trimStart = trimInfo.trimStart;
+            nextTrack.trimEnd = trimInfo.trimEnd;
+            nextTrack.realDurationSec = trimInfo.realDurationSec;
+            nextTrack.rawDurationSec = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
+            nextTrack.rawDuration = nextTrack.rawDuration || nextTrack.duration;
+            nextTrack.duration = formatSecondsToDuration(trimInfo.realDurationSec);
+            nextTrack.durationMs = trimInfo.realDurationSec * 1000;
+            nextTrack.skippedIntroSec = trimInfo.skippedIntroSec;
+            nextTrack.skippedOutroSec = trimInfo.skippedOutroSec;
+          }
         }
       } catch (sbErr) {}
     }
@@ -1582,23 +1603,44 @@ class MusicQueue {
       this.crossfadeDuration = typeof guildSettings.crossfadeDuration === 'number' ? guildSettings.crossfadeDuration : 0;
       const crossfade = this.crossfadeDuration;
 
-      // LAZY EVALUATION: Kiểm tra phân đoạn kịch MV YouTube qua SponsorBlock (ngay trước khi phát)
+      // LAZY EVALUATION: Kiểm tra phân đoạn kịch MV YouTube qua SponsorBlock hoặc SSD Cache (ngay trước khi phát)
       if (this.currentSong && !this.currentSong.trimStart && !this.currentSong._sbChecked && guildSettings.autoSkipOfftopic !== false && !this.currentSong.is247 && !this.currentSong.isLive) {
         this.currentSong._sbChecked = true;
         try {
-          const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
-          const trimInfo = await resolveSponsorBlockTrim(this.currentSong);
-          if (trimInfo) {
-            this.currentSong.trimStart = trimInfo.trimStart;
-            this.currentSong.trimEnd = trimInfo.trimEnd;
-            this.currentSong.realDurationSec = trimInfo.realDurationSec;
-            this.currentSong.rawDurationSec = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
-            this.currentSong.rawDuration = this.currentSong.rawDuration || this.currentSong.duration;
-            this.currentSong.duration = formatSecondsToDuration(trimInfo.realDurationSec);
-            this.currentSong.durationMs = trimInfo.realDurationSec * 1000;
-            this.currentSong.skippedIntroSec = trimInfo.skippedIntroSec;
-            this.currentSong.skippedOutroSec = trimInfo.skippedOutroSec;
-            console.log(`[SponsorBlock Auto-Trim] "${this.currentSong.title}": Tự động cắt ${trimInfo.skippedIntroSec}s mở đầu, ${trimInfo.skippedOutroSec}s kết thúc (Nhạc thực tế: ${this.currentSong.duration})`);
+          const audioCacheManager = require('./AudioCacheManager');
+          const cachedEntry = audioCacheManager.findCachedEntry(this.currentSong);
+          if (cachedEntry) {
+            this.currentSong.trimStart = cachedEntry.trimStart;
+            this.currentSong.trimEnd = cachedEntry.trimEnd;
+            if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
+              this.currentSong.skippedIntroSec = cachedEntry.trimStart;
+              this.currentSong.skippedOutroSec = cachedEntry.trimEnd;
+              const rawDur = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
+              if (rawDur > 0) {
+                const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+                  ? (cachedEntry.trimEnd - cachedEntry.trimStart)
+                  : Math.max(1, rawDur - cachedEntry.trimStart);
+                this.currentSong.realDurationSec = realSec;
+                this.currentSong.duration = formatSecondsToDuration(realSec);
+                this.currentSong.durationMs = realSec * 1000;
+              }
+            }
+            console.log(`[AudioCache SB-Hit] "${this.currentSong.title}": Tái sử dụng mốc cắt từ SSD Cache (${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s, bỏ qua mạng SponsorBlock)`);
+          } else {
+            const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
+            const trimInfo = await resolveSponsorBlockTrim(this.currentSong);
+            if (trimInfo) {
+              this.currentSong.trimStart = trimInfo.trimStart;
+              this.currentSong.trimEnd = trimInfo.trimEnd;
+              this.currentSong.realDurationSec = trimInfo.realDurationSec;
+              this.currentSong.rawDurationSec = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
+              this.currentSong.rawDuration = this.currentSong.rawDuration || this.currentSong.duration;
+              this.currentSong.duration = formatSecondsToDuration(trimInfo.realDurationSec);
+              this.currentSong.durationMs = trimInfo.realDurationSec * 1000;
+              this.currentSong.skippedIntroSec = trimInfo.skippedIntroSec;
+              this.currentSong.skippedOutroSec = trimInfo.skippedOutroSec;
+              console.log(`[SponsorBlock Auto-Trim] "${this.currentSong.title}": Tự động cắt ${trimInfo.skippedIntroSec}s mở đầu, ${trimInfo.skippedOutroSec}s kết thúc (Nhạc thực tế: ${this.currentSong.duration})`);
+            }
           }
         } catch (sbErr) {}
       }

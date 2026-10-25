@@ -2133,12 +2133,15 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
   const effectiveSeek = trimStart + userSeek;
   const playDurationSec = (trimEnd > effectiveSeek) ? (trimEnd - effectiveSeek) : 0;
 
-  // ⚡ LOCAL AUDIO DISK CACHE: Kiểm tra Cache Hit trên SSD
-  const cachedFilePath = audioCacheManager.getCachedPath(trackItem, trimStart, trimEnd);
-  if (cachedFilePath) {
+  // ⚡ LOCAL AUDIO DISK CACHE: Kiểm tra Cache Hit trên SSD (Tìm thông minh theo Video ID)
+  const cachedEntry = audioCacheManager.findCachedEntry(trackItem, trimStart, trimEnd);
+  if (cachedEntry && fs.existsSync(cachedEntry.filePath)) {
     try {
-      console.log(`[AudioCache Hit] Phát tức thì từ SSD Cache: "${trackTitle}" (Seek: ${userSeek}s)`);
-      return await createDirectFileStream(cachedFilePath, userSeek, playDurationSec);
+      console.log(`[AudioCache Hit] Phát tức thì từ SSD Cache: "${trackTitle}" (Seek: ${userSeek}s, Trim: ${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s)`);
+      // Lưu ý: File trong SSD Cache đã được cắt sẵn phần đầu trimStart lúc lưu.
+      // Khi phát lại, vị trí 00:00 của file chính là đầu bài hát đã cắt.
+      // Do đó chỉ seek theo yêu cầu tua của người dùng (userSeek), tuyệt đối không cộng trimStart!
+      return await createDirectFileStream(cachedEntry.filePath, userSeek, playDurationSec);
     } catch (cachePlayErr) {
       console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
     }
