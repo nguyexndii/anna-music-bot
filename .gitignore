@@ -21,6 +21,7 @@ scratch/
 
 # Runtime Data & Storage
 data/
+!data/audio-cache/.gitkeep
 *.tmp
 
 # Logs, Dumps & Archives

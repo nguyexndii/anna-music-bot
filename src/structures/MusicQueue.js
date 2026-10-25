@@ -1332,7 +1332,7 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this._prefetchQueueLyrics();
+    this.schedulePrefetchLyrics(1000);
     if (!this.hasSyncedLyrics) {
       this.refreshNowPlayingCard();
     }
@@ -1345,10 +1345,17 @@ class MusicQueue {
   async addSongs(songArray, requestUser) {
     this.clear247IdleTimer();
     this.autoplayPool = []; // Làm mới bộ đệm Autoplay khi thêm danh sách bài mới
+    const existingUrls = new Set((this.songs || []).map(s => s.url).filter(Boolean));
+    if (this.currentSong?.url) existingUrls.add(this.currentSong.url);
+
     const sanitized = [];
     for (let i = 0; i < songArray.length; i++) {
       const s = this._sanitizeTrack(songArray[i], i);
       if (s) {
+        if (s.url && existingUrls.has(s.url)) {
+          continue;
+        }
+        if (s.url) existingUrls.add(s.url);
         this._attachRequester(s, requestUser);
         s.is247 = false;
         s.isUserRequest = true;
@@ -1356,6 +1363,15 @@ class MusicQueue {
       }
     }
     if (sanitized.length === 0) return null;
+
+    // Giới hạn trần cứng tối đa 200 bài trong hàng chờ
+    const MAX_QUEUE_SIZE = 200;
+    const remainingSlots = Math.max(0, MAX_QUEUE_SIZE - this.songs.length);
+    if (remainingSlots <= 0) {
+      console.warn(`[Queue Overflow] Hàng chờ guild ${this.guild?.id} đã đạt giới hạn tối đa ${MAX_QUEUE_SIZE} bài.`);
+      return null;
+    }
+    const finalTracks = sanitized.slice(0, remainingSlots);
 
     const isCurrentLofi = this.isCurrentSongLofi() || this._is247Loading;
     this.isQueueOnHold = false;
@@ -1370,7 +1386,7 @@ class MusicQueue {
       this.preloadedSongUrl = null;
       this.prefetchedSong = null;
 
-      this.songs.unshift(...sanitized);
+      this.songs.unshift(...finalTracks);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
@@ -1381,7 +1397,7 @@ class MusicQueue {
       } else {
         this.player.stop(true);
       }
-      return { count: sanitized.length, firstPosition: 1, isPlayingNow: true };
+      return { count: finalTracks.length, firstPosition: 1, isPlayingNow: true };
     }
 
     // Nếu bot đang rảnh rỗi và chưa có bài đang phát: phát ngay bài đầu tiên
@@ -1391,13 +1407,13 @@ class MusicQueue {
         this.preloadedResource = null;
         this.preloadedSongUrl = null;
       }
-      this.songs.push(...sanitized);
+      this.songs.push(...finalTracks);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
       await this.playNext();
-      return { count: sanitized.length, firstPosition: 1, isPlayingNow: true };
+      return { count: finalTracks.length, firstPosition: 1, isPlayingNow: true };
     }
 
     // Chuẩn FIFO: Chèn cụm playlist vào sau các bài user trước đó, nhưng đứng TRƯỚC các bài Auto Prefetch
@@ -1405,12 +1421,12 @@ class MusicQueue {
     const firstAutoIdx = this.songs.findIndex(s => !isUserTrack(s));
 
     if (firstAutoIdx !== -1) {
-      this.songs.splice(firstAutoIdx, 0, ...sanitized);
+      this.songs.splice(firstAutoIdx, 0, ...finalTracks);
     } else {
-      this.songs.push(...sanitized);
+      this.songs.push(...finalTracks);
     }
 
-    if (this.songs[0] === sanitized[0] && this.preloadedResource) {
+    if (this.songs[0] === finalTracks[0] && this.preloadedResource) {
       this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
       this.preloadedSongUrl = null;
@@ -1421,14 +1437,14 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this._prefetchQueueLyrics();
+    this.schedulePrefetchLyrics(2000);
     if (!this.hasSyncedLyrics) {
       this.refreshNowPlayingCard();
     }
 
     const userSongs = this.getUserSongs();
-    const firstPosition = userSongs.findIndex(s => s === sanitized[0]) + 1;
-    return { count: sanitized.length, firstPosition: firstPosition > 0 ? firstPosition : 1, isPlayingNow: false };
+    const firstPosition = userSongs.findIndex(s => s === finalTracks[0]) + 1;
+    return { count: finalTracks.length, firstPosition: firstPosition > 0 ? firstPosition : 1, isPlayingNow: false };
   }
 
 
@@ -2467,6 +2483,10 @@ class MusicQueue {
       clearTimeout(this.liveLyricsTimer);
       this.liveLyricsTimer = null;
     }
+    if (this._prefetchLyricsTimer) {
+      clearTimeout(this._prefetchLyricsTimer);
+      this._prefetchLyricsTimer = null;
+    }
     this.currentLyricText = '';
     this.currentLyricIndex = -1;
     this.cachedSyncedLyrics = null;
@@ -2476,6 +2496,19 @@ class MusicQueue {
     this._lastProgressEditTime = 0;
     this._lastRenderedLyricIdx = -1;
     this._lastRenderedChunkIdx = -1;
+  }
+
+  /**
+   * Trì hoãn và gộp nhiều yêu cầu prefetch lyrics thành 1 lần gọi (Debounce)
+   */
+  schedulePrefetchLyrics(delayMs = 2000) {
+    if (this._prefetchLyricsTimer) {
+      clearTimeout(this._prefetchLyricsTimer);
+    }
+    this._prefetchLyricsTimer = setTimeout(() => {
+      this._prefetchLyricsTimer = null;
+      this._prefetchQueueLyrics();
+    }, delayMs);
   }
 
   /**
@@ -2906,7 +2939,7 @@ class MusicQueue {
             return t;
           });
           console.log(`[Autoplay Metadata Pre-fetch (${targetRegion})] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'}) và lưu ${this.autoplayPool.length} bài vào pool`);
-          this._prefetchQueueLyrics();
+          this.schedulePrefetchLyrics(2000);
         }
       } catch (err) {
         console.warn('[Autoplay Pre-fetch Error]:', err.message);
@@ -2917,42 +2950,48 @@ class MusicQueue {
   }
 
   async enrichMissingThumbnails() {
-    const missing = [];
-    if (this.currentSong && !this.currentSong.thumbnail) {
-      missing.push(this.currentSong);
-    }
-    for (const s of (this.songs || [])) {
-      if (s && !s.thumbnail) {
-        missing.push(s);
+    if (this._isEnrichingThumbs) return;
+    this._isEnrichingThumbs = true;
+    try {
+      const missing = [];
+      if (this.currentSong && !this.currentSong.thumbnail) {
+        missing.push(this.currentSong);
       }
-    }
-
-    if (missing.length === 0) return;
-
-    let changed = false;
-    const batchSize = 15;
-    for (let i = 0; i < missing.length; i += batchSize) {
-      const chunk = missing.slice(i, i + batchSize);
-      await Promise.allSettled(chunk.map(async item => {
-        if (item.uri && item.uri.startsWith('spotify:track:')) {
-          const trackId = item.uri.replace('spotify:track:', '').split('?')[0];
-          try {
-            const res = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
-            if (res.ok) {
-              const d = await res.json();
-              if (d.thumbnail_url) {
-                item.thumbnail = d.thumbnail_url;
-                changed = true;
-                return;
-              }
-            }
-          } catch (e) {}
+      for (const s of (this.songs || [])) {
+        if (s && !s.thumbnail) {
+          missing.push(s);
         }
-      }));
-    }
+      }
 
-    if (changed) {
-      this._saveSessionState();
+      if (missing.length === 0) return;
+
+      let changed = false;
+      const batchSize = 10;
+      for (let i = 0; i < missing.length; i += batchSize) {
+        const chunk = missing.slice(i, i + batchSize);
+        await Promise.allSettled(chunk.map(async item => {
+          if (item.uri && item.uri.startsWith('spotify:track:')) {
+            const trackId = item.uri.replace('spotify:track:', '').split('?')[0];
+            try {
+              const res = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+              if (res.ok) {
+                const d = await res.json();
+                if (d.thumbnail_url) {
+                  item.thumbnail = d.thumbnail_url;
+                  changed = true;
+                  return;
+                }
+              }
+            } catch (e) {}
+          }
+        }));
+      }
+
+      if (changed) {
+        this._saveSessionState();
+      }
+    } finally {
+      this._isEnrichingThumbs = false;
     }
   }
 

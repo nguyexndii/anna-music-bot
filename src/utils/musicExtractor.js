@@ -27,6 +27,7 @@ try {
 const ytdlp = require('yt-dlp-exec');
 const play = require('play-dl');
 const yts = require('yt-search');
+const audioCacheManager = require('../structures/AudioCacheManager');
 const ffmpeg = (process.platform === 'linux' && fs.existsSync('/usr/bin/ffmpeg'))
   ? '/usr/bin/ffmpeg'
   : (require('ffmpeg-static') || 'ffmpeg');
@@ -1672,10 +1673,93 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 }
 
 /**
+ * Phát trực tiếp từ file âm thanh trên ổ cứng SSD (Local Audio Disk Cache)
+ * Không tải mạng, độ trễ 0ms, mức sử dụng CPU ~ 0%
+ */
+function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) {
+  return new Promise((resolve, reject) => {
+    const ffmpegArgs = [];
+    if (seekSeconds && Number(seekSeconds) > 0) {
+      ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
+    }
+    ffmpegArgs.push(
+      '-i', filePath,
+      '-vn',
+      '-c:a', 'pcm_s16le',
+      '-f', 's16le',
+      '-ar', '48000',
+      '-ac', '2',
+      '-threads', '1'
+    );
+    if (playDurationSec && Number(playDurationSec) > 0) {
+      ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+    }
+    ffmpegArgs.push('pipe:1');
+
+    const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    registerProcess(ffmpegProcess);
+
+    let ffmpegStderr = '';
+    ffmpegProcess.stderr.on('data', (chunk) => {
+      ffmpegStderr += chunk.toString();
+      if (ffmpegStderr.length > 4000) ffmpegStderr = ffmpegStderr.slice(-2000);
+    });
+
+    ffmpegProcess.stdin?.on('error', () => {});
+    ffmpegProcess.on('error', (err) => {
+      if (err.code !== 'EPIPE') console.error('[FFmpeg File Direct Error]:', err.message);
+    });
+
+    let firstChunkReceived = false;
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    passThroughStream.on('error', (err) => {
+      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+        console.warn('[PassThroughStream File Error]:', err.message);
+      }
+    });
+    passThroughStream.on('close', () => {
+      killProcess(ffmpegProcess);
+    });
+    ffmpegProcess.stdout.pipe(passThroughStream);
+
+    const safetyTimeout = setTimeout(() => {
+      if (!firstChunkReceived) {
+        killProcess(ffmpegProcess);
+        reject(new Error('Quá thời gian chờ âm thanh từ SSD Cache File (Timeout 15s)'));
+      }
+    }, 15000);
+
+    ffmpegProcess.stdout.once('data', () => {
+      firstChunkReceived = true;
+      clearTimeout(safetyTimeout);
+      const resource = createAudioResource(passThroughStream, {
+        inputType: StreamType.Raw,
+        inlineVolume: true
+      });
+      resource.destroy = () => {
+        killProcess(ffmpegProcess);
+      };
+      resolve(resource);
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      clearTimeout(safetyTimeout);
+      if (!firstChunkReceived) {
+        killProcess(ffmpegProcess);
+        const lastErr = ffmpegStderr.slice(-200).trim();
+        reject(new Error(`FFmpeg File Direct exited with code ${code}: ${lastErr}`));
+      } else {
+        killProcess(ffmpegProcess);
+      }
+    });
+  });
+}
+
+/**
  * Tạo một luồng phát đơn qua yt-dlp & FFmpeg với cơ chế kiểm tra gói dữ liệu đầu tiên (First-Chunk Confirmation)
  * Nếu YouTube bị chặn bot (ra 0 byte / code 183), hàm sẽ reject ngay lập tức để kích hoạt cơ chế Failover.
  */
-async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0) {
+async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0, cacheOptions = null) {
   if (typeof targetQueryOrUrl !== 'string' || !targetQueryOrUrl.trim()) {
     throw new Error('Target không hợp lệ');
   }
@@ -1763,6 +1847,18 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     }
     ffmpegArgs.push('pipe:1');
 
+    // Nếu có tùy chọn lưu cache SSD (Cache Miss): FFmpeg xuất đồng thời luồng thứ hai ghi ra file tạm .tmp
+    if (cacheOptions?.tempPath) {
+      ffmpegArgs.push(
+        '-vn',
+        '-c:a', 'libopus',
+        '-b:a', '128k',
+        '-f', 'ogg',
+        '-y',
+        cacheOptions.tempPath
+      );
+    }
+
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
 
@@ -1815,6 +1911,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
       killProcess(ffmpegProcess);
       killProcess(ytdlpStreamProcess);
+      cacheOptions?.onAbort?.();
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
@@ -1824,6 +1921,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
         reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 35s)'));
       }
     }, 35000);
@@ -1842,6 +1940,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
       };
 
       resolve(resource);
@@ -1853,12 +1952,17 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
         const lastErr = (ytdlpStderr || ffmpegStderr).slice(-200).trim();
         reject(new Error(`FFmpeg exited with code ${code}: ${lastErr}`));
       } else {
         if (code !== 0 && code !== null) {
           const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
           if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+          cacheOptions?.onAbort?.();
+        } else {
+          // Lưu cache thành công khi FFmpeg hoàn tất tiến trình với mã 0
+          cacheOptions?.onCommit?.();
         }
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
@@ -2029,17 +2133,54 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
   const effectiveSeek = trimStart + userSeek;
   const playDurationSec = (trimEnd > effectiveSeek) ? (trimEnd - effectiveSeek) : 0;
 
+  // ⚡ LOCAL AUDIO DISK CACHE: Kiểm tra Cache Hit trên SSD
+  const cachedFilePath = audioCacheManager.getCachedPath(trackItem, trimStart, trimEnd);
+  if (cachedFilePath) {
+    try {
+      console.log(`[AudioCache Hit] Phát tức thì từ SSD Cache: "${trackTitle}" (Seek: ${userSeek}s)`);
+      return await createDirectFileStream(cachedFilePath, userSeek, playDurationSec);
+    } catch (cachePlayErr) {
+      console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
+    }
+  }
+
+  // Khởi tạo tùy chọn ghi cache khi Cache Miss (chỉ cache khi bài phát từ đầu 00:00)
+  let cacheOptions = null;
+  if (userSeek === 0 && audioCacheManager.isCacheable(trackItem)) {
+    const tempPath = audioCacheManager.createTempFilePath(trackItem, trimStart, trimEnd);
+    if (tempPath) {
+      let isDone = false;
+      cacheOptions = {
+        tempPath,
+        onCommit: () => {
+          if (!isDone) {
+            isDone = true;
+            audioCacheManager.commitCache(trackItem, tempPath, trimStart, trimEnd).catch(() => {});
+          }
+        },
+        onAbort: () => {
+          if (!isDone) {
+            isDone = true;
+            audioCacheManager.abortTemp(tempPath);
+          }
+        }
+      };
+    }
+  }
+
   if (isYouTubeCircuitOpen()) {
+    cacheOptions?.onAbort?.();
     console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000)}p), chuyển thẳng sang SoundCloud.`);
     return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec);
   }
 
   // TẦNG 1: Thử phát từ YouTube URL chính
   try {
-    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec);
+    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, cacheOptions);
     recordYouTubeSuccess();
     return res;
   } catch (ytErr) {
+    cacheOptions?.onAbort?.();
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
     recordYouTubeFailure(errMsg);

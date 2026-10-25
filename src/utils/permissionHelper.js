@@ -17,6 +17,35 @@ function isStrictAdmin(member) {
 }
 
 /**
+ * Kiểm tra xem người dùng có quyền Quản lý máy chủ (Không bao gồm vai trò DJ đơn thuần)
+ */
+function hasManagerPermission(member) {
+  if (!member || !member.guild) return false;
+  if (isStrictAdmin(member)) return true;
+  if (member.permissions?.has('ManageChannels')) return true;
+
+  return member.roles?.cache?.some(r => /quản\s*lý|manager|admin|mod/i.test(r.name)) || false;
+}
+
+/**
+ * Kiểm tra xem thành viên có vai trò DJ hoặc quyền Quản lý máy chủ không
+ */
+function hasDJPermission(member) {
+  if (!member || !member.guild) return false;
+  if (isStrictAdmin(member)) return true;
+  if (hasManagerPermission(member)) return true;
+
+  const guildSettings = settingsManager.get(member.guild.id);
+  // 1. Kiểm tra theo ID vai trò DJ được gán cụ thể trong cài đặt máy chủ
+  if (guildSettings?.djRoleId && member.roles?.cache?.has(guildSettings.djRoleId)) {
+    return true;
+  }
+
+  // 2. Tự động nhận diện role có tên "DJ" (không phân biệt hoa thường)
+  return member.roles?.cache?.some(r => r.name.toLowerCase() === 'dj' || /\bdj\b/i.test(r.name)) || false;
+}
+
+/**
  * Kiểm tra xem người dùng có quyền sử dụng lệnh âm nhạc không (Dựa trên Role DJ và quyền Admin)
  */
 function hasMusicPermission(member) {
@@ -24,15 +53,9 @@ function hasMusicPermission(member) {
   if (isStrictAdmin(member)) return true;
 
   const guildSettings = settingsManager.get(member.guild.id);
-  if (!guildSettings.djOnly) return true; // Chế độ yêu cầu role đang TẮT -> mọi người đều phát nhạc được
+  if (!guildSettings?.djOnly) return true; // Chế độ DJ Only đang TẮT -> mọi người đều phát nhạc được
 
-  // Nếu Admin đã gán 1 vai trò (Role) cụ thể trong server: bắt buộc thành viên phải có Role đó
-  if (guildSettings.djRoleId) {
-    return member.roles?.cache?.has(guildSettings.djRoleId) || false;
-  }
-
-  // Nếu chưa gán role cụ thể nhưng đang bật chế độ DJ Only: cho phép role có chữ "DJ"
-  return member.roles?.cache?.some(r => r.name.toLowerCase().includes('dj')) || false;
+  return hasDJPermission(member);
 }
 
 /**
@@ -63,21 +86,11 @@ function isAllowedVoiceChannel(memberOrChannel) {
   return channelId === guildSettings.lockedVoiceChannelId;
 }
 
-/**
- * Kiểm tra xem người dùng có quyền Quản lý máy chủ (Không bao gồm vai trò DJ đơn thuần)
- */
-function hasManagerPermission(member) {
-  if (!member || !member.guild) return false;
-  if (isStrictAdmin(member)) return true;
-  if (member.permissions?.has('ManageChannels')) return true;
-
-  return member.roles?.cache?.some(r => /quản\s*lý|manager|admin|mod/i.test(r.name)) || false;
-}
-
 module.exports = {
   isStrictAdmin,
   hasMusicPermission,
   hasManagerPermission,
+  hasDJPermission,
   isAllowedVoiceChannel,
   STAFF_VOICE_CHANNELS
 };

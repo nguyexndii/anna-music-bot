@@ -9,6 +9,8 @@ const playlistHistoryManager = require('../structures/PlaylistHistoryManager');
 const { t } = require('../utils/i18n');
 const config = require('../config');
 
+const activePlaylistLoads = new Set();
+
 module.exports = {
   name: 'play',
   aliases: ['p'],
@@ -134,31 +136,39 @@ module.exports = {
         });
       } else {
         // Nhiều bài hát từ Playlist
-        await queue.addSongs(tracks, ctx.member || ctx.user);
-
-        // Lưu danh sách phát vào lịch sử server
-        try {
-          const userObj = ctx.member?.user || ctx.user;
-          const reqName = ctx.member?.displayName || userObj?.username || 'User';
-          const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
-
-          playlistHistoryManager.addPlaylist(guildId, {
-            url: query,
-            title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} tracks)`,
-            trackCount: tracks.length,
-            thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
-            addedBy: reqName,
-            addedByAvatar: reqAvatar,
-            tracks: tracks
-          });
-        } catch (plErr) {
-          console.error('Error saving playlist to history in play command:', plErr);
+        if (activePlaylistLoads.has(guildId)) {
+          return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
         }
+        activePlaylistLoads.add(guildId);
+        try {
+          await queue.addSongs(tracks, ctx.member || ctx.user);
 
-        return ctx.editReply(t(guildId, 'player.added_playlist', {
-          count: tracks.length,
-          title: tracks[0]?.playlistTitle || 'Playlist'
-        }));
+          // Lưu danh sách phát vào lịch sử server
+          try {
+            const userObj = ctx.member?.user || ctx.user;
+            const reqName = ctx.member?.displayName || userObj?.username || 'User';
+            const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
+
+            playlistHistoryManager.addPlaylist(guildId, {
+              url: query,
+              title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} tracks)`,
+              trackCount: tracks.length,
+              thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
+              addedBy: reqName,
+              addedByAvatar: reqAvatar,
+              tracks: tracks
+            });
+          } catch (plErr) {
+            console.error('Error saving playlist to history in play command:', plErr);
+          }
+
+          return ctx.editReply(t(guildId, 'player.added_playlist', {
+            count: tracks.length,
+            title: tracks[0]?.playlistTitle || 'Playlist'
+          }));
+        } finally {
+          activePlaylistLoads.delete(guildId);
+        }
       }
     } catch (error) {
       console.error('Error executing play command:', error);
