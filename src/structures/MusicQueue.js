@@ -105,6 +105,7 @@ class MusicQueue {
     this.crossfadeTimer = null;
     this._playCountTimer = null;
     this.nowPlayingMessage = null;
+    this._repostCardTimer = null;
     this._isPrefetching = false;
     this._isPlayingNext = false;
     this.lastNonLofiSong = null; // Ghi nhớ bài hát gần nhất không phải Lofi để Autoplay tương tự
@@ -1357,6 +1358,7 @@ class MusicQueue {
     if (!this.hasSyncedLyrics) {
       this.refreshNowPlayingCard();
     }
+    this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
     const position = userSongs.findIndex(s => s === song) + 1;
@@ -1462,6 +1464,7 @@ class MusicQueue {
     if (!this.hasSyncedLyrics) {
       this.refreshNowPlayingCard();
     }
+    this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
     const firstPosition = userSongs.findIndex(s => s === finalTracks[0]) + 1;
@@ -2276,6 +2279,10 @@ class MusicQueue {
     this._pendingButtonAction = null;
     this._isProcessingAction = false;
     this.clearLiveLyrics();
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+      this._repostCardTimer = null;
+    }
     this.clearPlayCountTimer();
     this._clearCrossfadeTimer();
     this._clearSessionSaveInterval();
@@ -2900,6 +2907,61 @@ class MusicQueue {
     }, 600);
   }
 
+  scheduleRepostNowPlayingCard(delayMs = 1200) {
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+    }
+    this._repostCardTimer = setTimeout(async () => {
+      this._repostCardTimer = null;
+      await this.repostNowPlayingCardToBottom();
+    }, delayMs);
+  }
+
+  async repostNowPlayingCardToBottom() {
+    if (this.isDestroyed || this.isStopped || !this.currentSong || !this.textChannel) return;
+    const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
+    if (is247Lofi) return;
+
+    try {
+      // 1. Kiểm tra xem nowPlayingMessage có phải là tin nhắn cuối cùng trong textChannel không
+      let isAlreadyLast = false;
+      try {
+        const lastMessages = await this.textChannel.messages.fetch({ limit: 1 }).catch(() => null);
+        const lastMsg = lastMessages?.first();
+        isAlreadyLast = Boolean(this.nowPlayingMessage && lastMsg && lastMsg.id === this.nowPlayingMessage.id);
+      } catch (fetchErr) {}
+
+      // Nếu thẻ đang phát ĐÃ là tin nhắn cuối cùng rồi thì không cần repost (tránh nhấp nháy / tốn request)
+      if (isAlreadyLast) return;
+
+      const { createNowPlayingCard } = require('../utils/embed');
+      const cardPayload = createNowPlayingCard(this.currentSong, this);
+
+      // 2. Xóa thẻ cũ (nếu có)
+      if (this.nowPlayingMessage) {
+        const oldMsg = this.nowPlayingMessage;
+        this.nowPlayingMessage = null; // Ngắt gắn kết ngay để Live Lyrics không edit vào tin cũ
+        await oldMsg.delete().catch(() => {});
+      }
+
+      // 3. Gửi thẻ mới xuống dưới cùng
+      const newMsg = await this.textChannel.send(cardPayload);
+      this.nowPlayingMessage = newMsg;
+
+      // 4. Reset mốc render để Live Lyrics lập tức vẽ câu tiếp theo trên thẻ mới
+      this._lastRenderedChunkIdx = -1;
+      this._lastLyricsEditTime = 0;
+
+      if (this.hasSyncedLyrics) {
+        this.scheduleNextLyricUpdate(this.currentSong);
+      } else {
+        this.scheduleProgressBarUpdate(this.currentSong);
+      }
+    } catch (err) {
+      console.warn('[RepostNowPlayingCard] Lỗi khi đưa thẻ Now Playing xuống đáy:', err.message);
+    }
+  }
+
   destroy() {
     this.isDestroyed = true;
     this.isStopped = true;
@@ -2913,6 +2975,10 @@ class MusicQueue {
       this._onLyricsFound = null;
     }
     this.clearLiveLyrics();
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+      this._repostCardTimer = null;
+    }
     this._clearBufferingWatchdog();
     this.clearPlayCountTimer();
     this._clearCrossfadeTimer();

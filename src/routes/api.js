@@ -1011,7 +1011,9 @@ module.exports = function createApiRouter(client) {
             const notifEmbed = new EmbedBuilder()
               .setColor('#2B7FFF')
               .setDescription(notifDesc);
-            notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).catch(() => {});
+            notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).then(() => {
+              if (queue && !isFirst) queue.scheduleRepostNowPlayingCard(600);
+            }).catch(() => {});
           }
         } catch (e) {}
 
@@ -1086,7 +1088,9 @@ module.exports = function createApiRouter(client) {
             flags: 4096,
             content: `${isFirst ? 'playing' : 'queued'}: ${(targetTrack.title || '').slice(0, 60)}`
           });
-          notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).catch(() => {});
+          notifyChannel.send({ embeds: [notifEmbed], flags: 4096 }).then(() => {
+            if (queue && !isFirst) queue.scheduleRepostNowPlayingCard(600);
+          }).catch(() => {});
         }
       } catch (notifErr) {
         // Không crash nếu gửi thông báo lỗi

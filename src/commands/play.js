@@ -145,10 +145,14 @@ module.exports = {
         const track = tracks[0];
         const result = await queue.addSong(track, ctx.member || ctx.user);
         const position = result?.position || 1;
-        return ctx.editReply({
+        const editRes = await ctx.editReply({
           content: null,
           embeds: [createQueueAddedEmbed(track, position, guildId)]
         });
+        if (!result?.isPlayingNow) {
+          queue.scheduleRepostNowPlayingCard(600);
+        }
+        return editRes;
       } else {
         // Nhiều bài hát từ Playlist (Nếu query ban đầu không khớp pattern nhưng kết quả trả về nhiều bài)
         if (!isLockHeld) {
@@ -180,10 +184,12 @@ module.exports = {
           console.error('Error saving playlist to history in play command:', plErr);
         }
 
-        return ctx.editReply(t(guildId, 'player.added_playlist', {
+        const replyRes = await ctx.editReply(t(guildId, 'player.added_playlist', {
           count: tracks.length,
           title: tracks[0]?.playlistTitle || 'Playlist'
         }));
+        queue.scheduleRepostNowPlayingCard(600);
+        return replyRes;
       }
     } catch (error) {
       console.error('Error executing play command:', error);
