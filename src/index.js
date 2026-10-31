@@ -878,9 +878,18 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ embeds: [createErrorEmbed(t(interaction.guildId, 'common.dj_only', { role: roleText }))], flags: 64 });
       }
 
+      const isV2Message = interaction.message?.components?.[0]?.type === 17 || interaction.message?.flags?.has?.(32768);
+
       if (interaction.values[0] === 'remove_all') {
         queue.songs = [];
         queue._saveSessionState?.();
+        if (typeof queue.refreshNowPlayingCard === 'function') {
+          queue.refreshNowPlayingCard();
+        }
+        if (isV2Message) {
+          const queueContainer = createQueueContainer(queue, 1);
+          return interaction.update({ components: queueContainer ? [queueContainer] : [] });
+        }
         const newEmbed = createQueueEmbed(queue, 1);
         return interaction.update({ embeds: [newEmbed], components: [] });
       }
@@ -897,10 +906,18 @@ client.on('interactionCreate', async (interaction) => {
           queue.songs.splice(actualIdx, 1);
           queue._saveSessionState?.();
         }
+        if (typeof queue.refreshNowPlayingCard === 'function') {
+          queue.refreshNowPlayingCard();
+        }
 
         const remainingUserSongs = queue.getUserSongs ? queue.getUserSongs() : (queue.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)' && s.requestedBy !== 'Auto (24/7 Lofi)');
         const totalPages = Math.max(1, Math.ceil(remainingUserSongs.length / 10));
         if (page > totalPages) page = totalPages;
+
+        if (isV2Message) {
+          const queueContainer = createQueueContainer(queue, page);
+          return interaction.update({ components: queueContainer ? [queueContainer] : [] });
+        }
 
         const newEmbed = createQueueEmbed(queue, page);
         const components = [];
