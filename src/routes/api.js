@@ -1954,7 +1954,8 @@ module.exports = function createApiRouter(client) {
       }
       const settingsManager = require('../structures/SettingsManager');
       const guildSettings = settingsManager.get(guildId);
-      const lyricsData = await getLyrics(safeTitle, queryArtist, durMs || 0, currentTrack.url, guildSettings?.lyricsLayers);
+      const songDurMs = currentTrack.rawDurationSec ? currentTrack.rawDurationSec * 1000 : (durMs || 0);
+      const lyricsData = await getLyrics(safeTitle, queryArtist, songDurMs, currentTrack.url, guildSettings?.lyricsLayers);
 
       // Nếu bài hát đang phát chưa có Live Lyrics trên Discord mà API vừa tìm thấy lời -> Tự động nạp nóng (Hot-Attach)
       if (queue && queue.currentSong && !queue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
@@ -1969,7 +1970,7 @@ module.exports = function createApiRouter(client) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;
         const realDurMs = currentTrack.durationMs || 0;
 
-        if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
+        if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics
             .map(line => ({
               ...line,
@@ -2038,7 +2039,7 @@ module.exports = function createApiRouter(client) {
       if (currentTrack && lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0) && (!targetUrl || targetUrl === currentTrack.url)) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;
         const realDurMs = currentTrack.durationMs || 0;
-        if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
+        if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics
             .map(line => ({
               ...line,

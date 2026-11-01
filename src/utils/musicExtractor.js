@@ -1759,7 +1759,8 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) 
  * Tạo một luồng phát đơn qua yt-dlp & FFmpeg với cơ chế kiểm tra gói dữ liệu đầu tiên (First-Chunk Confirmation)
  * Nếu YouTube bị chặn bot (ra 0 byte / code 183), hàm sẽ reject ngay lập tức để kích hoạt cơ chế Failover.
  */
-async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0, cacheOptions = null) {
+async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0, cacheOptions = null, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
   if (typeof targetQueryOrUrl !== 'string' || !targetQueryOrUrl.trim()) {
     throw new Error('Target không hợp lệ');
   }
@@ -1824,6 +1825,10 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       return reject(new Error(`Không thể khởi chạy yt-dlp cho: ${cleanTarget}`));
     }
 
+    if (process.platform === 'linux' && ytdlpStreamProcess.pid) {
+      try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 15 : 5); } catch (e) {}
+    }
+
     const ffmpegArgs = [];
     if (seekSeconds && Number(seekSeconds) > 0) {
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
@@ -1849,20 +1854,31 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     // Nếu có tùy chọn lưu cache SSD (Cache Miss): FFmpeg xuất đồng thời luồng thứ hai ghi ra file tạm .tmp
     if (cacheOptions?.tempPath) {
-      ffmpegArgs.push(
-        '-vn',
-        '-c:a', 'libopus',
-        '-b:a', '128k',
-        '-f', 'ogg'
-      );
-      if (playDurationSec && Number(playDurationSec) > 0) {
-        ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+      const isCpuBusyForCache = Boolean(os.loadavg && os.loadavg()[0] > 0.85);
+      if (isCpuBusyForCache) {
+        cacheOptions?.onAbort?.();
+        cacheOptions = null;
+      } else {
+        ffmpegArgs.push(
+          '-vn',
+          '-c:a', 'libopus',
+          '-b:a', '128k',
+          '-compression_level', '0',
+          '-f', 'ogg'
+        );
+        if (playDurationSec && Number(playDurationSec) > 0) {
+          ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+        }
+        ffmpegArgs.push('-y', cacheOptions.tempPath);
       }
-      ffmpegArgs.push('-y', cacheOptions.tempPath);
     }
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
+
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 10 : 0); } catch (e) {}
+    }
 
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
@@ -1977,7 +1993,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 /**
  * TẦNG 2: Failover sang SoundCloud khi YouTube bị chặn hoặc Circuit Breaker kích hoạt
  */
-async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds = 0, seekSeconds = 0, playDurationSec = 0) {
+async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds = 0, seekSeconds = 0, playDurationSec = 0, options = {}) {
   console.log(`[Failover] Đang tìm kiếm bản phát chuẩn trên SoundCloud cho "${trackTitle}"...`);
   try {
     const is247Track = Boolean(trackItem && (trackItem.is247 || trackItem.requestedBy === 'Auto (24/7)' || trackItem.requestedBy === 'Auto'));
@@ -2058,7 +2074,7 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
         try {
           const streamUrl = candidate.webpage_url || candidate.url;
           console.log(`[SoundCloud] Đang thử phát ứng viên: "${candidate.title}" (${candidate.duration}s)...`);
-          const resource = await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true, false, playDurationSec);
+          const resource = await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true, false, playDurationSec, null, options);
           console.log(`[SoundCloud] Phát thành công bản chuẩn: "${candidate.title}"`);
           if (typeof trackItem === 'object' && trackItem !== null) {
             trackItem.url = streamUrl;
@@ -2080,7 +2096,7 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
 /**
  * Trích xuất luồng âm thanh theo kiến trúc Failover 3 tầng có tích hợp Circuit Breaker
  */
-async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
+async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, options = {}) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
   const trackTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery) : trackItem;
 
@@ -2179,12 +2195,12 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
   if (isYouTubeCircuitOpen()) {
     cacheOptions?.onAbort?.();
     console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000)}p), chuyển thẳng sang SoundCloud.`);
-    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec);
+    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 
   // TẦNG 1: Thử phát từ YouTube URL chính
   try {
-    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, cacheOptions);
+    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, cacheOptions, options);
     recordYouTubeSuccess();
     return res;
   } catch (ytErr) {
@@ -2207,7 +2223,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
       // Tự động thử lại không dùng cookie với player_client=android,ios
       try {
         console.log(`[YouTube Failover] Thử lại trực tiếp "${targetUrl}" không dùng cookie (android,ios)...`);
-        const noCookieRes = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, true, playDurationSec);
+        const noCookieRes = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, true, playDurationSec, null, options);
         recordYouTubeSuccess();
         return noCookieRes;
       } catch (noCookieErr) {
@@ -2264,7 +2280,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
           for (const altVideo of candidateVideos.slice(0, 4)) {
             try {
               console.log(`[YouTube Alternate] Thử phát bản thay thế: "${altVideo.title}" (${altVideo.url})`);
-              const resource = await createSingleStream(altVideo.url, crossfadeSeconds, effectiveSeek, false, false, playDurationSec);
+              const resource = await createSingleStream(altVideo.url, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, null, options);
               if (typeof trackItem === 'object' && trackItem !== null) {
                 trackItem.url = altVideo.url;
               }
@@ -2282,7 +2298,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     }
 
     // TẦNG 2: Failover sang SoundCloud
-    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec);
+    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 }
 
@@ -2294,7 +2310,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, options = {}) {
   const priority = options?.priority || trackItem?.priority || 'high';
   return await extractionSemaphore.run(async () => {
-    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds);
+    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds, { ...options, priority });
   }, priority);
 }
 

@@ -372,13 +372,6 @@ class MusicQueue {
       } catch (sbErr) {}
     }
 
-    // Trên VPS 1 Core, chỉ preload stream khi bài đã có sẵn trong SSD Cache (0% CPU, 0ms mạng).
-    // Nếu chưa có trong cache, dừng ở mức phân giải SponsorBlock, để bài hiện tại kết thúc mới spawn ffmpeg ở playNext().
-    if (!cachedEntry) {
-      console.log(`[MusicQueue Preload] Bài "${nextTrack.title}" chưa có trong SSD Cache. Hoãn preload stream để tránh nghẽn CPU 1 Core (sẽ phát chính thức ở bài kế tiếp).`);
-      return;
-    }
-
     this._isPreloading = true;
     try {
       const res = await createResource(nextTrack, 0, 0, { priority: 'low' });
@@ -387,8 +380,10 @@ class MusicQueue {
           this._cleanupResource(this.preloadedResource);
         }
         this.preloadedResource = res;
-        this.preloadedSongUrl = targetKey;
-        console.log(`[MusicQueue Preload] Đã tải trước thành công bài kế tiếp (priority: low): "${nextTrack.title}"`);
+        // Sau khi createResource, nextTrack.url có thể đã được phân giải sang URL YouTube mới
+        const finalKey = nextTrack.url || nextTrack.searchQuery || targetKey;
+        this.preloadedSongUrl = finalKey;
+        console.log(`[MusicQueue Preload] Đã tải trước thành công bài kế tiếp (priority: low): "${nextTrack.title}" (key: ${finalKey})`);
       } else if (res) {
         this._cleanupResource(res);
       }
@@ -1511,7 +1506,7 @@ class MusicQueue {
 
     const currentPlayedMs = (this.currentSong.seekPosition || 0) * 1000 + (this.currentResource?.playbackDuration || 0);
     const remainingMs = (totalSec * 1000) - currentPlayedMs;
-    const triggerAfterMs = Math.max(500, remainingMs - 18000);
+    const triggerAfterMs = Math.max(500, remainingMs - 22000);
 
     this.preloadTimer = setTimeout(async () => {
       this.preloadTimer = null;
@@ -1659,11 +1654,21 @@ class MusicQueue {
       const targetKey = this.currentSong.url || this.currentSong.searchQuery;
       let resource = null;
 
-      // Sử dụng ngay tài nguyên âm thanh đã tải sẵn ngầm trong RAM (0.001s instant transition) nếu không tua vị trí cũ
-      if (!initialSeekSeconds && this.preloadedResource && this.preloadedSongUrl === targetKey) {
+      // Sử dụng ngay tài nguyên âm thanh đã tải sẵn ngầm trong RAM (0ms instant transition) nếu không tua vị trí cũ
+      const isPreloadMatch = Boolean(
+        this.preloadedResource && (
+          this.preloadedSongUrl === targetKey ||
+          this.preloadedSongUrl === this.currentSong.url ||
+          this.preloadedSongUrl === this.currentSong.searchQuery ||
+          (this.currentSong.originalUrl && this.preloadedSongUrl === this.currentSong.originalUrl)
+        )
+      );
+
+      if (!initialSeekSeconds && isPreloadMatch) {
         resource = this.preloadedResource;
         this.preloadedResource = null;
         this.preloadedSongUrl = null;
+        console.log(`[MusicQueue 0ms Hit] Nối bài tức thì từ luồng Preload (0ms): "${this.currentSong.title}"`);
       } else {
         if (this.preloadedResource) {
           this._cleanupResource(this.preloadedResource);
@@ -2613,7 +2618,7 @@ class MusicQueue {
       const trimStartMs = (song.trimStart || 0) * 1000;
       const realDurMs = song.durationMs || 0;
 
-      if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
+      if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
         activeSyncedLyrics = lyricsData.syncedLyrics
           .map(line => ({
             ...line,
@@ -2680,7 +2685,7 @@ class MusicQueue {
       const { fetchLyrics } = require('../utils/lyricsHelper');
       const settingsManager = require('./SettingsManager');
       const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
-      const durationMs = song.durationMs || (song.duration ? parseDurationToMs(song.duration) : 0);
+      const durationMs = (song.rawDurationSec ? song.rawDurationSec * 1000 : (song.durationMs || (song.duration ? parseDurationToMs(song.duration) : 0)));
       const lyricsData = await fetchLyrics(song.title, song.artist, durationMs, song.url, guildSettings?.lyricsLayers);
 
       if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;

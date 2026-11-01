@@ -32,10 +32,30 @@ function getSystemAvailableMemoryMb() {
 }
 
 /**
+ * Kiểm tra xem CPU có đang bị quá tải dựa trên loadavg 1 phút trên Linux không.
+ * @param {number} threshold Ngưỡng tải CPU trung bình 1 phút (mặc định 1.15)
+ * @returns {boolean}
+ */
+function isCpuOverloaded(threshold = 1.15) {
+  if (process.platform === 'linux' && typeof os.loadavg === 'function') {
+    const loads = os.loadavg();
+    if (Array.isArray(loads) && loads.length > 0) {
+      return loads[0] > threshold;
+    }
+  }
+  return false;
+}
+
+/**
  * Kiểm tra xem hệ thống có đủ RAM trống để tải trước (preload) bài tiếp theo không.
  * Ngưỡng an toàn mặc định là 300MB (có thể chỉnh qua biến môi trường PRELOAD_MIN_FREE_MB).
  */
 function hasEnoughMemoryToPreload() {
+  if (isCpuOverloaded(1.25)) {
+    console.warn('[CPU Guard] Tải trung bình CPU 1p quá cao, tạm hoãn preload để bảo vệ luồng âm thanh');
+    return false;
+  }
+
   const minFreeMb = parseInt(process.env.PRELOAD_MIN_FREE_MB, 10) || 300;
   const availableMb = getSystemAvailableMemoryMb();
 
@@ -77,6 +97,7 @@ function logMemoryUsage(tag = 'RAM Monitor') {
 }
 
 module.exports = {
+  isCpuOverloaded,
   hasEnoughMemoryToPreload,
   getSystemAvailableMemoryMb,
   getMemoryStats,
