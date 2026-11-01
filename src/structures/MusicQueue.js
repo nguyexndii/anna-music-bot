@@ -330,12 +330,13 @@ class MusicQueue {
     const targetKey = nextTrack.url || nextTrack.searchQuery;
     if (!targetKey) return;
 
+    const audioCacheManager = require('./AudioCacheManager');
+    const cachedEntry = audioCacheManager.findCachedEntry(nextTrack);
+
     const guildSettings = settingsManager.get(this.guild.id);
     if (nextTrack && !nextTrack.trimStart && !nextTrack._sbChecked && guildSettings.autoSkipOfftopic !== false && !nextTrack.is247 && !nextTrack.isLive) {
       nextTrack._sbChecked = true;
       try {
-        const audioCacheManager = require('./AudioCacheManager');
-        const cachedEntry = audioCacheManager.findCachedEntry(nextTrack);
         if (cachedEntry) {
           nextTrack.trimStart = cachedEntry.trimStart;
           nextTrack.trimEnd = cachedEntry.trimEnd;
@@ -369,6 +370,13 @@ class MusicQueue {
           }
         }
       } catch (sbErr) {}
+    }
+
+    // Trên VPS 1 Core, chỉ preload stream khi bài đã có sẵn trong SSD Cache (0% CPU, 0ms mạng).
+    // Nếu chưa có trong cache, dừng ở mức phân giải SponsorBlock, để bài hiện tại kết thúc mới spawn ffmpeg ở playNext().
+    if (!cachedEntry) {
+      console.log(`[MusicQueue Preload] Bài "${nextTrack.title}" chưa có trong SSD Cache. Hoãn preload stream để tránh nghẽn CPU 1 Core (sẽ phát chính thức ở bài kế tiếp).`);
+      return;
     }
 
     this._isPreloading = true;

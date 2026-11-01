@@ -45,8 +45,8 @@ function hasEnoughMemoryToPreload() {
   }
 
   const rssMb = process.memoryUsage().rss / (1024 * 1024);
-  if (rssMb >= 650) {
-    console.warn(`[RAM Guard] Tiến trình bot đang sử dụng ${rssMb.toFixed(0)}MB RAM (>= 650MB). Tạm hoãn preload để bảo vệ bộ nhớ.`);
+  if (rssMb >= 380) {
+    console.warn(`[RAM Guard] Tiến trình bot đang sử dụng ${rssMb.toFixed(0)}MB RAM (>= 380MB). Tạm hoãn preload để bảo vệ bộ nhớ.`);
     return false;
   }
   return true;

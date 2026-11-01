@@ -105,10 +105,23 @@ module.exports = function createApiRouter(client) {
     if (!forceFresh && cached && (now - cached.time < 2500)) {
       return cached.data;
     }
+    const rawPlaylists = (playlistHistoryManager.getPlaylists ? playlistHistoryManager.getPlaylists(guildId, 50) : []) || [];
+    const recentPlaylists = rawPlaylists.map(pl => ({
+      id: pl.id || pl.url,
+      url: pl.url,
+      title: pl.title || pl.name,
+      name: pl.name || pl.title,
+      trackCount: pl.trackCount || (Array.isArray(pl.tracks) ? pl.tracks.length : 0),
+      itemCount: pl.itemCount || pl.trackCount || (Array.isArray(pl.tracks) ? pl.tracks.length : 0),
+      thumbnail: pl.thumbnail,
+      addedBy: pl.addedBy,
+      addedByAvatar: pl.addedByAvatar,
+      addedAt: pl.addedAt
+    }));
     const data = {
       history: (historyManager.getRecent ? historyManager.getRecent(guildId, 50) : (historyManager.getHistory(guildId) || []).slice(0, 50)) || [],
       topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 16) : []) || [],
-      recentPlaylists: (playlistHistoryManager.getPlaylists ? playlistHistoryManager.getPlaylists(guildId, 50) : []) || []
+      recentPlaylists
     };
     guildStatsCache.set(guildId, { time: now, data });
     return data;
@@ -2014,13 +2027,13 @@ module.exports = function createApiRouter(client) {
       }
       const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl);
 
+      const callerQueue = req.user?.guildId && client.musicManager ? client.musicManager.get(req.user.guildId) : null;
       if (callerQueue && callerQueue.currentSong && !callerQueue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
         callerQueue.attachLateLyrics(callerQueue.currentSong, lyricsData);
       }
 
       let activeSyncedLyrics = lyricsData?.syncedLyrics || null;
       let activeAutoOffsetMs = lyricsData?.autoOffsetMs || 0;
-      const callerQueue = req.user?.guildId && client.musicManager ? client.musicManager.get(req.user.guildId) : null;
       const currentTrack = callerQueue?.currentSong;
       if (currentTrack && lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0) && (!targetUrl || targetUrl === currentTrack.url)) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;

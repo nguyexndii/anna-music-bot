@@ -12,8 +12,8 @@ const crypto = require('crypto');
 class AudioCacheManager {
   constructor() {
     this.cacheDir = path.join(__dirname, '../../data/audio-cache');
-    // Mặc định 8 GB (hoặc cấu hình qua biến môi trường AUDIO_CACHE_MAX_GB)
-    this.maxCacheBytes = (parseFloat(process.env.AUDIO_CACHE_MAX_GB) || 8) * 1024 * 1024 * 1024;
+    // Mặc định 2 GB (hoặc cấu hình qua biến môi trường AUDIO_CACHE_MAX_GB)
+    this.maxCacheBytes = (parseFloat(process.env.AUDIO_CACHE_MAX_GB) || 2) * 1024 * 1024 * 1024;
     // Không lưu cache các bài dài quá 15 phút (900 giây) để tránh ngốn đĩa
     this.maxTrackDurationSec = 900;
     // Bảng chỉ mục file trong RAM: cacheKey -> { filePath, size, lastAccessedAt }

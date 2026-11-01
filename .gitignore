@@ -39,6 +39,8 @@ logs/
 .impeccable/
 memory-bank/
 skills-lock.json
+graphify-out/
+repomix-output*
 .DS_Store
 Thumbs.db
 .vscode/
