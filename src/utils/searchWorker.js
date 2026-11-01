@@ -55,7 +55,7 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
   const isQueryAskingKaraoke = /\b(karaoke|beat|instrumental|nhac song|tone nam|tone nu|tong nam|tong nu)\b/.test(normQuery);
   const isQueryAskingShort = /\b(short|shorts|tiktok)\b/.test(normQuery);
   const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|list|nhac tre|nonstop|full|album)\b/.test(normQuery);
-  const isQueryAskingVariant = /\b(remix|cover|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
+  const isQueryAskingVariant = /\b(remix|cover|hat lai|hát lại|covered by|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
   const isQueryAskingTvOrStage = /\b(the masked singer|ca si mat na|anh trai say hi|anh trai vuot ngan chong gai|chi dep dap gio|rap viet|giao lo thoi gian|xuan ha thu dong|may lang thang|in the moonlight|la ca hat ca|forest studio|vie channel|htv2|vtv3|yeah1|fancam|live stage)\b/i.test(normQuery);
 
   const scored = [];
@@ -145,13 +145,15 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
     }
 
     // 7. Xử lý Chế độ 'official' vs 'all'
-    const isVariantVideo = /\b(remix|cover|live|lofi|sped up|speed up|slowed|mashup|vinahouse|dance ver|parody)\b/.test(normTitle);
+    const isCoverOrHatLai = /\b(cover|hat lai|covered by)\b/.test(normTitle);
+    const isVariantVideo = /\b(remix|cover|hat lai|live|lofi|sped up|speed up|slowed|mashup|vinahouse|dance ver|parody)\b/.test(normTitle);
     if (mode === 'official') {
       if (isOfficialChannel && (!isTvShowOrStage || isQueryAskingTvOrStage)) {
         score += 30;
       }
       if (!isQueryAskingVariant && isVariantVideo) {
-        score -= 45;
+        // Nếu là cover/hát lại mà user không hỏi cover -> trừ mạnh 90 điểm để bản official luôn xếp trên
+        score -= (isCoverOrHatLai ? 90 : 45);
       }
     }
 

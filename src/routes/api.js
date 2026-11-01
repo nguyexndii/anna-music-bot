@@ -1969,8 +1969,22 @@ module.exports = function createApiRouter(client) {
       if (lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0)) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;
         const realDurMs = currentTrack.durationMs || 0;
+        activeAutoOffsetMs = 0;
 
-        if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
+        const lastLineMs = Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length > 0
+          ? (lyricsData.syncedLyrics[lyricsData.syncedLyrics.length - 1].time || 0)
+          : 0;
+        const lyricDurSec = Number(lyricsData.duration) || Math.round(lastLineMs / 1000);
+        const rawSec = currentTrack.rawDurationSec || 0;
+        const realSec = currentTrack.realDurationSec || Math.round(realDurMs / 1000);
+
+        // Chỉ dịch lùi mốc thời gian nếu là phụ đề gốc của video YouTube (youtube_cc),
+        // HOẶC nếu bản lời bên ngoài có độ dài khớp với MV gốc chưa cắt (rawSec) hơn là bản nhạc đã cắt (realSec)
+        const shouldShiftTimestamps =
+          lyricsData.source === 'youtube_cc' ||
+          (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+
+        if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics
             .map(line => ({
               ...line,
@@ -1983,9 +1997,6 @@ module.exports = function createApiRouter(client) {
               time: Math.max(0, line.time),
               time_ms: Math.max(0, line.time_ms)
             }));
-          activeAutoOffsetMs = 0;
-        } else {
-          activeAutoOffsetMs = 0;
         }
       }
 
@@ -2039,7 +2050,20 @@ module.exports = function createApiRouter(client) {
       if (currentTrack && lyricsData && (currentTrack.trimStart > 0 || currentTrack.trimEnd > 0) && (!targetUrl || targetUrl === currentTrack.url)) {
         const trimStartMs = (currentTrack.trimStart || 0) * 1000;
         const realDurMs = currentTrack.durationMs || 0;
-        if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
+        activeAutoOffsetMs = 0;
+
+        const lastLineMs = Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length > 0
+          ? (lyricsData.syncedLyrics[lyricsData.syncedLyrics.length - 1].time || 0)
+          : 0;
+        const lyricDurSec = Number(lyricsData.duration) || Math.round(lastLineMs / 1000);
+        const rawSec = currentTrack.rawDurationSec || 0;
+        const realSec = currentTrack.realDurationSec || Math.round(realDurMs / 1000);
+
+        const shouldShiftTimestamps =
+          lyricsData.source === 'youtube_cc' ||
+          (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+
+        if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics
             .map(line => ({
               ...line,
@@ -2052,9 +2076,6 @@ module.exports = function createApiRouter(client) {
               time: Math.max(0, line.time),
               time_ms: Math.max(0, line.time_ms)
             }));
-          activeAutoOffsetMs = 0;
-        } else {
-          activeAutoOffsetMs = 0;
         }
       }
 

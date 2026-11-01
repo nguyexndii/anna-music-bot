@@ -2617,8 +2617,20 @@ class MusicQueue {
     if (song.trimStart > 0 || song.trimEnd > 0) {
       const trimStartMs = (song.trimStart || 0) * 1000;
       const realDurMs = song.durationMs || 0;
+      activeAutoOffsetMs = 0;
 
-      if (trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
+      const lastLineMs = Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length > 0
+        ? (lyricsData.syncedLyrics[lyricsData.syncedLyrics.length - 1].time || 0)
+        : 0;
+      const lyricDurSec = Number(lyricsData.duration) || Math.round(lastLineMs / 1000);
+      const rawSec = song.rawDurationSec || 0;
+      const realSec = song.realDurationSec || Math.round(realDurMs / 1000);
+
+      const shouldShiftTimestamps =
+        lyricsData.source === 'youtube_cc' ||
+        (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+
+      if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
         activeSyncedLyrics = lyricsData.syncedLyrics
           .map(line => ({
             ...line,
@@ -2631,9 +2643,6 @@ class MusicQueue {
             time: Math.max(0, line.time),
             time_ms: Math.max(0, line.time_ms)
           }));
-        activeAutoOffsetMs = 0;
-      } else {
-        activeAutoOffsetMs = 0;
       }
     }
 

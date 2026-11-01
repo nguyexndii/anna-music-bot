@@ -184,11 +184,15 @@ function setCachedStreamUrl(targetUrl, streamUrl) {
   streamUrlCache.set(targetUrl, { streamUrl, expiresAt });
 }
 
-// Circuit Breaker (Cầu chì tự ngắt YouTube khi lỗi 3 lần liên tiếp)
+// Circuit Breaker (Cầu chì tự ngắt YouTube khi lỗi 3 bài liên tiếp)
 let ytStreamFailures = 0;
 let skipYouTubeStreamUntil = 0;
 
-function isYouTubeCircuitOpen() {
+function isYouTubeCircuitOpen(options = {}) {
+  // Nếu là yêu cầu trực tiếp từ người dùng (/play, web playNow), cho phép thử phát YouTube ngay để kiểm tra phục hồi (Half-Open)
+  if (options?.priority === 'high') {
+    return false;
+  }
   return Date.now() < skipYouTubeStreamUntil;
 }
 
@@ -196,8 +200,8 @@ function recordYouTubeFailure(errorMsg) {
   ytStreamFailures++;
   console.warn(`[YouTube Circuit Breaker] Ghi nhận lỗi phát YouTube (${ytStreamFailures}/3): ${errorMsg}`);
   if (ytStreamFailures >= 3) {
-    skipYouTubeStreamUntil = Date.now() + 10 * 60 * 1000; // Ngắt 10 phút
-    console.warn('[YouTube Circuit Breaker] Đã lỗi 3 lần liên tiếp! Kích hoạt cầu chì tạm ngắt YouTube 10 phút, chuyển thẳng sang SoundCloud.');
+    skipYouTubeStreamUntil = Date.now() + 3 * 60 * 1000; // Ngắt 3 phút (thay vì 10 phút để tránh kẹt SoundCloud quá lâu)
+    console.warn('[YouTube Circuit Breaker] Đã lỗi 3 bài liên tiếp! Kích hoạt cầu chì tạm ngắt YouTube 3 phút, chuyển sang SoundCloud.');
     try {
       const { notifyCookieExpired, checkYouTubeCookieHealth } = require('./statusNotifier');
       const client = global._discordClient;
@@ -1138,6 +1142,7 @@ function analyzeTrackOriginAndMeta(song) {
   const region = detectTrackRegion(`${realTitle} ${realArtist}`, realArtist);
   const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
   const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
+  const isCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(rawTitle);
 
   return {
     realTitle: realTitle || rawTitle,
@@ -1145,6 +1150,7 @@ function analyzeTrackOriginAndMeta(song) {
     region,
     isRemix,
     isAcoustic,
+    isCover,
     rawTitle,
     rawArtist
   };
@@ -1182,13 +1188,19 @@ function isCandidateMatchingRegion(candidate, targetRegion, seedMeta = null) {
     return false;
   }
 
-  // 3. LỌC NỘI DUNG RÁC (Karaoke, Beat, Reaction, Tập phim, Parody, Live Stage)
+  // 3. LỌC NỘI DUNG RÁC (Karaoke, Beat, Reaction, Tập phim, Parody, Live Stage) & BÀI COVER
   const junkRegex = /\b(karaoke|beat chuẩn|beat karaoke|reaction|parody|tập\s*\d+|phim ngắn|hậu trường|behind the scenes|tiktok compilation)\b/i;
   if (junkRegex.test(candTitle)) {
     return false;
   }
   if (isLiveStageVideo(candTitle)) {
     return false;
+  }
+  // Nếu bài gốc KHÔNG PHẢI bài cover -> CHẶN TUYỆT ĐỐI các bài cover/hát lại để tránh Autoplay tự động nhảy sang bản cover
+  if (seedMeta && !seedMeta.isCover) {
+    if (/\b(cover|hát lại|hat lai|covered\s*by|cover\s*version)\b/i.test(candTitle)) {
+      return false;
+    }
   }
 
   // 4. LỌC VIBE & PHONG CÁCH:
@@ -1642,9 +1654,9 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         killProcess(ffmpegProcess);
-        reject(new Error('Quá thời gian chờ âm thanh từ Direct Stream (Timeout 25s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ Direct Stream (Timeout 12s)'));
       }
-    }, 25000);
+    }, 12000);
 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;
@@ -1933,16 +1945,16 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
-    // Timeout bảo vệ: Nếu sau 35 giây không có dữ liệu âm thanh nào, tự hủy để failover
+    // Timeout bảo vệ: Nếu sau 14 giây không có dữ liệu âm thanh nào, tự hủy để failover
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
         cacheOptions?.onAbort?.();
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 35s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 14s)'));
       }
-    }, 35000);
+    }, 14000);
 
     // Khi nhận được gói âm thanh đầu tiên: Xác nhận luồng chạy tốt 100%!
     ffmpegProcess.stdout.once('data', () => {
@@ -2050,25 +2062,34 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
         });
       }
 
+      const userWantsCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(trackTitle || '');
       const expectedSec = (typeof trackItem === 'object' && trackItem !== null)
         ? (trackItem.spotifyDurationSec || (trackItem.durationMs ? Math.round(trackItem.durationMs / 1000) : (trackItem.duration ? parseDurationToSec(trackItem.duration) : 0)))
         : 0;
 
-      if (!userWantsRemix) {
-        candidateTracks.sort((a, b) => {
-          const aKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(a.title || '');
-          const bKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(b.title || '');
-          if (aKaraoke && !bKaraoke) return 1;
-          if (!aKaraoke && bKaraoke) return -1;
+      candidateTracks.sort((a, b) => {
+        // Ưu tiên 1: Đẩy bài Karaoke/Beat xuống sau nếu user không hỏi karaoke
+        const aKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(a.title || '');
+        const bKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(b.title || '');
+        if (aKaraoke && !bKaraoke) return 1;
+        if (!aKaraoke && bKaraoke) return -1;
 
-          if (expectedSec > 45 && a.duration && b.duration) {
-            const diffA = Math.abs(a.duration - expectedSec);
-            const diffB = Math.abs(b.duration - expectedSec);
-            return diffA - diffB;
-          }
-          return 0;
-        });
-      }
+        // Ưu tiên 2: Đẩy bài Cover/Hát lại xuống sau nếu bài gốc không phải cover
+        if (!userWantsCover) {
+          const aCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(a.title || '');
+          const bCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(b.title || '');
+          if (aCover && !bCover) return 1;
+          if (!aCover && bCover) return -1;
+        }
+
+        // Ưu tiên 3: Khớp thời lượng gần nhất với bài gốc
+        if (expectedSec > 45 && a.duration && b.duration) {
+          const diffA = Math.abs(a.duration - expectedSec);
+          const diffB = Math.abs(b.duration - expectedSec);
+          return diffA - diffB;
+        }
+        return 0;
+      });
 
       for (const candidate of candidateTracks.slice(0, 6)) {
         try {
@@ -2192,7 +2213,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     }
   }
 
-  if (isYouTubeCircuitOpen()) {
+  if (isYouTubeCircuitOpen(options)) {
     cacheOptions?.onAbort?.();
     console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000)}p), chuyển thẳng sang SoundCloud.`);
     return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
@@ -2207,7 +2228,6 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     cacheOptions?.onAbort?.();
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
-    recordYouTubeFailure(errMsg);
 
     // Xử lý lỗi Cookie YouTube / Bot Detection
     const isCookieBotError = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookie|bot verification|403|429/i.test(errMsg);
@@ -2242,6 +2262,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             : '';
           const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
           const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(trackTitle || '');
+          const userWantsCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(trackTitle || '');
           const songSegments = (rawTitle || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').split(/\s*[-–—|:]\s*/).filter(Boolean);
           const songTitlePart = songSegments.length >= 2 ? songSegments.slice(1).join(' ') : (rawTitle || '');
           const coreTitleWords = songTitlePart
@@ -2257,6 +2278,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             if (targetId && v.videoId === targetId) return false;
             if (v.seconds && (v.seconds < 45 || v.seconds > 600)) return false;
             if (!userWantsLive && isLiveStageVideo(v.title)) return false;
+            if (!userWantsCover && /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(v.title || '')) return false;
             if (!userWantsRemix) {
               const t = (v.title || '').toLowerCase();
               if (/\b(remix|mashup|vinahouse|bass\s*boosted|parody|karaoke|beat|slowed|speed\s*up)\b/i.test(t)) return false;
@@ -2277,7 +2299,15 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             return true;
           });
 
-          for (const altVideo of candidateVideos.slice(0, 4)) {
+          // Ưu tiên các bản Audio / Lyrics / Topic / Visualizer lên đầu (nhẹ và ít kẹt luồng hơn MV 4K)
+          const isAudioLyric = (video) => /\b(official\s*audio|audio|lyrics?|lyric\s*video|topic|visualizer)\b/i.test(`${video.title || ''} ${video.author?.name || ''}`);
+          candidateVideos.sort((a, b) => {
+            const aMatch = isAudioLyric(a) ? 1 : 0;
+            const bMatch = isAudioLyric(b) ? 1 : 0;
+            return bMatch - aMatch;
+          });
+
+          for (const altVideo of candidateVideos.slice(0, 2)) {
             try {
               console.log(`[YouTube Alternate] Thử phát bản thay thế: "${altVideo.title}" (${altVideo.url})`);
               const resource = await createSingleStream(altVideo.url, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, null, options);
@@ -2288,7 +2318,6 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
               return resource;
             } catch (altErr) {
               console.warn(`[YouTube Alternate Failed]: "${altVideo.title}" - ${altErr.message.split('\n')[0]}`);
-              recordYouTubeFailure(altErr.message);
             }
           }
         }
@@ -2296,6 +2325,9 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
         console.warn('[YouTube Alternate Error]:', altErr.message);
       }
     }
+
+    // Chỉ khi TẤT CẢ các nhánh thử YouTube (Chính + No Cookie + Alternate) đều thất bại thì mới ghi nhận 1 lần lỗi bài hát cho Circuit Breaker
+    recordYouTubeFailure(errMsg);
 
     // TẦNG 2: Failover sang SoundCloud
     return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
