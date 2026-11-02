@@ -1959,16 +1959,16 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
-    // Timeout bảo vệ: Nếu sau 14 giây không có dữ liệu âm thanh nào, tự hủy để failover
+    // Timeout bảo vệ: Cần 36 giây vì trên VPS 1 core CPU, yt-dlp + deno mất khoảng 18-22 giây để giải mã JS challenge của YouTube
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
         cacheOptions?.onAbort?.();
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 14s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 36s)'));
       }
-    }, 14000);
+    }, 36000);
 
     // Khi nhận được gói âm thanh đầu tiên: Xác nhận luồng chạy tốt 100%!
     ffmpegProcess.stdout.once('data', () => {
