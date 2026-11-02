@@ -57,6 +57,20 @@ function getCookiesFile() {
           if (sample.includes('NETSCAPE') || sample.includes('.youtube.com') || sample.includes('# HTTP Cookie File')) {
             return c;
           }
+        } else if (stat.isFile() && stat.size <= 100) {
+          // Cơ chế Auto-Heal: Tự động khôi phục nếu file cookie bị tiến trình truncate về 0 byte
+          const bakFile = c + '.bak';
+          if (fs.existsSync(bakFile) && fs.statSync(bakFile).size > 100) {
+            console.log(`[Cookie Auto-Heal] Phát hiện file cookie bị rỗng, tự động khôi phục từ: ${bakFile}`);
+            try {
+              fs.chmodSync(c, 0o666);
+              fs.copyFileSync(bakFile, c);
+              fs.chmodSync(c, 0o444);
+              return c;
+            } catch (healErr) {
+              return bakFile;
+            }
+          }
         }
       }
     } catch (e) {}

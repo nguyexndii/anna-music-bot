@@ -132,9 +132,36 @@ async function checkYouTubeCookieHealth(client, adminId) {
   } catch (e) {}
 
   const cookiePath = process.env.YTDLP_COOKIES_FILE || '/root/anna-music-bot/youtube.cookies';
+  const bakPath = cookiePath + '.bak';
+
   if (!fs.existsSync(cookiePath)) {
-    console.warn(`[Cookie Checker] Không tìm thấy file cookie tại: ${cookiePath}`);
-    await notifyCookieExpired(client, adminId, `Không tìm thấy file cookie tại đường dẫn: ${cookiePath}`);
+    if (fs.existsSync(bakPath) && fs.statSync(bakPath).size > 100) {
+      console.log(`[Cookie Checker Auto-Heal] Khôi phục file cookie bị thiếu từ: ${bakPath}`);
+      try {
+        fs.copyFileSync(bakPath, cookiePath);
+        fs.chmodSync(cookiePath, 0o444);
+      } catch (e) {}
+    } else {
+      console.warn(`[Cookie Checker] Không tìm thấy file cookie tại: ${cookiePath}`);
+      await notifyCookieExpired(client, adminId, `Không tìm thấy file cookie tại đường dẫn: ${cookiePath}`);
+      return false;
+    }
+  }
+
+  try {
+    const stat = fs.statSync(cookiePath);
+    if (!stat.isFile() || stat.size < 100) {
+      if (fs.existsSync(bakPath) && fs.statSync(bakPath).size > 100) {
+        console.log(`[Cookie Checker Auto-Heal] Khôi phục file cookie bị 0 byte từ: ${bakPath}`);
+        fs.chmodSync(cookiePath, 0o666);
+        fs.copyFileSync(bakPath, cookiePath);
+        fs.chmodSync(cookiePath, 0o444);
+      } else {
+        console.warn(`[Cookie Checker] File cookie bị rỗng hoặc không đúng định dạng (kích thước: ${stat.size} bytes)`);
+        return false;
+      }
+    }
+  } catch (e) {
     return false;
   }
 
@@ -145,7 +172,6 @@ async function checkYouTubeCookieHealth(client, adminId) {
       flatPlaylist: true,
       playlistEnd: 2,
       cookies: cookiePath,
-      extractorArgs: 'youtube:player_client=android,mweb',
       noWarnings: true,
       '--': [testUrl]
     });
@@ -160,9 +186,9 @@ async function checkYouTubeCookieHealth(client, adminId) {
     const errMsg = err.message || String(err);
     console.warn('[Cookie Checker Warning]: Cookie YouTube kiểm tra thất bại:', errMsg);
 
-    // Kiểm tra các dấu hiệu cookie bị chết / hết hạn
-    const isCookieIssue = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookies|expired|private video|429/i.test(errMsg);
-    if (isCookieIssue) {
+    // Kiểm tra chính xác các dấu hiệu cookie bị chết / hết hạn thực sự (tránh false-positive từ tên cờ --cookies)
+    const isActualCookieIssue = /(?:sign in to confirm|confirm you(?:'|re|\s*are)\s*not\s*a\s*bot|this content isn(?:'|t)\s*available|bot verification|cookie.*(?:expired|invalid)|(?:expired|invalid).*cookie|login\s*required|http error 429)/i.test(errMsg);
+    if (isActualCookieIssue) {
       await notifyCookieExpired(client, adminId, errMsg);
     }
     return false;
