@@ -82,7 +82,7 @@ class MusicQueue {
     this.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play,
-        maxMissedFrames: 250
+        maxMissedFrames: 50
       }
     });
 
@@ -1357,10 +1357,6 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this.schedulePrefetchLyrics(1000);
-    if (!this.hasSyncedLyrics) {
-      this.refreshNowPlayingCard();
-    }
     this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
@@ -1463,10 +1459,6 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this.schedulePrefetchLyrics(2000);
-    if (!this.hasSyncedLyrics) {
-      this.refreshNowPlayingCard();
-    }
     this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
@@ -2580,28 +2572,20 @@ class MusicQueue {
   _prefetchQueueLyrics() {
     if (this.isDestroyed || this.isStopped) return;
     try {
+      const { isCpuOverloaded } = require('../utils/systemMonitor');
+      if (isCpuOverloaded(0.8)) return;
+
       const { prefetchLyrics } = require('../utils/lyricsHelper');
       const settingsManager = require('./SettingsManager');
       const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
       const layers = guildSettings?.lyricsLayers;
 
-      const candidates = [];
-      if (this.currentSong && !this.isCurrentSongLofi()) {
-        candidates.push(this.currentSong);
-      }
       const userQueue = (this.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto (24/7)');
-      candidates.push(...userQueue.slice(0, 3));
-      if (this.prefetchedSong && !candidates.some(c => c.url === this.prefetchedSong.url)) {
-        candidates.push(this.prefetchedSong);
-      }
+      const nextTrack = userQueue[0] || this.prefetchedSong;
+      if (!nextTrack || nextTrack.is247) return;
 
-      candidates.forEach((track, idx) => {
-        setTimeout(() => {
-          if (this.isDestroyed || this.isStopped) return;
-          const durMs = track.durationMs || (track.duration ? parseDurationToMs(track.duration) : 0);
-          prefetchLyrics(track.title, track.artist, durMs, track.url, layers);
-        }, idx * 250);
-      });
+      const durMs = nextTrack.durationMs || (nextTrack.duration ? parseDurationToMs(nextTrack.duration) : 0);
+      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, layers);
     } catch (e) {}
   }
 

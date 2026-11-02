@@ -8,7 +8,8 @@ function signTunnelUrl(url, secret) {
 const os = require('os');
 try {
   if (process.platform === 'linux') {
-    os.setPriority(0, -5);
+    // Đặt độ ưu tiên Node.js ở mức bình thường (0) để nhường quyền ưu tiên CPU cao (-5) cho FFmpeg giải mã âm thanh
+    os.setPriority(0, 0);
   }
 } catch (e) {}
 

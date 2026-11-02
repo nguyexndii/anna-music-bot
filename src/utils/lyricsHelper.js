@@ -711,7 +711,16 @@ function isVietnameseTrack(context = {}) {
 const ytInfoCache = new Map();
 const inFlightYtInfo = new Map();
 
+let cachedCookieHeader = null;
+let cachedCookieHeaderTime = 0;
+const COOKIE_HEADER_TTL = 10 * 60 * 1000; // 10 phút
+
 function getYouTubeCookieHeader() {
+  const now = Date.now();
+  if (cachedCookieHeader !== null && (now - cachedCookieHeaderTime < COOKIE_HEADER_TTL)) {
+    return cachedCookieHeader;
+  }
+
   const candidates = [
     process.env.YTDLP_COOKIES_FILE,
     path.resolve(__dirname, '../../youtube.cookies'),
@@ -719,6 +728,7 @@ function getYouTubeCookieHeader() {
     '/root/anna-music-bot/youtube.cookies'
   ].filter(Boolean);
 
+  let result = null;
   for (const file of candidates) {
     try {
       if (fs.existsSync(file)) {
@@ -732,12 +742,16 @@ function getYouTubeCookieHeader() {
           }
         }
         if (pairs.length > 0) {
-          return `CONSENT=YES+cb; PREF=hl=vi&gl=VN; ${pairs.slice(0, 40).join('; ')}`;
+          result = `CONSENT=YES+cb; PREF=hl=vi&gl=VN; ${pairs.slice(0, 40).join('; ')}`;
+          break;
         }
       }
     } catch (e) {}
   }
-  return 'CONSENT=YES+cb; PREF=hl=vi&gl=VN';
+
+  cachedCookieHeader = result || 'CONSENT=YES+cb; PREF=hl=vi&gl=VN';
+  cachedCookieHeaderTime = now;
+  return cachedCookieHeader;
 }
 
 /**
@@ -864,42 +878,9 @@ async function _executeFetchYtdlpInfo(url, norm) {
   const videoId = extractVideoId(url);
   if (!videoId) return null;
 
-  let bestPartialInfo = null;
   const cookieHeader = getYouTubeCookieHeader();
 
-  // ── PHƯƠNG PHÁP 1: Tải trực tiếp Watch Page HTML & bóc ytInitialPlayerResponse (~150ms, không bị UNPLAYABLE) ──
-  try {
-    const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=vi&gl=VN&bpctr=9999999999&has_verified=1`;
-    const res = await fetch(watchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Cookie': cookieHeader
-      },
-      signal: AbortSignal.timeout(3500)
-    });
-
-    if (res.ok) {
-      const html = await res.text();
-      const playerResponse =
-        extractJsonAssignedToVar(html, 'var ytInitialPlayerResponse =') ||
-        extractJsonAssignedToVar(html, 'ytInitialPlayerResponse =') ||
-        extractJsonAssignedToVar(html, 'window["ytInitialPlayerResponse"] =');
-
-      const parsed = buildParsedPlayerInfo(playerResponse);
-      if (parsed) {
-        if (parsed.hasCaptions) {
-          setCachedYtdlpInfo(url, parsed);
-          return parsed;
-        }
-        if (parsed.title || parsed.duration > 0) {
-          bestPartialInfo = parsed;
-        }
-      }
-    }
-  } catch (watchErr) {}
-
-  // ── PHƯƠNG PHÁP 2: InnerTube Multi-Client (IOS / WEB_REMIX / TVHTML5_SIMPLY_EMBEDDED_PLAYER) ──
+  // ── PHƯƠNG PHÁP 1: InnerTube JSON API (IOS / WEB_REMIX) - Chỉ tải ~15KB JSON, không làm đơ Event Loop ──
   const innerTubeClients = [
     {
       name: 'IOS',
@@ -911,12 +892,6 @@ async function _executeFetchYtdlpInfo(url, norm) {
       name: 'WEB_REMIX',
       version: '1.20241118.01.00',
       ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      extra: {}
-    },
-    {
-      name: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      version: '2.0',
-      ua: 'Mozilla/5.0 (PlayStation; PlayStation 5/2.26) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0 Safari/605.1.15',
       extra: {}
     }
   ];
@@ -951,46 +926,43 @@ async function _executeFetchYtdlpInfo(url, norm) {
       if (res.ok) {
         const data = await res.json();
         const parsed = buildParsedPlayerInfo(data);
-        if (parsed) {
-          if (parsed.hasCaptions) {
-            if (!parsed.description && bestPartialInfo?.description) {
-              parsed.description = bestPartialInfo.description;
-            }
-            setCachedYtdlpInfo(url, parsed);
-            return parsed;
-          }
-          if (!bestPartialInfo && (parsed.title || parsed.duration > 0)) {
-            bestPartialInfo = parsed;
-          }
+        const hasValidDetails = Boolean(data?.videoDetails?.videoId || parsed?.title || (parsed?.duration > 0));
+        if (parsed && hasValidDetails) {
+          // Khi nhận được response hợp lệ từ InnerTube: dù có phụ đề hay không (parsed.hasCaptions = false),
+          // video không có phụ đề -> lưu cache và return ngay lập tức! Tuyệt đối không chạy tiếp client khác để tránh nghẽn CPU!
+          setCachedYtdlpInfo(url, parsed);
+          return parsed;
         }
       }
     } catch (clientErr) {}
   }
 
-  // ── PHƯƠNG PHÁP 3: @distube/ytdl-core (Chạy trực tiếp trong tiến trình Node.js, không tốn CPU spawn) ──
+  // ── PHƯƠNG PHÁP 2: Tải Watch Page HTML & bóc ytInitialPlayerResponse (chỉ chạy khi InnerTube hoàn toàn không lấy được gì) ──
   try {
-    const ytdl = require('@distube/ytdl-core');
-    const info = await Promise.race([
-      ytdl.getBasicInfo(`https://www.youtube.com/watch?v=${videoId}`),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('ytdl timeout')), 3000))
-    ]);
-    const pr = info?.player_response;
-    const parsed = buildParsedPlayerInfo(pr);
-    if (parsed) {
-      if (parsed.hasCaptions) {
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=vi&gl=VN&bpctr=9999999999&has_verified=1`;
+    const res = await fetch(watchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cookie': cookieHeader
+      },
+      signal: AbortSignal.timeout(3500)
+    });
+
+    if (res.ok) {
+      const html = await res.text();
+      const playerResponse =
+        extractJsonAssignedToVar(html, 'var ytInitialPlayerResponse =') ||
+        extractJsonAssignedToVar(html, 'ytInitialPlayerResponse =') ||
+        extractJsonAssignedToVar(html, 'window["ytInitialPlayerResponse"] =');
+
+      const parsed = buildParsedPlayerInfo(playerResponse);
+      if (parsed) {
         setCachedYtdlpInfo(url, parsed);
         return parsed;
       }
-      if (!bestPartialInfo && (parsed.title || parsed.duration > 0)) {
-        bestPartialInfo = parsed;
-      }
     }
-  } catch (ytdlErr) {}
-
-  if (bestPartialInfo) {
-    setCachedYtdlpInfo(url, bestPartialInfo);
-    return bestPartialInfo;
-  }
+  } catch (watchErr) {}
 
   setCachedYtdlpInfo(url, { _empty: true });
   return null;
@@ -1354,53 +1326,43 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
   const ytdlp = getYtdlpExec();
   if (!ytdlp) return null;
 
-  const runDump = async (cookiesFile = null) => {
-    const infoOpts = {
-      dumpSingleJson: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      skipDownload: true
-    };
-    if (cookiesFile) {
-      infoOpts.cookies = cookiesFile;
+  try {
+    const { isCpuOverloaded } = require('./systemMonitor');
+    if (typeof isCpuOverloaded === 'function' && isCpuOverloaded(0.7)) {
+      return null;
     }
-    return await Promise.race([
-      ytdlp(url, infoOpts),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle dump timeout')), 7000))
-    ]);
+  } catch (e) {}
+
+  const { extractionSemaphore } = require('./musicExtractor');
+
+  const runDump = async () => {
+    try {
+      const infoOpts = {
+        dumpSingleJson: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        skipDownload: true
+      };
+      const info = await Promise.race([
+        ytdlp(url, infoOpts),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle dump timeout')), 7000))
+      ]).catch(() => null);
+
+      if (!info) return null;
+      const videoId = extractVideoId(url);
+      if (videoId && (info.subtitles || info.automatic_captions)) {
+        cacheYoutubeSubtitlesMeta(videoId, info.subtitles, info.automatic_captions);
+      }
+      return info;
+    } catch (err) {
+      return null;
+    }
   };
 
-  try {
-    // 1. Thử dump không cookies trước (hoàn toàn an toàn, nhanh, không bị chặn bởi cookies YouTube hết hạn)
-    let info = await runDump(null).catch(() => null);
-
-    // 2. Nếu không tìm thấy phụ đề và có file cookies, thử lại với cookies
-    if (!info || (!info.subtitles && !info.automatic_captions)) {
-      const candidates = [
-        process.env.YTDLP_COOKIES_FILE,
-        path.resolve(__dirname, '../../youtube.cookies'),
-        '/root/anna-music-bot/youtube.cookies'
-      ].filter(Boolean);
-      for (const c of candidates) {
-        if (fs.existsSync(c)) {
-          const infoWithCookie = await runDump(c).catch(() => null);
-          if (infoWithCookie && (infoWithCookie.subtitles || infoWithCookie.automatic_captions)) {
-            info = infoWithCookie;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!info) return null;
-    const videoId = extractVideoId(url);
-    if (videoId && (info.subtitles || info.automatic_captions)) {
-      cacheYoutubeSubtitlesMeta(videoId, info.subtitles, info.automatic_captions);
-    }
-    return info;
-  } catch (err) {
-    return null;
+  if (extractionSemaphore && typeof extractionSemaphore.run === 'function') {
+    return await extractionSemaphore.run(runDump, 'low');
   }
+  return await runDump();
 }
 
 /**
@@ -1483,50 +1445,52 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       }
     }
 
-    // BƯỚC 1.5: Nếu bước 1 không ra câu nào (do URL timedtext bị rỗng 0 byte từ cờ exp=xpe):
-    // Fallback gọi yt-dlp dump-single-json để lấy danh sách URL timedtext chuẩn từ phụ đề chính thức (subtitles)
-    try {
-      const ytdlpInfo = await fetchOfficialSubtitlesViaYtdlp(url);
-      if (ytdlpInfo && ytdlpInfo.subtitles) {
-        const ytdlpOfficial = getRankedSubtitleTracks(ytdlpInfo.subtitles || {}, context);
-        for (const candidateTrackList of ytdlpOfficial) {
-          const subTarget = candidateTrackList.find(s => s.ext === 'json3') || candidateTrackList[0];
-          if (!subTarget) continue;
+    // BƯỚC 1.5: Chỉ khi có track phụ đề chính thức (rankedOfficialTracks.length > 0) mà bước 1 tải JSON3/SRV3 thất bại
+    // thì mới gọi yt-dlp dump-single-json lấy URL timedtext chuẩn. Tuyệt đối không gọi nếu rankedOfficialTracks.length === 0!
+    if (rankedOfficialTracks.length > 0) {
+      try {
+        const ytdlpInfo = await fetchOfficialSubtitlesViaYtdlp(url);
+        if (ytdlpInfo && ytdlpInfo.subtitles) {
+          const ytdlpOfficial = getRankedSubtitleTracks(ytdlpInfo.subtitles || {}, context);
+          for (const candidateTrackList of ytdlpOfficial) {
+            const subTarget = candidateTrackList.find(s => s.ext === 'json3') || candidateTrackList[0];
+            if (!subTarget) continue;
 
-          const events = await downloadAndParseCaptionEvents(subTarget);
-          if (!events || events.length === 0) continue;
+            const events = await downloadAndParseCaptionEvents(subTarget);
+            if (!events || events.length === 0) continue;
 
-          const { syncedLyrics, plainLines } = convertEventsToSyncedLyrics(events);
-          if (syncedLyrics.length >= 5) {
-            if (isVN) {
-              const sampleText = plainLines.slice(0, 20).join(' ');
-              if (!VIETNAMESE_REGEX.test(sampleText)) {
-                continue;
+            const { syncedLyrics, plainLines } = convertEventsToSyncedLyrics(events);
+            if (syncedLyrics.length >= 5) {
+              if (isVN) {
+                const sampleText = plainLines.slice(0, 20).join(' ');
+                if (!VIETNAMESE_REGEX.test(sampleText)) {
+                  continue;
+                }
+              } else if (!isJP && !isKR && !isCN) {
+                const sampleText = plainLines.slice(0, 20).join(' ');
+                if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+                  continue;
+                }
               }
-            } else if (!isJP && !isKR && !isCN) {
-              const sampleText = plainLines.slice(0, 20).join(' ');
-              if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
-                continue;
-              }
+
+              console.log(`[Lyrics CC yt-dlp] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chuẩn từ yt-dlp: ${ytdlpInfo.title || url}`);
+              return {
+                title: ytdlpInfo.title || rawTitle || 'YouTube Track',
+                artist: ytdlpInfo.uploader || ytdlpInfo.channel || artist || '',
+                lyrics: plainLines.join('\n'),
+                syncedLyrics,
+                duration: ytdlpInfo.duration || info?.duration,
+                autoOffsetMs: 0,
+                trackKey,
+                userSavedOffsetMs: userSavedOffsetMs || 0,
+                source: 'youtube_cc',
+                isOfficialCc: true
+              };
             }
-
-            console.log(`[Lyrics CC yt-dlp] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chuẩn từ yt-dlp: ${ytdlpInfo.title || url}`);
-            return {
-              title: ytdlpInfo.title || rawTitle || 'YouTube Track',
-              artist: ytdlpInfo.uploader || ytdlpInfo.channel || artist || '',
-              lyrics: plainLines.join('\n'),
-              syncedLyrics,
-              duration: ytdlpInfo.duration || info?.duration,
-              autoOffsetMs: 0,
-              trackKey,
-              userSavedOffsetMs: userSavedOffsetMs || 0,
-              source: 'youtube_cc',
-              isOfficialCc: true
-            };
           }
         }
-      }
-    } catch (ytdlpFallbackErr) {}
+      } catch (ytdlpFallbackErr) {}
+    }
   } catch (e) {}
   return null;
 }

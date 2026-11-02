@@ -515,12 +515,12 @@ async function enrichSpotifyTracksWithThumbnails(tracks, defaultCover) {
     }));
   };
 
-  // 2. Tải ngay 15 bài đầu tiên (~300-500ms) để phản hồi API siêu nhanh cho người dùng
-  const firstBatch = tracks.slice(0, 15);
+  // 2. Tải trước 5 bài đầu tiên (~100-200ms) để phản hồi API siêu nhanh mà không nghẽn Event Loop
+  const firstBatch = tracks.slice(0, 5);
   await enrichBatch(firstBatch);
 
   // 3. Tải tiếp các bài còn lại ở background để không làm nghẽn API (mỗi đợt 25 bài)
-  const remaining = tracks.slice(15);
+  const remaining = tracks.slice(5);
   if (remaining.length > 0) {
     (async () => {
       const batchSize = 25;
@@ -710,8 +710,8 @@ async function searchTrack(query, targetDurationSec = 0) {
             };
           }).filter(t => t.title && t.title.trim() !== '');
 
-          // Tải song song thumbnail từng bài hát từ Spotify oEmbed (tối đa 25 bài/đợt, cực nhanh ~1-2s)
-          await enrichSpotifyTracksWithThumbnails(limited, defaultCover);
+          // Tải song song thumbnail từng bài hát từ Spotify oEmbed ở nền để phản hồi playlist ngay lập tức
+          enrichSpotifyTracksWithThumbnails(limited, defaultCover).catch(() => {});
           return limited;
         }
       } catch (spErr) {
@@ -907,7 +907,7 @@ function extractSoundCloudTitleFromUrl(url) {
 
     // 5. Xử lý đường dẫn Direct HTTP/HTTPS (File audio hoặc Livestream)
     if (query.startsWith('http://') || query.startsWith('https://')) {
-      // 5.1 Xử lý Single YouTube video bằng oEmbed / yts (Tránh spawn yt-dlp ngốn 100% CPU trên VPS 1 core)
+      // 5.1 Xử lý Single YouTube video bằng oEmbed + InnerTube siêu nhẹ (< 1ms CPU, không block Main Thread)
       const ytMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
       if (ytMatch && ytMatch[1] && !query.includes('list=')) {
         const videoId = ytMatch[1];
@@ -915,36 +915,91 @@ function extractSoundCloudTitleFromUrl(url) {
         const defaultThumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
         try {
-          const oEmbedPromise = fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null);
+          // Bước 1: Kiểm tra cache trong searchService nếu đã có metadata
+          let cachedMeta = null;
+          try {
+            const { getCachedResults } = require('./searchService');
+            const cachedList = getCachedResults(videoUrl) || getCachedResults(videoId);
+            if (Array.isArray(cachedList) && cachedList.length > 0 && cachedList[0].url) {
+              cachedMeta = cachedList[0];
+            }
+          } catch (e) {}
 
-          const ytsPromise = Promise.race([
-            yts({ videoId }),
-            new Promise(resolve => setTimeout(() => resolve(null), 2500))
-          ]).catch(() => null);
+          if (cachedMeta) {
+            return [{
+              title: cachedMeta.title,
+              url: videoUrl,
+              duration: cachedMeta.duration || '3:30',
+              thumbnail: cachedMeta.thumbnail || defaultThumb,
+              artist: cachedMeta.artist || 'YouTube',
+              isLive: Boolean(cachedMeta.isLive)
+            }];
+          }
 
-          const [oembedData, ytsData] = await Promise.all([oEmbedPromise, ytsPromise]);
-          const rawTitle = ytsData?.title || oembedData?.title || '';
-          const rawArtist = oembedData?.author_name || ytsData?.author?.name || 'YouTube';
+          // Bước 2: Gọi đồng thời oEmbed và InnerTube Player API (Client IOS siêu nhẹ ~15KB JSON, không parse DOM HTML)
+          const oEmbedPromise = fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+            signal: AbortSignal.timeout(2000)
+          }).then(res => res.ok ? res.json() : null).catch(() => null);
+
+          const innerTubePromise = fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)'
+            },
+            body: JSON.stringify({
+              videoId,
+              context: {
+                client: {
+                  clientName: 'IOS',
+                  clientVersion: '19.45.4',
+                  hl: 'vi',
+                  gl: 'VN'
+                }
+              }
+            }),
+            signal: AbortSignal.timeout(2000)
+          }).then(res => res.ok ? res.json() : null).catch(() => null);
+
+          const [oembedData, innerData] = await Promise.all([oEmbedPromise, innerTubePromise]);
+          const innerDetails = innerData?.videoDetails;
+
+          const rawTitle = innerDetails?.title || oembedData?.title || '';
+          const rawArtist = oembedData?.author_name || innerDetails?.author || 'YouTube';
           const cleanTitle = String(rawTitle).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
           const cleanArtist = String(rawArtist).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
 
-          const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (videoId ? `Bài hát không tên (${videoId})` : 'Bài hát không tên'));
+          const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : `Bài hát YouTube (${videoId})`);
           const safeArtist = cleanArtist || 'YouTube';
 
-          if (rawTitle || safeTitle) {
-            return [{
-              title: safeTitle,
-              url: videoUrl,
-              duration: ytsData?.timestamp || (ytsData?.seconds ? `${Math.floor(ytsData.seconds / 60)}:${String(ytsData.seconds % 60).padStart(2, '0')}` : '3:30'),
-              thumbnail: defaultThumb,
-              artist: safeArtist,
-              isLive: Boolean(ytsData?.live)
-            }];
+          let parsedDuration = '3:30';
+          if (innerDetails?.lengthSeconds) {
+            const sec = parseInt(innerDetails.lengthSeconds, 10);
+            if (!isNaN(sec) && sec > 0) {
+              parsedDuration = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+            }
           }
+
+          // Bước 3: Luôn trả về kết quả ngay lập tức cho YouTube Watch URL đơn lẻ, TUYỆT ĐỐI không rơi xuống fallback yt-dlp nặng nề
+          return [{
+            title: safeTitle,
+            url: videoUrl,
+            duration: parsedDuration,
+            thumbnail: defaultThumb,
+            artist: safeArtist,
+            isLive: Boolean(innerDetails?.isLiveContent)
+          }];
         } catch (fastYtErr) {
           console.warn('[Fast YouTube single video fallback]:', fastYtErr.message);
+          // Trường hợp lỗi mạng, vẫn trả về metadata tối thiểu để phát nhạc, không spawn yt-dlp làm sập CPU
+          return [{
+            title: `Bài hát YouTube (${videoId})`,
+            url: videoUrl,
+            duration: '3:30',
+            thumbnail: defaultThumb,
+            artist: 'YouTube',
+            isLive: false
+          }];
         }
       }
 
@@ -1614,6 +1669,8 @@ process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0) {
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
+      '-fflags', '+nobuffer',
+      '-flags', 'low_delay',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
@@ -1642,6 +1699,10 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
 
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, -5); } catch (e) {}
+    }
+
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
       ffmpegStderr += chunk.toString();
@@ -1654,7 +1715,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1704,7 +1765,10 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
  */
 function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) {
   return new Promise((resolve, reject) => {
-    const ffmpegArgs = [];
+    const ffmpegArgs = [
+      '-fflags', '+nobuffer',
+      '-flags', 'low_delay'
+    ];
     if (seekSeconds && Number(seekSeconds) > 0) {
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
     }
@@ -1725,6 +1789,10 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
 
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, -5); } catch (e) {}
+    }
+
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
       ffmpegStderr += chunk.toString();
@@ -1737,7 +1805,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream File Error]:', err.message);
@@ -1855,7 +1923,10 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 15 : 5); } catch (e) {}
     }
 
-    const ffmpegArgs = [];
+    const ffmpegArgs = [
+      '-fflags', '+nobuffer',
+      '-flags', 'low_delay'
+    ];
     if (seekSeconds && Number(seekSeconds) > 0) {
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
     }
@@ -1878,8 +1949,9 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     }
     ffmpegArgs.push('pipe:1');
 
-    // Nếu có tùy chọn lưu cache SSD (Cache Miss): FFmpeg xuất đồng thời luồng thứ hai ghi ra file tạm .tmp
-    if (cacheOptions?.tempPath) {
+    // Nếu có tùy chọn lưu cache SSD (Cache Miss): Chỉ nén thêm luồng thứ hai libopus nếu người dùng cấu hình rõ ràng (tránh tốn CPU x3 trên VPS 1 core)
+    const enableDiskCache = process.env.ENABLE_DISK_AUDIO_CACHE === 'true';
+    if (enableDiskCache && cacheOptions?.tempPath) {
       const isCpuBusyForCache = Boolean(os.loadavg && os.loadavg()[0] > 0.85);
       if (isCpuBusyForCache) {
         cacheOptions?.onAbort?.();
@@ -1897,13 +1969,17 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         }
         ffmpegArgs.push('-y', cacheOptions.tempPath);
       }
+    } else if (cacheOptions?.tempPath) {
+      // Bỏ qua ghi cache ngầm khi đang phát trên VPS 1 core để dành 100% tài nguyên cho luồng âm thanh thời gian thực
+      cacheOptions?.onAbort?.();
+      cacheOptions = null;
     }
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
 
     if (process.platform === 'linux' && ffmpegProcess.pid) {
-      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 10 : 0); } catch (e) {}
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 10 : -5); } catch (e) {}
     }
 
     let ffmpegStderr = '';
@@ -1945,7 +2021,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
