@@ -30,7 +30,7 @@ const DEFAULT_GUILD_SETTINGS = {
   language: 'vi'               // Ngôn ngữ hệ thống: 'vi' (Tiếng Việt) | 'en' (English)
 };
 
-const VALID_AUTOPLAY_LAYERS = ['ytmix', 'lastfm', 'heuristic'];
+const VALID_AUTOPLAY_LAYERS = ['ytmix', 'ai', 'lastfm', 'heuristic'];
 const VALID_LYRICS_LAYERS = ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'];
 
 function cleanAutoplayLayers(layers) {

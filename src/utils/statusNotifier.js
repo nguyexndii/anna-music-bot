@@ -325,11 +325,12 @@ function initStatusNotifier(client, options = {}) {
 }
 
 /**
- * Đọc tối đa 16KB cuối cùng của file log để tiết kiệm RAM, tránh đọc cả file lớn
+ * Đọc tối đa bytes cuối cùng của file log để tiết kiệm RAM, tránh đọc cả file lớn.
+ * Nâng bộ đệm mặc định lên 512KB (đủ bao quát các log ngắt kết nối kéo dài nhiều ngày).
  */
-function readLastBytesSync(filePath, maxBytes = 16384) {
+function readLastBytesSync(filePath, maxBytes = 524288) {
   try {
-    if (!fs.existsSync(filePath)) return '';
+    if (!filePath || typeof filePath !== 'string' || !fs.existsSync(filePath)) return '';
     const fd = fs.openSync(filePath, 'r');
     try {
       const stat = fs.fstatSync(fd);
@@ -339,6 +340,29 @@ function readLastBytesSync(filePath, maxBytes = 16384) {
       const buffer = Buffer.alloc(bytesToRead);
       const position = fileSize - bytesToRead;
       fs.readSync(fd, buffer, 0, bytesToRead, position);
+      return buffer.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Đọc tối đa bytes đầu tiên của file log (nơi Cloudflare Tunnel in banner khởi tạo ban đầu).
+ */
+function readFirstBytesSync(filePath, maxBytes = 65536) {
+  try {
+    if (!filePath || typeof filePath !== 'string' || !fs.existsSync(filePath)) return '';
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const stat = fs.fstatSync(fd);
+      const fileSize = stat.size;
+      if (fileSize === 0) return '';
+      const bytesToRead = Math.min(fileSize, maxBytes);
+      const buffer = Buffer.alloc(bytesToRead);
+      fs.readSync(fd, buffer, 0, bytesToRead, 0);
       return buffer.toString('utf8');
     } finally {
       fs.closeSync(fd);
@@ -440,49 +464,114 @@ async function checkWebPlayerHealth(client, adminId) {
   }
 }
 
+const DEAD_TUNNEL_DOMAINS = [
+  'asking-grain-result-knew.trycloudflare.com',
+  'difficulties-proudly-animals-ryan.trycloudflare.com',
+  'pockets-morrison-sells-nurse'
+];
+
+/**
+ * Kiểm tra xem URL tunnel có hợp lệ và không nằm trong danh sách domain chết
+ */
+function isCleanTunnelUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim().replace(/\/$/, '');
+  if (!/^https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?$/i.test(trimmed)) return false;
+  if (trimmed.includes('127.0.0.1') || trimmed.includes('localhost') || trimmed.includes('0.0.0.0')) return false;
+  for (const dead of DEAD_TUNNEL_DOMAINS) {
+    if (trimmed.includes(dead)) return false;
+  }
+  return true;
+}
+
 let currentKnownTunnelUrl = '';
 
 /**
- * Tự động nhận diện URL trycloudflare.com mới nhất trên VPS
+ * Tự động nhận diện URL trycloudflare.com hoặc Named Tunnel mới nhất
+ * Thứ tự ưu tiên:
+ * 1. Biến môi trường TUNNEL_URL
+ * 2. File chuyên dụng data/active_tunnel.url (< 100 bytes do wrapper script ghi tức thì)
+ * 3. File log PM2 (quét 512KB cuối và 64KB đầu để không sót URL dù file log lớn)
  */
 function getActiveTunnelUrl() {
-  if (process.env.TUNNEL_URL && process.env.TUNNEL_URL.trim()) {
+  // 1. Biến môi trường
+  if (process.env.TUNNEL_URL && isCleanTunnelUrl(process.env.TUNNEL_URL)) {
     return process.env.TUNNEL_URL.trim().replace(/\/$/, '');
   }
 
-  const logFiles = [
-    '/root/.pm2/logs/anna-tunnel-error.log',
-    '/root/.pm2/logs/anna-tunnel-out.log'
-  ];
+  // 2. Ưu tiên đọc file data/active_tunnel.url (kích thước nhỏ < 100 bytes)
+  const candidateUrlFiles = [
+    process.env.TUNNEL_URL_FILE,
+    process.env.ACTIVE_TUNNEL_FILE,
+    path.resolve(__dirname, '../../data/active_tunnel.url'),
+    path.resolve(process.cwd(), 'data/active_tunnel.url'),
+    path.resolve(process.cwd(), 'anna/anna-music-bot/data/active_tunnel.url'),
+    path.resolve(__dirname, '../../../../data/active_tunnel.url'),
+    '/root/anna-music-bot/data/active_tunnel.url',
+    '/root/data/active_tunnel.url'
+  ].filter(Boolean);
 
-  for (const logPath of logFiles) {
+  for (const filePath of candidateUrlFiles) {
     try {
-      if (fs.existsSync(logPath)) {
-        const content = readLastBytesSync(logPath, 16384);
-        const matches = [...content.matchAll(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g)];
-        if (matches && matches.length > 0) {
-          const latestUrl = matches[matches.length - 1][0];
-          if (latestUrl) return latestUrl;
+      if (fs.existsSync(filePath)) {
+        const rawContent = fs.readFileSync(filePath, 'utf8').trim();
+        const lines = rawContent.split(/\r?\n/);
+        for (const line of lines) {
+          const match = line.match(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/i)
+            || line.match(/https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?/i);
+          if (match && isCleanTunnelUrl(match[0])) {
+            return match[0].replace(/\/$/, '');
+          }
         }
       }
     } catch (e) {}
   }
 
-  return 'https://asking-grain-result-knew.trycloudflare.com';
+  // 3. Fallback đọc file log PM2 khi chưa có file active_tunnel.url
+  const logFiles = [
+    process.env.TUNNEL_LOG_FILE,
+    '/root/.pm2/logs/anna-tunnel-error.log',
+    '/root/.pm2/logs/anna-tunnel-out.log',
+    path.join(process.env.HOME || process.env.USERPROFILE || '', '.pm2/logs/anna-tunnel-error.log'),
+    path.join(process.env.HOME || process.env.USERPROFILE || '', '.pm2/logs/anna-tunnel-out.log')
+  ].filter(Boolean);
+
+  for (const logPath of logFiles) {
+    try {
+      if (fs.existsSync(logPath)) {
+        // Đọc 512KB cuối cùng của file log
+        const tailContent = readLastBytesSync(logPath, 524288);
+        let matches = [...tailContent.matchAll(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/gi)];
+
+        // Nếu file log phình to và URL được sinh từ lúc bắt đầu chạy, đọc thêm 64KB đầu
+        if ((!matches || matches.length === 0) && fs.statSync(logPath).size > 524288) {
+          const headContent = readFirstBytesSync(logPath, 65536);
+          matches = [...headContent.matchAll(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/gi)];
+        }
+
+        if (matches && matches.length > 0) {
+          for (let i = matches.length - 1; i >= 0; i--) {
+            const candidate = matches[i][0];
+            if (isCleanTunnelUrl(candidate)) {
+              return candidate;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Tuyệt đối không fallback về domain chết
+  return '';
 }
 
 /**
  * Theo dõi và thông báo khi Cloudflare Tunnel trên VPS đổi subdomain ngẫu nhiên
  */
 async function checkTunnelUrlChange(client, adminId) {
-  const tunnelLogPath = process.platform === 'linux' ? '/root/.pm2/logs/anna-tunnel-error.log' : null;
-  if (!tunnelLogPath || !fs.existsSync(tunnelLogPath)) return;
-
   try {
-    const content = readLastBytesSync(tunnelLogPath, 16384);
-    const matches = [...content.matchAll(/https:\/\/([a-z0-9-]+)\.trycloudflare\.com/g)];
-    if (matches && matches.length > 0) {
-      const latestUrl = matches[matches.length - 1][0];
+    const latestUrl = getActiveTunnelUrl();
+    if (latestUrl && isCleanTunnelUrl(latestUrl)) {
       if (!currentKnownTunnelUrl) {
         currentKnownTunnelUrl = latestUrl;
       } else if (currentKnownTunnelUrl !== latestUrl) {
@@ -498,7 +587,7 @@ async function checkTunnelUrlChange(client, adminId) {
             { name: '⏰ Thời gian phát hiện', value: `\`${vnTime}\` (Giờ VN)`, inline: true },
             { name: '🌐 URL Tunnel mới', value: `\`${latestUrl}\``, inline: false },
             { name: '⏮️ URL cũ', value: `\`${oldUrl}\``, inline: false },
-            { name: '💡 Tình trạng', value: 'Hệ thống đã có fallback cấu hình VPS trực tiếp, bạn không cần làm gì nếu Web Player vẫn đang chạy bình thường.', inline: false }
+            { name: '💡 Tình trạng', value: 'Hệ thống đã tự động cập nhật URL mới vào file active_tunnel.url và đồng bộ Web Player.', inline: false }
           ]
         });
       }

@@ -1120,16 +1120,16 @@ function createAutoplayLayersEmbed(guild, settings) {
     ? settings.autoplayLayers
     : ['ytmix', 'lastfm', 'heuristic'];
 
-  const allKeys = ['ytmix', 'lastfm', 'heuristic'];
+  const allKeys = ['ytmix', 'ai', 'lastfm', 'heuristic'];
   const inactiveKeys = allKeys.filter(k => !activeLayers.includes(k));
 
-  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣'];
+  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
   let activeListText = '';
   activeLayers.forEach((key, idx) => {
     const info = AUTOPLAY_LAYER_INFO[key] || { name: key, badge: EMOJI_TAG.musicNote, desc: '' };
     const num = numberEmojis[idx] || `${idx + 1}.`;
     const descText = isEn
-      ? (key === 'ytmix' ? 'YouTube official Radio Mix algorithm' : (key === 'lastfm' ? 'Global similar tracks library' : 'Same artist or popular fallback'))
+      ? (key === 'ytmix' ? 'YouTube official Radio Mix algorithm' : (key === 'ai' ? 'Gemini AI DJ recommends tracks matching vibe & genre' : (key === 'lastfm' ? 'Global similar tracks library' : 'Same artist or popular fallback')))
       : info.desc;
     activeListText += `${num} ${info.badge} **${info.name}**\n↳ *${descText}*\n`;
   });
@@ -1141,7 +1141,7 @@ function createAutoplayLayersEmbed(guild, settings) {
       inactiveListText += `• ❌ ~~${info.name}~~\n`;
     });
   } else {
-    inactiveListText = isEn ? '*None (All 3 layers are active)*\n' : '*Không có (Tất cả 3 tầng đều đang bật)*\n';
+    inactiveListText = isEn ? '*None (All 4 layers are active)*\n' : '*Không có (Tất cả 4 tầng đều đang bật)*\n';
   }
 
   const desc = isEn
@@ -1151,7 +1151,7 @@ function createAutoplayLayersEmbed(guild, settings) {
        `${EMOJI_TAG.stop} **Disabled Layers:**\n` +
        inactiveListText + '\n' +
        '💡 **Guide:**\n' +
-       '• Open **Dropdown Menu** below to select your desired layers (1 to 3 layers).\n' +
+       '• Open **Dropdown Menu** below to select your desired layers (1 to 4 layers).\n' +
        '• Or use the **Quick Presets** below for 1-click configuration.')
     : ('Khi hàng chờ phát hết nhạc, bot sẽ tự động tìm bài hát tiếp theo lần lượt theo các tầng được tích chọn bên dưới:\n\n' +
        `${EMOJI_TAG.play} **Các tầng đang kích hoạt (Theo thứ tự ưu tiên):**\n` +
@@ -1159,7 +1159,7 @@ function createAutoplayLayersEmbed(guild, settings) {
        `${EMOJI_TAG.stop} **Các tầng đã tắt:**\n` +
        inactiveListText + '\n' +
        '💡 **Hướng dẫn:**\n' +
-       '• Mở **Dropdown Menu** bên dưới để **tích chọn những tầng bạn muốn** (chọn từ 1 đến 3 tầng).\n' +
+       '• Mở **Dropdown Menu** bên dưới để **tích chọn những tầng bạn muốn** (chọn từ 1 đến 4 tầng).\n' +
        '• Hoặc dùng các nút **Preset nhanh** bên dưới để chuyển đổi 1 chạm.');
 
   return new EmbedBuilder()
@@ -1180,7 +1180,7 @@ function createAutoplayLayersComponents(settings) {
     .setCustomId('menu_autoplay_layers')
     .setPlaceholder(isEn ? '🔽 Click here to select Autoplay layers...' : '🔽 Bấm vào đây để tích chọn các tầng Autoplay...')
     .setMinValues(1)
-    .setMaxValues(3)
+    .setMaxValues(4)
     .addOptions(
       new StringSelectMenuOptionBuilder()
         .setLabel('YouTube Mix (RD)')
@@ -1188,6 +1188,12 @@ function createAutoplayLayersComponents(settings) {
         .setValue('ytmix')
         .setEmoji(CUSTOM_EMOJIS.playCircle)
         .setDefault(activeLayers.includes('ytmix')),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('Gemini DJ AI')
+        .setDescription(isEn ? 'AI DJ recommends tracks matching vibe & genre' : 'Trí tuệ nhân tạo gợi ý bài theo vibe & thể loại')
+        .setValue('ai')
+        .setEmoji(CUSTOM_EMOJIS.ai)
+        .setDefault(activeLayers.includes('ai')),
       new StringSelectMenuOptionBuilder()
         .setLabel('Last.fm Similar')
         .setDescription(isEn ? 'Global similar tracks library' : 'Kho dữ liệu bài hát tương tự quốc tế')

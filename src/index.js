@@ -170,8 +170,8 @@ app.get('*', (req, res, next) => {
 });
 
 function startServer(port) {
-  const server = app.listen(port, () => {
-    console.log(`[Express Web Server] Đang lắng nghe trên cổng ${port}`);
+  const server = app.listen(port, '127.0.0.1', () => {
+    console.log(`[Express Web Server] Đang lắng nghe an toàn tại 127.0.0.1:${port}`);
   });
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
@@ -1195,15 +1195,17 @@ client.on('interactionCreate', async (interaction) => {
       }
       const tab = customId.replace('help_tab_', '');
       const isAdmin = isStrictAdmin(interaction.member);
-      if (tab === 'admin' && !isAdmin) {
+      if ((tab === 'admin' || tab.startsWith('admin_') || tab.startsWith('admin:')) && !isAdmin) {
+        const isEn = settingsManager.get(interaction.guild.id)?.language === 'en';
         return interaction.reply({
-          embeds: [createErrorEmbed('Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên** mới có thể xem trang hướng dẫn Quản trị!')],
+          embeds: [createErrorEmbed(isEn ? 'Only **Server Owner** or **Administrators** can view the Admin guide!' : 'Chỉ **Chủ sở hữu máy chủ** hoặc **Quản trị viên** mới có thể xem trang hướng dẫn Quản trị!')],
           flags: 64
         });
       }
       const helpCommand = client.commands.get('help');
       if (helpCommand && helpCommand.createHelpMenu) {
-        const payload = helpCommand.createHelpMenu(tab, isAdmin);
+        const isEn = settingsManager.get(interaction.guild.id)?.language === 'en';
+        const payload = helpCommand.createHelpMenu(tab, isAdmin, isEn);
         return interaction.update(payload);
       }
     }

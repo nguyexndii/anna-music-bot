@@ -11,12 +11,36 @@ const settingsManager = require('../structures/SettingsManager');
 const config = require('../config');
 
 function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
+  let cleanTab = 'music';
+  let isEnglish = Boolean(isEn);
+
+  if (typeof activeTab === 'string') {
+    if (activeTab.endsWith('_en') || activeTab.includes(':en')) {
+      isEnglish = true;
+      cleanTab = activeTab.replace(/_en$|:en$/, '');
+    } else if (activeTab.endsWith('_vi') || activeTab.includes(':vi')) {
+      isEnglish = false;
+      cleanTab = activeTab.replace(/_vi$|:vi$/, '');
+    } else {
+      cleanTab = activeTab;
+    }
+  } else if (activeTab && typeof activeTab === 'object') {
+    cleanTab = activeTab.tab || 'music';
+    if (activeTab.isEn !== undefined) isEnglish = Boolean(activeTab.isEn);
+    if (activeTab.isAdmin !== undefined) isAdmin = Boolean(activeTab.isAdmin);
+  }
+
+  // Bảo vệ tab admin: nếu không phải admin thì không bao giờ hiển thị admin tab
+  if (!isAdmin && cleanTab === 'admin') {
+    cleanTab = 'music';
+  }
+
   const tabs = {
     music: {
-      title: isEn
+      title: isEnglish
         ? `${EMOJI_TAG.musicNotesDouble} Music Commands Guide`
         : `${EMOJI_TAG.musicNotesDouble} Hướng Dẫn Lệnh Âm Nhạc • Music Commands`,
-      desc: isEn ? [
+      desc: isEnglish ? [
         `**/play** (or **/p**) \`[title/link]\` — Play track or playlist (YouTube, Spotify, SoundCloud)`,
         `**/web** — Open Web UI to control playback, search & manage queue`,
         `**/pause** — Pause currently playing song`,
@@ -39,15 +63,15 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/join** — Mời bot tham gia kênh thoại của bạn`,
         `**/leave** — Cho bot rời khỏi kênh thoại`
       ].join('\n'),
-      footer: isEn
+      footer: isEnglish
         ? '💡 Tip: Short aliases like /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h are supported!'
         : '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h'
     },
     queue: {
-      title: isEn
+      title: isEnglish
         ? `${EMOJI_TAG.queue} Queue Commands Guide`
         : `${EMOJI_TAG.queue} Hướng Dẫn Hàng Chờ • Queue Commands`,
-      desc: isEn ? [
+      desc: isEnglish ? [
         `**/queue** (or **/q**) \`[page]\` — View queue list with interactive page buttons & remove menu`,
         `**/move** (or **/mv**) \`<from> [to]\` — Move track to a new position (default: 1 - play next)`,
         `**/remove** \`<position>\` — Remove a song from the queue by its index number`,
@@ -58,13 +82,13 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/remove** \`<vị_trí>\` — Xóa bài hát ra khỏi hàng chờ theo số thứ tự`,
         `**/shuffle** — Xáo trộn ngẫu nhiên thứ tự các bài trong hàng chờ`
       ].join('\n'),
-      footer: isEn ? 'Manage, reorder and remove songs from the queue' : 'Quản lý, sắp xếp và xóa bài hát trong hàng chờ'
+      footer: isEnglish ? 'Manage, reorder and remove songs from the queue' : 'Quản lý, sắp xếp và xóa bài hát trong hàng chờ'
     },
     controls: {
-      title: isEn
+      title: isEnglish
         ? `${EMOJI_TAG.equalizer} Audio Controls Guide`
         : `${EMOJI_TAG.equalizer} Hướng Dẫn Điều Khiển • Audio Controls`,
-      desc: isEn ? [
+      desc: isEnglish ? [
         `**/nowplaying** (or **/np**) — View current song info & interactive control buttons`,
         `**/volume** (or **/vol**) \`[1-100]\` — Adjust playback volume (1-100%)`,
         `**/loop** \`[mode]\` — Loop mode: Off ➔ Current Song ➔ Entire Queue`,
@@ -75,13 +99,13 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/loop** \`[chế_độ]\` — Đổi chế độ lặp: Tắt ➔ Lặp bài hiện tại ➔ Lặp hàng chờ`,
         `**/autoplay** \`[on/off]\` — Tự động tìm và phát bài tương tự khi hết nhạc`
       ].join('\n'),
-      footer: isEn ? 'Control volume, loop modes and autoplay' : 'Điều chỉnh âm lượng, chế độ lặp và tự động phát'
+      footer: isEnglish ? 'Control volume, loop modes and autoplay' : 'Điều chỉnh âm lượng, chế độ lặp và tự động phát'
     },
     utility: {
-      title: isEn
+      title: isEnglish
         ? `${EMOJI_TAG.settings} Utility Commands`
         : `${EMOJI_TAG.settings} Tiện Ích • Utility Commands`,
-      desc: isEn ? [
+      desc: isEnglish ? [
         `**/ping** — Check bot network latency and status`,
         `**/feedback** \`<message>\` — Send feedback or bug reports to developers`,
         `**/help** (or **/h**) — Open this comprehensive guide`
@@ -90,16 +114,16 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/feedback** \`<nội_dung>\` — Gửi góp ý / báo lỗi trực tiếp tới nhà phát triển`,
         `**/help** (hoặc **/h**) — Mở bảng hướng dẫn sử dụng toàn diện này`
       ].join('\n'),
-      footer: isEn ? 'Bot utilities and help' : 'Tiện ích hệ thống và trợ giúp'
+      footer: isEnglish ? 'Bot utilities and help' : 'Tiện ích hệ thống và trợ giúp'
     }
   };
 
   if (isAdmin) {
     tabs.admin = {
-      title: isEn
+      title: isEnglish
         ? `${EMOJI_TAG.padlock} Administrator Controls Guide`
         : `${EMOJI_TAG.padlock} Bảng Lệnh Quản Trị Viên (Admin Controls)`,
-      desc: isEn ? [
+      desc: isEnglish ? [
         `**/settings** — Open interactive Server Settings panel via Dropdown`,
         `**/247** \`[status:On/Off]\` — Toggle 24/7 voice stay & relaxing Lofi radio`,
         `**/lockvoice** \`[channel] [reset]\` — Lock bot to a fixed voice channel`,
@@ -114,45 +138,46 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/setlog** \`[channel] [reset]\` — Cài đặt kênh ghi toàn bộ nhật ký hoạt động`,
         `**/setdj** \`[role] [mode]\` — Cài đặt vai trò DJ cho máy chủ`
       ].join('\n'),
-      footer: isEn
+      footer: isEnglish
         ? 'Server Administrators only • Full administrative control'
         : 'Dành riêng cho Quản trị viên máy chủ • Bạn có toàn quyền quản trị'
     };
   }
 
-  const current = tabs[activeTab] || tabs.music;
+  const current = tabs[cleanTab] || tabs.music;
 
   const embed = new EmbedBuilder()
     .setTitle(current.title)
     .setDescription(current.desc)
-    .setColor(activeTab === 'admin' ? '#2ecc71' : (config.embedColor || '#5865F2'))
+    .setColor(cleanTab === 'admin' ? '#2ecc71' : (config.embedColor || '#5865F2'))
     .setFooter({ text: current.footer });
 
+  const langSuffix = isEnglish ? '_en' : '';
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId('help_tab_music')
-      .setLabel(isEn ? 'Music' : 'Âm Nhạc')
-      .setStyle(activeTab === 'music' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setCustomId(`help_tab_music${langSuffix}`)
+      .setLabel(isEnglish ? 'Music' : 'Âm Nhạc')
+      .setStyle(cleanTab === 'music' ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId('help_tab_queue')
-      .setLabel(isEn ? 'Queue' : 'Hàng Chờ')
-      .setStyle(activeTab === 'queue' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setCustomId(`help_tab_queue${langSuffix}`)
+      .setLabel(isEnglish ? 'Queue' : 'Hàng Chờ')
+      .setStyle(cleanTab === 'queue' ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId('help_tab_controls')
-      .setLabel(isEn ? 'Controls' : 'Điều Khiển')
-      .setStyle(activeTab === 'controls' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setCustomId(`help_tab_controls${langSuffix}`)
+      .setLabel(isEnglish ? 'Controls' : 'Điều Khiển')
+      .setStyle(cleanTab === 'controls' ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId('help_tab_utility')
-      .setLabel(isEn ? 'Utility' : 'Tiện Ích')
-      .setStyle(activeTab === 'utility' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      .setCustomId(`help_tab_utility${langSuffix}`)
+      .setLabel(isEnglish ? 'Utility' : 'Tiện Ích')
+      .setStyle(cleanTab === 'utility' ? ButtonStyle.Primary : ButtonStyle.Secondary)
   );
 
   if (isAdmin) {
     row1.addComponents(
       new ButtonBuilder()
-        .setCustomId('help_tab_admin')
-        .setLabel(isEn ? '⚙️ Admin' : '⚙️ Quản Trị')
-        .setStyle(activeTab === 'admin' ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setCustomId(`help_tab_admin${langSuffix}`)
+        .setLabel(isEnglish ? '⚙️ Admin' : '⚙️ Quản Trị')
+        .setStyle(cleanTab === 'admin' ? ButtonStyle.Success : ButtonStyle.Secondary)
     );
   }
 

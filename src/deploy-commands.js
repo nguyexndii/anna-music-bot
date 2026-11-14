@@ -163,10 +163,10 @@ const SLASH_SHORTCUTS = [
   }
 ];
 
-async function deploySlashCommands(customClient = null) {
+async function deploySlashCommands(customClient = null, targetGuildId = null) {
   const token = config.token;
   const clientId = config.clientId || customClient?.user?.id;
-  const guildId = process.env.GUILD_ID || config.guildId;
+  const guildId = targetGuildId || process.env.GUILD_ID || config.guildId;
 
   if (!token) {
     console.error('[Deploy Slash] Lỗi: Chưa cấu hình DISCORD_TOKEN trong file .env');
@@ -212,19 +212,38 @@ async function deploySlashCommands(customClient = null) {
   const currentHash = crypto.createHash('md5').update(JSON.stringify(commands)).digest('hex');
   const currentGuildCount = customClient?.guilds?.cache?.size || (guildId ? 1 : 0);
 
-  try {
-    if (fs.existsSync(HASH_FILE)) {
-      const savedMeta = JSON.parse(fs.readFileSync(HASH_FILE, 'utf8'));
-      if (savedMeta && savedMeta.hash === currentHash && savedMeta.guildCount === currentGuildCount) {
-        console.log(`⚡ [Deploy Slash] Danh sách ${commands.length} Slash Commands & ${currentGuildCount} Guild không đổi - Bỏ qua đăng ký REST PUT (0ms)!`);
-        return true;
+  // Chỉ bỏ qua bằng hash cache khi chạy startup toàn cục (không chỉ định targetGuildId)
+  if (!targetGuildId) {
+    try {
+      if (fs.existsSync(HASH_FILE)) {
+        const savedMeta = JSON.parse(fs.readFileSync(HASH_FILE, 'utf8'));
+        if (savedMeta && savedMeta.hash === currentHash && savedMeta.guildCount === currentGuildCount) {
+          console.log(`⚡ [Deploy Slash] Danh sách ${commands.length} Slash Commands & ${currentGuildCount} Guild không đổi - Bỏ qua đăng ký REST PUT (0ms)!`);
+          return true;
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   const rest = new REST({ version: '10' }).setToken(token);
 
   try {
+    // Trường hợp 1: Deploy chỉ định riêng cho một Guild cụ thể (ví dụ khi có GuildCreate event)
+    if (targetGuildId) {
+      if (!clientId) {
+        console.error('[Deploy Slash] Lỗi: Chưa xác định được clientId để đăng ký lệnh cho Guild');
+        return false;
+      }
+      console.log(`🚀 [Deploy Slash] Đang đăng ký ${commands.length} Slash Commands cho Guild cụ thể: ${targetGuildId}...`);
+      await rest.put(
+        Routes.applicationGuildCommands(clientId, targetGuildId),
+        { body: commands }
+      );
+      console.log(`✅ [Deploy Slash] Đã đăng ký thành công ${commands.length} Guild Slash Commands cho Server: ${targetGuildId}`);
+      return true;
+    }
+
+    // Trường hợp 2: Đồng bộ toàn cục khi khởi động bot
     console.log(`🚀 [Deploy Slash] Đang đồng bộ ${commands.length} Slash Commands (kèm Shortcuts) lên Discord...`);
 
     // 1. Đăng ký cho toàn bộ Server mà bot đang tham gia (Cập nhật 0 giây ngay lập tức!)

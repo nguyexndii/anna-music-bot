@@ -158,7 +158,7 @@ class PrioritySemaphore {
   }
 }
 
-const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 2;
+const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 1;
 const extractionSemaphore = new PrioritySemaphore(MAX_CONCURRENT_EXTRACTION);
 
 // RAM Cache tái sử dụng Metadata & Direct Stream URL (tối đa 200 mục, TTL theo tham số expire còn hạn >= 30p)
@@ -546,6 +546,36 @@ const ALLOWED_MUSIC_HOSTNAMES = new Set([
   'on.soundcloud.com'
 ]);
 
+let soundCloudClientId = null;
+async function ensureSoundCloudAuth() {
+  if (soundCloudClientId) return soundCloudClientId;
+  try {
+    soundCloudClientId = await play.getFreeClientID();
+    if (soundCloudClientId) {
+      await play.setToken({ soundcloud: { client_id: soundCloudClientId } });
+    }
+  } catch (e) {
+    console.warn('[SoundCloud Auth Warning]:', e.message);
+  }
+  return soundCloudClientId;
+}
+
+function extractSoundCloudTitleFromUrl(url) {
+  if (!url) return 'SoundCloud Track';
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const slug = parts[parts.length - 1];
+      return slug
+        .split('-')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    }
+  } catch (e) {}
+  return 'SoundCloud Track';
+}
+
 /**
  * Kiểm tra và chuẩn hóa URL âm nhạc: Chống Argument Injection, Whitelist Hostname HTTPS và Chặn SSRF
  * @param {string} rawUrl
@@ -796,36 +826,6 @@ async function searchTrack(query, targetDurationSec = 0) {
         console.warn('[YouTube Playlist extraction error]:', ytErr.message);
       }
     }
-
-let soundCloudClientId = null;
-async function ensureSoundCloudAuth() {
-  if (soundCloudClientId) return soundCloudClientId;
-  try {
-    soundCloudClientId = await play.getFreeClientID();
-    if (soundCloudClientId) {
-      await play.setToken({ soundcloud: { client_id: soundCloudClientId } });
-    }
-  } catch (e) {
-    console.warn('[SoundCloud Auth Warning]:', e.message);
-  }
-  return soundCloudClientId;
-}
-
-function extractSoundCloudTitleFromUrl(url) {
-  if (!url) return 'SoundCloud Track';
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean);
-    if (parts.length >= 2) {
-      const slug = parts[parts.length - 1];
-      return slug
-        .split('-')
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' ');
-    }
-  } catch (e) {}
-  return 'SoundCloud Track';
-}
 
     // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album - Giới hạn 100 bài)
     if (query.includes('soundcloud.com')) {
@@ -1589,7 +1589,25 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
     : ['ytmix', 'lastfm', 'heuristic'];
 
   for (const layer of configuredLayers) {
-    if (layer === 'ytmix') {
+    if (layer === 'ai') {
+      try {
+        const { getGeminiRecommendation } = require('./geminiHelper');
+        const aiRec = await getGeminiRecommendation(lastSong, playedList, region);
+        if (aiRec) {
+          console.log(`[Autoplay Pool] Gợi ý thành công từ AI Gemini: "${aiRec.title}" (${aiRec.artist || 'AI'})`);
+          const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
+          const searchRes = await searchTrack(query);
+          if (Array.isArray(searchRes) && searchRes.length > 0 && searchRes[0]?.url) {
+            return [{
+              ...searchRes[0],
+              requestedBy: 'Auto'
+            }];
+          }
+        }
+      } catch (aiErr) {
+        console.warn('[Autoplay AI Gemini Error]:', aiErr.message);
+      }
+    } else if (layer === 'ytmix') {
       const candidates = await getYoutubeMix(lastSong, guildId, playedList, region, true);
       if (Array.isArray(candidates) && candidates.length > 0) {
         console.log(`[Autoplay Pool] Nạp ${candidates.length} bài vào bộ đệm từ YouTube Mix (${region})`);
@@ -1666,7 +1684,8 @@ process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 /**
  * Phát trực tiếp từ stream URL đã được lưu trong bộ nhớ đệm mà không cần gọi yt-dlp
  */
-function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0) {
+function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
       '-fflags', '+nobuffer',
@@ -1700,7 +1719,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     registerProcess(ffmpegProcess);
 
     if (process.platform === 'linux' && ffmpegProcess.pid) {
-      try { os.setPriority(ffmpegProcess.pid, -5); } catch (e) {}
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
     }
 
     let ffmpegStderr = '';
@@ -1715,7 +1734,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1763,7 +1782,8 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
  * Phát trực tiếp từ file âm thanh trên ổ cứng SSD (Local Audio Disk Cache)
  * Không tải mạng, độ trễ 0ms, mức sử dụng CPU ~ 0%
  */
-function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) {
+function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
       '-fflags', '+nobuffer',
@@ -1790,7 +1810,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) 
     registerProcess(ffmpegProcess);
 
     if (process.platform === 'linux' && ffmpegProcess.pid) {
-      try { os.setPriority(ffmpegProcess.pid, -5); } catch (e) {}
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
     }
 
     let ffmpegStderr = '';
@@ -1805,7 +1825,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0) 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream File Error]:', err.message);
@@ -1873,7 +1893,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
   if (cachedStreamUrl && !bypassCookie) {
     try {
       console.log(`[Stream Cache Hit] Tái sử dụng trực tiếp Stream URL cho: "${cleanTarget}"`);
-      return await createDirectFfmpegStream(cachedStreamUrl, seekSeconds, playDurationSec);
+      return await createDirectFfmpegStream(cachedStreamUrl, seekSeconds, playDurationSec, options);
     } catch (cacheErr) {
       console.warn('[Stream Cache Failed, fallback sang yt-dlp stream]:', cacheErr.message);
       streamUrlCache.delete(cleanTarget);
@@ -1920,7 +1940,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     }
 
     if (process.platform === 'linux' && ytdlpStreamProcess.pid) {
-      try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 15 : 5); } catch (e) {}
+      try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 19 : 5); } catch (e) {}
     }
 
     const ffmpegArgs = [
@@ -1979,7 +1999,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     registerProcess(ffmpegProcess);
 
     if (process.platform === 'linux' && ffmpegProcess.pid) {
-      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 10 : -5); } catch (e) {}
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
     }
 
     let ffmpegStderr = '';
@@ -2021,7 +2041,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -2273,7 +2293,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
       const cachePlayDurationSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
         ? Math.max(0, (cachedEntry.trimEnd - cachedEntry.trimStart) - userSeek)
         : playDurationSec;
-      return await createDirectFileStream(cachedEntry.filePath, userSeek, cachePlayDurationSec);
+      return await createDirectFileStream(cachedEntry.filePath, userSeek, cachePlayDurationSec, options);
     } catch (cachePlayErr) {
       console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
     }

@@ -48,10 +48,14 @@ module.exports = function createApiRouter(client) {
     next();
   });
 
-  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy cf-connecting-ip của Cloudflare hoặc req.ip đã qua trust proxy)
+  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy cf-connecting-ip khi request đến từ IP Loopback nội bộ do Cloudflare Tunnel chuyển tiếp)
   function getClientIp(req) {
-    const cfIp = req.headers['cf-connecting-ip'];
-    if (cfIp && typeof cfIp === 'string') return cfIp.trim();
+    const remote = (req.socket?.remoteAddress || '').replace(/^.*:/, '');
+    const isLocal = remote === '127.0.0.1' || remote === 'localhost' || remote === '1';
+
+    if (isLocal && req.headers['cf-connecting-ip']) {
+      return String(req.headers['cf-connecting-ip']).trim();
+    }
     return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
   }
 
@@ -89,13 +93,20 @@ module.exports = function createApiRouter(client) {
     return null;
   }
 
-  // Search in-memory cache & In-flight request deduplication
+  // Search in-memory cache & In-flight request deduplication (TTL 10 phút, LRU eviction max 200)
   const searchCache = new Map();
   const inFlightSearches = new Map();
   const activePlaylistLoads = new Set();
+  const SEARCH_CACHE_TTL = 10 * 60 * 1000;
   setInterval(() => {
-    if (searchCache.size > 300) searchCache.clear();
-  }, 10 * 60 * 1000);
+    const now = Date.now();
+    for (const [key, value] of searchCache.entries()) {
+      if (!value || now >= value.expiresAt) {
+        searchCache.delete(key);
+      }
+    }
+    if (searchCache.size > 200) searchCache.clear();
+  }, 5 * 60 * 1000);
 
   // Cache RAM 2.5s cho dữ liệu thống kê máy chủ (Top bài hát, lịch sử, playlist gần đây)
   const guildStatsCache = new Map();
@@ -285,6 +296,26 @@ module.exports = function createApiRouter(client) {
     return { name: `${raw}`, avatar: track.requestedByAvatar || null };
   }
 
+  // Helper kiểm tra Channel ID và Role ID có thực sự thuộc máy chủ hiện tại
+  function validateGuildChannelsAndRoles(guild, payload) {
+    if (!guild || !payload || typeof payload !== 'object') return null;
+    const channelFields = ['musicChannelId', 'lockedVoiceChannelId', 'logChannelId', 'roomLogChannelId', 'errorLogChannelId'];
+    for (const field of channelFields) {
+      const val = payload[field];
+      if (val && typeof val === 'string' && val.trim() !== '') {
+        if (!guild.channels?.cache?.has(val)) {
+          return `Kênh chỉ định cho "${field}" (${val}) không tồn tại trong máy chủ này!`;
+        }
+      }
+    }
+    if (payload.djRoleId && typeof payload.djRoleId === 'string' && payload.djRoleId.trim() !== '') {
+      if (!guild.roles?.cache?.has(payload.djRoleId)) {
+        return `Vai trò DJ (djRoleId: ${payload.djRoleId}) không tồn tại trong máy chủ này!`;
+      }
+    }
+    return null;
+  }
+
   // Middleware xác thực Magic Token
   const requireAuth = (req, res, next) => {
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.token || req.body.token;
@@ -432,8 +463,8 @@ module.exports = function createApiRouter(client) {
     });
   });
 
-  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp, Rate-limited 30 req/phút)
-  router.get('/search', searchLimiter, async (req, res) => {
+  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp, Rate-limited 30 req/phút, yêu cầu xác thực)
+  router.get('/search', requireAuth, searchLimiter, async (req, res) => {
     let query = (req.query.q || '').slice(0, 150).trim();
     const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 20, 50));
     const mode = req.query.mode || 'official';
@@ -444,8 +475,12 @@ module.exports = function createApiRouter(client) {
     }
 
     const cacheKey = `${query.toLowerCase()}_${limit}_${mode}`;
-    if (searchCache.has(cacheKey)) {
-      return res.json({ success: true, results: searchCache.get(cacheKey) });
+    const cached = searchCache.get(cacheKey);
+    if (cached) {
+      if (Date.now() < cached.expiresAt) {
+        return res.json({ success: true, results: cached.results });
+      }
+      searchCache.delete(cacheKey);
     }
 
     if (inFlightSearches.has(cacheKey)) {
@@ -461,7 +496,11 @@ module.exports = function createApiRouter(client) {
       try {
         const results = await searchMultipleTracks(query, limit, mode);
         if (results && results.length > 0) {
-          searchCache.set(cacheKey, results);
+          if (searchCache.size >= 200) {
+            const oldestKey = searchCache.keys().next().value;
+            if (oldestKey) searchCache.delete(oldestKey);
+          }
+          searchCache.set(cacheKey, { results, expiresAt: Date.now() + SEARCH_CACHE_TTL });
         }
         return results || [];
       } finally {
@@ -1631,6 +1670,9 @@ module.exports = function createApiRouter(client) {
           }
           if (queue) {
             queue.songs = [];
+            if (typeof queue._cleanupResource === 'function') {
+              queue._cleanupResource(queue.preloadedResource);
+            }
             queue.preloadedResource = null;
             queue.preloadedSongUrl = null;
             queue.prefetchedSong = null;
@@ -1757,12 +1799,22 @@ module.exports = function createApiRouter(client) {
         }
         case 'setLogChannel': {
           const newLogChannel = value || null;
+          if (newLogChannel && !(req.guild?.channels?.cache?.has(newLogChannel))) {
+            return res.status(400).json({
+              success: false,
+              error: `Kênh Nhật Ký (${newLogChannel}) không tồn tại trong máy chủ này!`
+            });
+          }
           settingsManager.update(guildId, { logChannelId: newLogChannel });
           resultMessage = newLogChannel ? `Đã cấu hình Kênh Nhật Ký (Log Channel): <#${newLogChannel}>` : 'Đã TẮT Kênh Nhật Ký hoạt động';
           break;
         }
         case 'updateSettings': {
           if (typeof value === 'object' && value !== null) {
+            const validationErr = validateGuildChannelsAndRoles(req.guild, value);
+            if (validationErr) {
+              return res.status(400).json({ success: false, error: validationErr });
+            }
             settingsManager.update(guildId, value);
             if (value.language !== undefined && queue && typeof queue.refreshNowPlayingCard === 'function') {
               queue.refreshNowPlayingCard();
@@ -1887,6 +1939,11 @@ module.exports = function createApiRouter(client) {
       });
     }
 
+    const validationErr = validateGuildChannelsAndRoles(req.guild, req.body);
+    if (validationErr) {
+      return res.status(400).json({ success: false, error: validationErr });
+    }
+
     try {
       const updated = settingsManager.update(guildId, req.body);
       const queue = client.musicManager ? client.musicManager.get(guildId) : null;
@@ -1978,11 +2035,16 @@ module.exports = function createApiRouter(client) {
         const rawSec = currentTrack.rawDurationSec || 0;
         const realSec = currentTrack.realDurationSec || Math.round(realDurMs / 1000);
 
-        // Chỉ dịch lùi mốc thời gian nếu là phụ đề gốc của video YouTube (youtube_cc),
-        // HOẶC nếu bản lời bên ngoài có độ dài khớp với MV gốc chưa cắt (rawSec) hơn là bản nhạc đã cắt (realSec)
-        const shouldShiftTimestamps =
-          lyricsData.source === 'youtube_cc' ||
-          (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+        // Chỉ dịch lùi mốc thời gian nếu là phụ đề gốc của video YouTube (youtube_cc) có intro > 500ms,
+        // HOẶC trường hợp đặc biệt lời ngoài khớp với thời lượng raw video (diffRaw <= 3 && diffReal >= 8)
+        let shouldShiftTimestamps = false;
+        if (lyricsData.source === 'youtube_cc') {
+          shouldShiftTimestamps = trimStartMs > 500;
+        } else if (rawSec > realSec && lyricDurSec > 0) {
+          const diffRaw = Math.abs(lyricDurSec - rawSec);
+          const diffReal = Math.abs(lyricDurSec - realSec);
+          shouldShiftTimestamps = diffRaw <= 3 && diffReal >= 8;
+        }
 
         if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics
@@ -2059,9 +2121,14 @@ module.exports = function createApiRouter(client) {
         const rawSec = currentTrack.rawDurationSec || 0;
         const realSec = currentTrack.realDurationSec || Math.round(realDurMs / 1000);
 
-        const shouldShiftTimestamps =
-          lyricsData.source === 'youtube_cc' ||
-          (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+        let shouldShiftTimestamps = false;
+        if (lyricsData.source === 'youtube_cc') {
+          shouldShiftTimestamps = trimStartMs > 500;
+        } else if (rawSec > realSec && lyricDurSec > 0) {
+          const diffRaw = Math.abs(lyricDurSec - rawSec);
+          const diffReal = Math.abs(lyricDurSec - realSec);
+          shouldShiftTimestamps = diffRaw <= 3 && diffReal >= 8;
+        }
 
         if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
           activeSyncedLyrics = lyricsData.syncedLyrics

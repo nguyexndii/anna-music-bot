@@ -819,7 +819,9 @@ function buildParsedPlayerInfo(data) {
         url: cap.baseUrl + (cap.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3'),
         rawUrl: cap.baseUrl,
         name: nameText,
-        vssId
+        vssId,
+        languageCode: lang,
+        kind: cap.kind
       }
     ];
 
@@ -880,13 +882,20 @@ async function _executeFetchYtdlpInfo(url, norm) {
 
   const cookieHeader = getYouTubeCookieHeader();
 
-  // ── PHƯƠNG PHÁP 1: InnerTube JSON API (IOS / WEB_REMIX) - Chỉ tải ~15KB JSON, không làm đơ Event Loop ──
+  // ── PHƯƠNG PHÁP 1: InnerTube JSON API (IOS / WEB / WEB_REMIX) - Chỉ tải ~15KB JSON, không làm đơ Event Loop ──
   const innerTubeClients = [
     {
       name: 'IOS',
       version: '19.45.4',
       ua: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)',
-      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.1.0.22B83' }
+      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.1.0.22B83' },
+      skipThirdParty: true
+    },
+    {
+      name: 'WEB',
+      version: '2.20241126.01.00',
+      ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      extra: {}
     },
     {
       name: 'WEB_REMIX',
@@ -896,8 +905,26 @@ async function _executeFetchYtdlpInfo(url, norm) {
     }
   ];
 
+  let fallbackParsedInfo = null;
+
   for (const clientCfg of innerTubeClients) {
     try {
+      const contextClient = {
+        clientName: clientCfg.name,
+        clientVersion: clientCfg.version,
+        hl: 'vi',
+        gl: 'VN',
+        ...clientCfg.extra
+      };
+      const contextObj = {
+        client: contextClient,
+        ...(clientCfg.skipThirdParty ? {} : {
+          thirdParty: {
+            embedUrl: 'https://www.youtube.com/'
+          }
+        })
+      };
+
       const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
         method: 'POST',
         headers: {
@@ -907,18 +934,7 @@ async function _executeFetchYtdlpInfo(url, norm) {
         },
         body: JSON.stringify({
           videoId,
-          context: {
-            client: {
-              clientName: clientCfg.name,
-              clientVersion: clientCfg.version,
-              hl: 'vi',
-              gl: 'VN',
-              ...clientCfg.extra
-            },
-            thirdParty: {
-              embedUrl: 'https://www.youtube.com/'
-            }
-          }
+          context: contextObj
         }),
         signal: AbortSignal.timeout(2500)
       });
@@ -928,16 +944,23 @@ async function _executeFetchYtdlpInfo(url, norm) {
         const parsed = buildParsedPlayerInfo(data);
         const hasValidDetails = Boolean(data?.videoDetails?.videoId || parsed?.title || (parsed?.duration > 0));
         if (parsed && hasValidDetails) {
-          // Khi nhận được response hợp lệ từ InnerTube: dù có phụ đề hay không (parsed.hasCaptions = false),
-          // video không có phụ đề -> lưu cache và return ngay lập tức! Tuyệt đối không chạy tiếp client khác để tránh nghẽn CPU!
-          setCachedYtdlpInfo(url, parsed);
-          return parsed;
+          if (parsed.hasCaptions) {
+            // Có phụ đề chính thức từ InnerTube: Lưu cache và kết thúc sớm
+            setCachedYtdlpInfo(url, parsed);
+            return parsed;
+          }
+
+          // Nếu parsed có thông tin video nhưng KHÔNG CÓ PHỤ ĐỀ (parsed.hasCaptions = false),
+          // lưu tạm fallbackParsedInfo và tiếp tục chạy xuống Phương pháp 2 (Watch Page HTML)
+          if (!fallbackParsedInfo) {
+            fallbackParsedInfo = parsed;
+          }
         }
       }
     } catch (clientErr) {}
   }
 
-  // ── PHƯƠNG PHÁP 2: Tải Watch Page HTML & bóc ytInitialPlayerResponse (chỉ chạy khi InnerTube hoàn toàn không lấy được gì) ──
+  // ── PHƯƠNG PHÁP 2: Tải Watch Page HTML & bóc ytInitialPlayerResponse (chạy khi InnerTube thiếu phụ đề hoặc không lấy được) ──
   try {
     const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=vi&gl=VN&bpctr=9999999999&has_verified=1`;
     const res = await fetch(watchUrl, {
@@ -958,11 +981,23 @@ async function _executeFetchYtdlpInfo(url, norm) {
 
       const parsed = buildParsedPlayerInfo(playerResponse);
       if (parsed) {
-        setCachedYtdlpInfo(url, parsed);
-        return parsed;
+        const finalInfo = fallbackParsedInfo ? {
+          ...fallbackParsedInfo,
+          ...parsed,
+          subtitles: { ...(fallbackParsedInfo.subtitles || {}), ...(parsed.subtitles || {}) },
+          automatic_captions: { ...(fallbackParsedInfo.automatic_captions || {}), ...(parsed.automatic_captions || {}) },
+          hasCaptions: Boolean(parsed.hasCaptions || fallbackParsedInfo.hasCaptions)
+        } : parsed;
+        setCachedYtdlpInfo(url, finalInfo);
+        return finalInfo;
       }
     }
   } catch (watchErr) {}
+
+  if (fallbackParsedInfo) {
+    setCachedYtdlpInfo(url, fallbackParsedInfo);
+    return fallbackParsedInfo;
+  }
 
   setCachedYtdlpInfo(url, { _empty: true });
   return null;
@@ -986,19 +1021,35 @@ function getRankedSubtitleTracks(subsMap, context = {}) {
     const track = trackArr[0];
     const kLow = key.toLowerCase();
     const nameLow = String(track?.name || '').toLowerCase();
+    const vssId = String(track?.vssId || '');
+    const langCode = String(track?.languageCode || kLow).toLowerCase();
+    const isAsr = track?.kind === 'asr' || vssId.startsWith('a.');
     let score = 0;
 
     // Tránh các bản dịch tự động sang ngôn ngữ khác (vssId có dạng .t.)
-    if (track?.vssId && track.vssId.includes('.t.')) {
+    if (vssId.includes('.t.')) {
       score -= 50;
     }
 
     if (isVN) {
-      if (kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_')) score += 100;
-      else if (/tiếng việt|vietnamese|việt|viet/i.test(nameLow)) score += 95;
-      else if (kLow.startsWith('und')) score += 60;
-      else if (kLow.startsWith('en')) score += 30; // Nhiều MV Việt tải lời tiếng Việt vào slot 'en' mặc định
-      else score -= 50;
+      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+      const isViName = /tiếng việt|vietnamese|việt|viet/i.test(nameLow);
+
+      if (isViLang && !isAsr) {
+        score += 120; // Phụ đề tiếng Việt chính thức (do người tải lên)
+      } else if (isViLang) {
+        score += 100; // Phụ đề tiếng Việt tự động ASR
+      } else if (isViName && !isAsr) {
+        score += 95;
+      } else if (isViName) {
+        score += 85;
+      } else if (kLow.startsWith('und')) {
+        score += 60;
+      } else if (kLow.startsWith('en')) {
+        score += 30; // Nhiều MV Việt tải lời tiếng Việt vào slot 'en' mặc định
+      } else {
+        score -= 50;
+      }
     } else if (isKR) {
       if (kLow.startsWith('ko')) score += 100;
       else if (kLow.startsWith('en')) score += 40;
@@ -1510,8 +1561,14 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec, lr
       if (sbRes.ok) {
         const segments = await sbRes.json();
         if (Array.isArray(segments)) {
-          // Tìm phân đoạn offtopic / intro ở đầu video (bắt đầu trong 3 giây đầu và dài từ 2s đến 180s)
-          const introSeg = segments.find(s => Array.isArray(s.segment) && s.segment[0] <= 3.0 && s.segment[1] >= 2.0 && s.segment[1] <= 180.0);
+          // Tìm phân đoạn offtopic / intro ở đầu video (bắt đầu trong 3 giây đầu, dài từ 2s đến 180s, và locked === 1 hoặc votes >= 2)
+          const introSeg = segments.find(s =>
+            Array.isArray(s.segment) &&
+            s.segment[0] <= 3.0 &&
+            s.segment[1] >= 2.0 &&
+            s.segment[1] <= 180.0 &&
+            (s.locked === 1 || Number(s.votes) >= 2)
+          );
           if (introSeg) {
             const introDurationMs = Math.round(introSeg.segment[1] * 1000);
             console.log(`[Lyrics Auto-Offset SponsorBlock] Phát hiện MV có đoạn kịch/intro đầu video dài ${(introDurationMs / 1000).toFixed(2)}s, tự động lùi mốc lời!`);
@@ -1892,7 +1949,7 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
     let autoOffsetMs = 0;
     if (syncedLyrics && targetUrl && (targetUrl.includes('youtube.com') || targetUrl.includes('youtu.be'))) {
       try {
-        autoOffsetMs = await detectYouTubeIntroOffset(targetUrl, syncedLyrics, targetDurationSec, targetDurationSec);
+        autoOffsetMs = await detectYouTubeIntroOffset(targetUrl, syncedLyrics, targetDurationSec, Number(matchedSong.duration || 0));
       } catch (e) {}
     }
 
@@ -1901,7 +1958,7 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
       artist: matchedSong.artist || matchedSong.artistsNames || artist || '',
       lyrics: plainLyrics || (syncedLyrics ? syncedLyrics.map(s => s.text).join('\n') : ''),
       syncedLyrics,
-      duration: targetDurationSec || Number(matchedSong.duration || 0),
+      duration: Number(matchedSong.duration || 0) || targetDurationSec,
       autoOffsetMs,
       trackKey,
       userSavedOffsetMs: (userSavedOffsetMs !== undefined && userSavedOffsetMs !== null) ? userSavedOffsetMs : 0,

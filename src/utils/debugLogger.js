@@ -332,6 +332,17 @@ async function processLogQueue() {
       }
 
       if (targetChannel && targetChannel.isTextBased && targetChannel.isTextBased()) {
+        // Chặn Cross-Guild Log Injection: Đảm bảo kênh nhận log thuộc đúng Guild phát sinh sự kiện
+        // Ngoại trừ kênh báo lỗi tập trung của Bot Owner
+        const channelGuildId = targetChannel.guildId || targetChannel.guild?.id;
+        const isBotOwnerErrorChannel = (config.errorLogChannelId && targetChannel.id === config.errorLogChannelId)
+          || targetChannel.id === '1547449482835394640';
+
+        if (!isBotOwnerErrorChannel && channelGuildId !== item.guildId) {
+          console.warn(`[Security] Chặn Cross-Guild Log Injection: Kênh ${targetChannel.id} (Guild: ${channelGuildId}) không khớp với Guild sự kiện (${item.guildId})`);
+          continue;
+        }
+
         const adminId = config?.adminId || '875358286487097395';
         const messagePayload = {
           embeds: [item.embed]
@@ -487,6 +498,7 @@ function logAction(action, details = {}) {
     logQueue.push({
       logChannelId: targetChannelId,
       targetChannel: logChannel || null,
+      guildId: guildId,
       embed,
       isErrorAction: Boolean(isErrorAction)
     });

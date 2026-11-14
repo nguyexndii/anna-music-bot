@@ -82,7 +82,7 @@ class MusicQueue {
     this.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play,
-        maxMissedFrames: 50
+        maxMissedFrames: 200
       }
     });
 
@@ -688,6 +688,9 @@ class MusicQueue {
     if (wasPreemptingLofi && this.songs.length > 0) {
       this.clearPlayCountTimer();
       this.currentSong = null;
+      this._cleanupResource(this.preloadedResource);
+      this.preloadedResource = null;
+      this.preloadedSongUrl = null;
       this._cleanupResource(this.currentResource);
       this.currentResource = null;
       this.isQueueOnHold = false;
@@ -744,7 +747,11 @@ class MusicQueue {
     if (humanCount === 0 && this.mode247) {
       this.isQueueOnHold = true;
       this.prefetchedSong = null;
+      this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+      this._cleanupResource(this.currentResource);
+      this.currentResource = null;
       this.currentSong = null;
       if (this.player) this.player.stop();
       setVoiceChannelStatus(activeChannel, settingsManager.get(this.guild.id)?.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
@@ -950,7 +957,11 @@ class MusicQueue {
     // 2. KHI PHÒNG TRỐNG (humanCount === 0):
     if (this.mode247) {
       this.prefetchedSong = null;
+      this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+      this._cleanupResource(this.currentResource);
+      this.currentResource = null;
       setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
       await this._play247BackgroundLofi();
     } else {
@@ -1161,10 +1172,14 @@ class MusicQueue {
           const humanCount = this.getHumanMemberCount();
           if (humanCount === 0) {
             console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, đưa bot về chế độ 24/7 Sleep Mode (0% CPU)...`);
-            this.songs = [];
+            this.songs = this.getUserSongs();
+            this.isQueueOnHold = true;
             this.prefetchedSong = null;
+            this._cleanupResource(this.preloadedResource);
             this.preloadedResource = null;
+            this.preloadedSongUrl = null;
             this.currentSong = null;
+            this._cleanupResource(this.currentResource);
             this.currentResource = null;
             this.loopMode = 'off';
             this.player.stop(true);
@@ -2279,6 +2294,19 @@ class MusicQueue {
     return removed || null;
   }
 
+  clearQueue() {
+    this.clearPreloadTimer();
+    this._cleanupResource(this.preloadedResource);
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
+    this.prefetchedSong = null;
+    this.autoplayPool = [];
+    this.songs = [];
+    if (this.loopMode === 'song' || this.loopMode === 'queue') {
+      this.loopMode = 'off';
+    }
+  }
+
   stop() {
     this.isStopped = true;
     this._pendingButtonAction = null;
@@ -2610,9 +2638,14 @@ class MusicQueue {
       const rawSec = song.rawDurationSec || 0;
       const realSec = song.realDurationSec || Math.round(realDurMs / 1000);
 
-      const shouldShiftTimestamps =
-        lyricsData.source === 'youtube_cc' ||
-        (rawSec > realSec && lyricDurSec > 0 && Math.abs(lyricDurSec - rawSec) < Math.abs(lyricDurSec - realSec));
+      let shouldShiftTimestamps = false;
+      if (lyricsData.source === 'youtube_cc') {
+        shouldShiftTimestamps = trimStartMs > 500;
+      } else if (rawSec > realSec && lyricDurSec > 0) {
+        const diffRaw = Math.abs(lyricDurSec - rawSec);
+        const diffReal = Math.abs(lyricDurSec - realSec);
+        shouldShiftTimestamps = diffRaw <= 3 && diffReal >= 8;
+      }
 
       if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
         activeSyncedLyrics = lyricsData.syncedLyrics
