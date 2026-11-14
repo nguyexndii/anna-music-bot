@@ -8,6 +8,7 @@ const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 class SessionManager {
   constructor() {
     this.cache = new Map();
+    this._lastMongoSyncTime = new Map();
     this._loadLocal();
   }
 
@@ -100,6 +101,25 @@ class SessionManager {
     this.cache.set(guildId, session);
     this._saveLocal();
 
+    // Kiểm tra nếu chỉ có vị trí bài hát (position) thay đổi
+    const isOnlyPositionChange = existing &&
+      existing.currentSong?.url === session.currentSong?.url &&
+      existing.status === session.status &&
+      existing.mode247 === session.mode247 &&
+      (existing.songs?.length || 0) === (session.songs?.length || 0) &&
+      existing.voiceChannelId === session.voiceChannelId &&
+      existing.textChannelId === session.textChannelId;
+
+    const now = Date.now();
+    const lastSync = this._lastMongoSyncTime.get(guildId) || 0;
+
+    // Nếu chỉ có vị trí bài hát thay đổi và chưa đủ 60 giây, chỉ cập nhật RAM & Local disk, không spam MongoDB Atlas
+    if (isOnlyPositionChange && (now - lastSync < 60000)) {
+      return;
+    }
+
+    this._lastMongoSyncTime.set(guildId, now);
+
     try {
       await GuildSession.findOneAndUpdate(
         { guildId },
@@ -113,6 +133,7 @@ class SessionManager {
 
   async clearSession(guildId) {
     if (!guildId) return;
+    this._lastMongoSyncTime.delete(guildId);
     const session = {
       guildId,
       voiceChannelId: null,
@@ -168,7 +189,9 @@ class SessionManager {
     if (!this.cache.size) return;
     try {
       const dbPromises = [];
+      const now = Date.now();
       for (const [guildId, session] of this.cache.entries()) {
+        this._lastMongoSyncTime.set(guildId, now);
         dbPromises.push(
           GuildSession.findOneAndUpdate(
             { guildId },

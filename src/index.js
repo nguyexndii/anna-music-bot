@@ -283,7 +283,18 @@ client.once(Events.ClientReady, async () => {
   setInterval(() => {
     try {
       if (global.gc) {
-        global.gc();
+        let anyPlaying = false;
+        if (musicManager && musicManager.queues) {
+          for (const q of musicManager.queues.values()) {
+            if (q && q.isPlaying) {
+              anyPlaying = true;
+              break;
+            }
+          }
+        }
+        if (!anyPlaying) {
+          global.gc();
+        }
       }
       const mem = process.memoryUsage();
       const rssMB = Math.round(mem.rss / 1024 / 1024);

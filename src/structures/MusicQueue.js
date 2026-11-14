@@ -2770,8 +2770,8 @@ class MusicQueue {
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastProgressEditTime || 0);
 
-      // Đảm bảo khoảng cách giữa 2 lần edit tối thiểu 3500ms để không dính rate limit Discord
-      if (timeSinceLastEdit >= 3500) {
+      // Đảm bảo khoảng cách giữa 2 lần edit tối thiểu 4000ms để không dính rate limit Discord
+      if (timeSinceLastEdit >= 4000) {
         this._lastProgressEditTime = now;
         const cardPayload = createNowPlayingCard(this.currentSong, this);
         await this.nowPlayingMessage.edit(cardPayload).catch(editErr => {
@@ -2874,10 +2874,10 @@ class MusicQueue {
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastLyricsEditTime || 0);
 
-      // 4. Chỉ sửa tin nhắn Discord khi CHUYỂN SANG CỤM 4 CÂU MỚI (Hết 4 câu mới đổi 1 lần!)
+      // 4. Chỉ sửa tin nhắn Discord khi CHUYỂN SANG CỤM 4 CÂU MỚI và câu hát thay đổi (Hết 4 câu mới đổi 1 lần!)
       if (chunkIndex !== this._lastRenderedChunkIdx || !this.currentLyricText) {
-        if (timeSinceLastEdit >= 3500) {
-          if (newLyricText !== this.currentLyricText) {
+        if (timeSinceLastEdit >= 4000) {
+          if (newLyricText && newLyricText !== this.currentLyricText) {
             this.currentLyricText = newLyricText;
             this.currentLyricIndex = startIdx;
             this._lastRenderedLyricIdx = activeIdx;
@@ -2898,8 +2898,8 @@ class MusicQueue {
             this._lastRenderedChunkIdx = chunkIndex;
           }
         } else {
-          // Chưa đủ 3500ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown
-          const waitCooldown = 3500 - timeSinceLastEdit;
+          // Chưa đủ 4000ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown
+          const waitCooldown = 4000 - timeSinceLastEdit;
           this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.max(300, waitCooldown));
           return;
         }
@@ -2916,7 +2916,7 @@ class MusicQueue {
       const nextChunkStartLine = lyrics[nextChunkIdx];
       // Cụm tiếp theo sẽ được lật khi effectiveCurrentMs chạm mốc: (nextChunkStartLine.time - LOOKAHEAD_MS)
       const msUntilNextChunk = Math.max(1000, (nextChunkStartLine.time - LOOKAHEAD_MS) - effectiveCurrentMs);
-      const minCooldownRemaining = Math.max(0, 3500 - (Date.now() - (this._lastLyricsEditTime || 0)));
+      const minCooldownRemaining = Math.max(0, 4000 - (Date.now() - (this._lastLyricsEditTime || 0)));
       const dynamicDelay = Math.max(msUntilNextChunk, minCooldownRemaining);
 
       this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), dynamicDelay);

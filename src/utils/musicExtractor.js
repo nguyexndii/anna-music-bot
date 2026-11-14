@@ -1702,6 +1702,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     // Cấu hình FFmpeg xuất luồng âm thanh nguyên bản (Bit-perfect Pure Stream) chuẩn Discord Voice:
     // TUYỆT ĐỐI KHÔNG dùng filter động (-af dynaudnorm, loudnorm, acompressor, alc...) để tránh phập phù âm lượng (Audio Pumping)
     ffmpegArgs.push(
+      '-thread_queue_size', '4096',
       '-i', streamUrl,
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1734,7 +1735,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1786,6 +1787,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
   const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
+      '-loglevel', 'error',
       '-fflags', '+nobuffer',
       '-flags', 'low_delay'
     ];
@@ -1793,6 +1795,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
     }
     ffmpegArgs.push(
+      '-thread_queue_size', '4096',
       '-i', filePath,
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1825,7 +1828,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream File Error]:', err.message);
@@ -1869,6 +1872,8 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
   });
 }
 
+const createCachedFfmpegStream = createDirectFileStream;
+
 /**
  * Tạo một luồng phát đơn qua yt-dlp & FFmpeg với cơ chế kiểm tra gói dữ liệu đầu tiên (First-Chunk Confirmation)
  * Nếu YouTube bị chặn bot (ra 0 byte / code 183), hàm sẽ reject ngay lập tức để kích hoạt cơ chế Failover.
@@ -1910,7 +1915,8 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       noProgress: true,
       socketTimeout: 10,
       retries: 2,
-      bufferSize: '64K',
+      bufferSize: '16K',
+      httpChunkSize: '10M',
       concurrentFragments: 1,
       noCheckCertificates: true,
       jsRuntimes: `node:${process.execPath}`
@@ -1956,6 +1962,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ffmpegArgs.push(
       '-analyzeduration', '0',
       '-probesize', '64k',
+      '-thread_queue_size', '4096',
       '-i', 'pipe:0',
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1972,7 +1979,8 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     // Nếu có tùy chọn lưu cache SSD (Cache Miss): Chỉ nén thêm luồng thứ hai libopus nếu người dùng cấu hình rõ ràng (tránh tốn CPU x3 trên VPS 1 core)
     const enableDiskCache = process.env.ENABLE_DISK_AUDIO_CACHE === 'true';
     if (enableDiskCache && cacheOptions?.tempPath) {
-      const isCpuBusyForCache = Boolean(os.loadavg && os.loadavg()[0] > 0.85);
+      const { isCpuOverloaded } = require('./systemMonitor');
+      const isCpuBusyForCache = (typeof isCpuOverloaded === 'function' ? isCpuOverloaded(0.85) : Boolean(os.loadavg && os.loadavg()[0] > 0.85));
       if (isCpuBusyForCache) {
         cacheOptions?.onAbort?.();
         cacheOptions = null;
@@ -2041,7 +2049,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
