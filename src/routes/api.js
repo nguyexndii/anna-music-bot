@@ -1566,6 +1566,13 @@ module.exports = function createApiRouter(client) {
               ok = await targetQueue.playNow(value.index);
             } else {
               let resolvedTrack = value;
+              if (value.url) {
+                const validatedUrl = validateAndSanitizeMusicUrl(value.url);
+                if (!validatedUrl) {
+                  return res.status(400).json({ success: false, error: 'URL bài hát không hợp lệ hoặc không thuộc danh sách domain âm nhạc được hỗ trợ!' });
+                }
+                resolvedTrack.url = validatedUrl;
+              }
               if (!resolvedTrack.url || resolvedTrack.url.includes('youtube.com/results?search_query=')) {
                 const q = resolvedTrack.searchQuery || `${resolvedTrack.title || ''} ${resolvedTrack.artist || ''}`.trim();
                 const found = await searchTrack(q);

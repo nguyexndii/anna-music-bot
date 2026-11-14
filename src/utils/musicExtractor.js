@@ -1131,6 +1131,16 @@ function isTrackInHistory(track, guildId, playedList, limit = 25) {
 const VIETNAMESE_ACCENTED_REGEX = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 /**
+ * Danh sách nghệ sĩ Việt Nam phổ biến (có dấu và không dấu) để phân loại và lọc vùng chuẩn xác
+ */
+const VN_ARTISTS_REGEX = /\b(son tung|sơn tùng|m-tp|soobin|justatee|binz|karik|rhymastic|touliver|low g|tlinh|mck|rpt|obito|hieuthuhai|hurrykng|manbo|negav|wren evans|grey d|chillies|vũ\.|madihu|bích phương|tăng duy tân|mono|hoàng thùy linh|đen vâu|b ray|andree|bâus|wxrdie|dangrangto|teuyungboy|wokeup|richie d|16 typh|lil wuyn|vsoul|datmaniac|kimmese|suboi|pháo|double2t|hòa minzy|erik|đức phúc|noo phước thịnh|đông nhi|mỹ tâm|bùi anh tuấn|hồ ngọc hà|trúc nhân|phan mạnh quỳnh|hà anh tuấn|đạt g|du uyên|jack|k-icm|châu khải phong|khắc việt|mr\.?\s*siro)\b/i;
+
+/**
+ * Biểu thức chính quy chặn tuyệt đối các video không phải âm nhạc (phân tích, cốt truyện, review, gameplay, podcast, v.v.)
+ */
+const NON_MUSIC_BLACKLIST_REGEX = /\b(phân\s*tích|cốt\s*truyện|giải\s*thích|tóm\s*tắt|review|đánh\s*giá|hướng\s*dẫn|cách\s*chơi|build\s*nhân\s*vật|tiêu\s*điểm\s*tướng|gameplay|walkthrough|playthrough|let'?s\s*play|highlight|highlights|full\s*match|bình\s*luận|reaction|phản\s*ứng|podcast|talkshow|phỏng\s*vấn|interview|tin\s*tức|điểm\s*tin|tâm\s*sự|vlog|thử\s*thách|challenge|prank|thuyết\s*minh|lồng\s*tiếng|tập\s*\d+|ep\.?\s*\d+|episode\s*\d+|movie\s*recap|tier\s*list|lore|theory|giả\s*thuyết|analysis|explained|video\s*essay|documentary|tài\s*liệu|speedrun|stream\s*vod|livestream\s*archive|trailer\s*breakdown|easter\s*eggs)\b/i;
+
+/**
  * 1. Nhận diện vùng quốc gia/ngôn ngữ của bài hát: 'VI', 'KR', 'JP', 'CN', 'INTL'
  */
 function detectTrackRegion(title = '', artist = '') {
@@ -1158,7 +1168,10 @@ function detectTrackRegion(title = '', artist = '') {
   }
 
   // 5. Danh sách từ khóa & nghệ sĩ V-Pop không dấu phổ biến
-  const vnKeywords = /\b(v-pop|vpop|nhac tre|viet nam|vietnamese|nhac viet|bolero|nhac vang|son tung|mtp|hieuthuhai|mck|madihu|grey d|chillies|hoang dung|den vau|erik|duc phuc|soobin|mono|wren evans|suni ha linh|phuong ly|justatee|rhymastic|binz|tlinh|low g|obito|24k\.right|b ray|karik|quang dung|tuan ngoc|le quyen|bui anh tuan|mr siro|phan manh quynh|trung quan|bao anh|hoa minzy|hoang thuy linh|bich phuong|ha anh tuan|my tam|vinahouse|nhac song|lien khuc)\b/i;
+  if (VN_ARTISTS_REGEX.test(combined)) {
+    return 'VI';
+  }
+  const vnKeywords = /\b(v-pop|vpop|nhac tre|viet nam|vietnamese|nhac viet|bolero|nhac vang|hoang dung|suni ha linh|phuong ly|24k\.right|quang dung|tuan ngoc|le quyen|trung quan|bao anh|vinahouse|nhac song|lien khuc)\b/i;
   if (vnKeywords.test(combined)) {
     return 'VI';
   }
@@ -1208,7 +1221,23 @@ function analyzeTrackOriginAndMeta(song) {
     realTitle = parsed.songName || rawTitle;
   }
 
-  const region = detectTrackRegion(`${realTitle} ${realArtist}`, realArtist);
+  let region = detectTrackRegion(`${realTitle} ${realArtist}`, realArtist);
+
+  // Khóa chuẩn vùng ngôn ngữ (INTL vs VI) & Chặn nghệ sĩ Việt không dấu lọt vào phiên US-UK
+  const combinedMeta = `${realTitle} ${realArtist}`.trim();
+  const hasViAccents = VIETNAMESE_ACCENTED_REGEX.test(combinedMeta);
+  const isVnArtist = VN_ARTISTS_REGEX.test(combinedMeta);
+
+  if (!hasViAccents && !isVnArtist) {
+    const isKr = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(combinedMeta) || /\b(k-pop|kpop|ost\s*part|bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|seventeen|red velvet|itzy|nmixx|gidle|g-idle)\b/i.test(combinedMeta);
+    const isJp = /[\u3040-\u309F\u30A0-\u30FF]/.test(combinedMeta) || /\b(j-pop|jpop|anime\s*ost|yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i.test(combinedMeta);
+    const isCn = /[\u4E00-\u9FFF]/.test(combinedMeta) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(combinedMeta);
+
+    if (!isKr && !isJp && !isCn) {
+      region = 'INTL';
+    }
+  }
+
   const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
   const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
   const isCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(rawTitle);
@@ -1234,19 +1263,31 @@ function isCandidateMatchingRegion(candidate, targetRegion, seedMeta = null) {
   const candArtist = candidate.artist || candidate.uploader || '';
   const candCombined = `${candTitle} ${candArtist}`;
 
+  // 0. CHẶN TUYỆT ĐỐI VIDEO PHÂN TÍCH GAME / CỐT TRUYỆN / REVIEW / GAMEPLAY / PODCAST:
+  if (NON_MUSIC_BLACKLIST_REGEX.test(candTitle) || NON_MUSIC_BLACKLIST_REGEX.test(candCombined)) {
+    return false;
+  }
+
   // 1. CHẶN TUYỆT ĐỐI NHẢY VÙNG (STRICT REGION LOCK):
   const hasViAccents = VIETNAMESE_ACCENTED_REGEX.test(candCombined);
-  const hasViKeywords = /\b(nhac tre|v-pop|vpop|nhac viet|remix viet|karaoke|beat chuan|tong nam|tong nu|tone nam|tone nu|nhac song|lien khuc|nhac vang|bolero|dan ca)\b/i.test(candCombined);
+  const isVnArtist = VN_ARTISTS_REGEX.test(candCombined);
+  const VN_INTL_BLACKLIST = /\b(vpop|v-pop|nhạc việt|nhac viet|nhạc trẻ|nhac tre|rap việt|rap viet|vinahouse|vinahey|lời việt|loi viet|vietnamese|vietsub)\b/i;
+  const hasViKeywords = VN_INTL_BLACKLIST.test(candCombined) || /\b(remix viet|karaoke|beat chuan|tong nam|tong nu|tone nam|tone nu|nhac song|lien khuc|nhac vang|bolero|dan ca)\b/i.test(candCombined);
 
-  if (targetRegion && targetRegion !== 'VI') {
-    // Đang nghe nhạc ngoại (INTL, KR, JP, CN) -> CHẶN TUYỆT ĐỐI bài Việt Nam!
-    if (hasViAccents || hasViKeywords) {
+  if (targetRegion === 'INTL') {
+    // Đang nghe nhạc ngoại US-UK (INTL) -> Chặn tuyệt đối dấu tiếng Việt, nghệ sĩ Việt Nam và từ khóa nhạc Việt
+    if (hasViAccents || isVnArtist || VN_INTL_BLACKLIST.test(candCombined) || hasViKeywords) {
+      return false;
+    }
+  } else if (targetRegion && targetRegion !== 'VI') {
+    // Đang nghe nhạc ngoại khác (KR, JP, CN) -> CHẶN TUYỆT ĐỐI bài Việt Nam!
+    if (hasViAccents || isVnArtist || hasViKeywords) {
       return false;
     }
   } else if (targetRegion === 'VI') {
     // Đang nghe nhạc Việt -> Ưu tiên tuyệt đối bài Việt Nam
     const candRegion = detectTrackRegion(candTitle, candArtist);
-    if (candRegion !== 'VI' && !hasViAccents && !hasViKeywords) {
+    if (candRegion !== 'VI' && !hasViAccents && !isVnArtist && !hasViKeywords) {
       return false;
     }
   }
@@ -1304,14 +1345,18 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = [], targetRe
 
     const seedMeta = analyzeTrackOriginAndMeta(lastSong);
     const region = targetRegion || seedMeta.region;
+    const isIntl = region === 'INTL';
 
     const mixOpts = {
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
       playlistEnd: 25,
-      extractorArgs: YTDLP_EXTRACTOR_ARGS
+      extractorArgs: isIntl ? `${YTDLP_EXTRACTOR_ARGS};youtube:lang=en` : YTDLP_EXTRACTOR_ARGS
     };
+    if (isIntl) {
+      mixOpts.geoBypassCountry = 'US';
+    }
 
     let res = null;
     try {
@@ -1426,8 +1471,8 @@ async function getLastfmSimilar(lastSong, guildId = null, playedList = [], targe
       }
 
       // Xác định locale cho searchTrack theo vùng
-      const searchLocale = region === 'VI' ? 'vi' : 'en';
-      const results = await searchMultipleTracks(fullQuery, 5, seedMeta.isRemix ? 'all' : 'official');
+      const searchLocale = region === 'INTL' ? 'en' : (region === 'VI' ? 'vi' : 'en');
+      const results = await searchMultipleTracks(fullQuery, 5, seedMeta.isRemix ? 'all' : 'official', searchLocale);
       if (results && results.length > 0) {
         for (const found of results) {
           if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
@@ -1536,7 +1581,8 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
     for (const query of searchQueries) {
       try {
         const cleanQ = query.replace(/^ytsearch\d+:/, '').trim();
-        const results = await executeSearch(cleanQ, 8, 'official');
+        const searchLocale = region === 'INTL' ? 'en' : (region === 'VI' ? 'vi' : 'en');
+        const results = await executeSearch(cleanQ, 8, 'official', searchLocale);
 
         if (results && results.length > 0) {
           for (const entry of results) {
@@ -1598,10 +1644,13 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
           const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
           const searchRes = await searchTrack(query);
           if (Array.isArray(searchRes) && searchRes.length > 0 && searchRes[0]?.url) {
-            return [{
+            const track = {
               ...searchRes[0],
               requestedBy: 'Auto'
-            }];
+            };
+            if (!NON_MUSIC_BLACKLIST_REGEX.test(track.title || '')) {
+              return [track];
+            }
           }
         }
       } catch (aiErr) {
@@ -1610,17 +1659,20 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
     } else if (layer === 'ytmix') {
       const candidates = await getYoutubeMix(lastSong, guildId, playedList, region, true);
       if (Array.isArray(candidates) && candidates.length > 0) {
-        console.log(`[Autoplay Pool] Nạp ${candidates.length} bài vào bộ đệm từ YouTube Mix (${region})`);
-        return candidates;
+        const filtered = candidates.filter(t => t && !NON_MUSIC_BLACKLIST_REGEX.test(t.title || ''));
+        if (filtered.length > 0) {
+          console.log(`[Autoplay Pool] Nạp ${filtered.length} bài vào bộ đệm từ YouTube Mix (${region})`);
+          return filtered;
+        }
       }
     } else if (layer === 'lastfm') {
       const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList, region);
-      if (lastfmTrack) {
+      if (lastfmTrack && !NON_MUSIC_BLACKLIST_REGEX.test(lastfmTrack.title || '')) {
         return [lastfmTrack];
       }
     } else if (layer === 'heuristic') {
       const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList, region);
-      if (heuristicTrack) {
+      if (heuristicTrack && !NON_MUSIC_BLACKLIST_REGEX.test(heuristicTrack.title || '')) {
         return [heuristicTrack];
       }
     }
@@ -1634,7 +1686,7 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
  */
 async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = false, targetRegion = null) {
   const pool = await getRelatedTracksPool(lastSong, guildIdOrHistory, useAi, targetRegion);
-  return (pool && pool.length > 0) ? pool[0] : null;
+  return (pool && pool.length > 0) ? pool.find(t => t && !NON_MUSIC_BLACKLIST_REGEX.test(t.title || '')) || null : null;
 }
 
 // Bộ quản lý tiến trình con (FFmpeg & yt-dlp) để chống tràn / rò rỉ RAM (Zombie processes)
@@ -2467,7 +2519,7 @@ async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, 
 /**
  * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web & Discord Autocomplete (Siêu tốc độ qua Worker Thread)
  */
-async function searchMultipleTracks(query, limit = 20, mode = 'official') {
+async function searchMultipleTracks(query, limit = 20, mode = 'official', locale = 'vi') {
   if (!query || typeof query !== 'string' || !query.trim()) return [];
   query = query.trim();
 
@@ -2477,7 +2529,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
   }
 
   try {
-    return await executeSearch(query, limit, mode);
+    return await executeSearch(query, limit, mode, locale);
   } catch (err) {
     console.warn('[searchMultipleTracks worker error]:', err.message);
     return [];

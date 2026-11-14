@@ -787,14 +787,22 @@ class MusicQueue {
       return;
     }
 
-    // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát
-    if (this.prefetchedSong && (this.prefetchedSong.url === lastSong?.url || this.prefetchedSong.title === lastSong?.title)) {
-      this.prefetchedSong = null;
+    // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát hoặc khác seedUrl
+    if (this.prefetchedSong) {
+      if (
+        this.prefetchedSong.url === lastSong?.url ||
+        this.prefetchedSong.title === lastSong?.title ||
+        (this.prefetchedSong._seedUrl && lastSong?.url && this.prefetchedSong._seedUrl !== lastSong.url)
+      ) {
+        this.prefetchedSong = null;
+      }
     }
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
     if (this.prefetchedSong && humanCount > 0 && guildSettings.autoplay !== false && !wasLofiTrack) {
-      if (historyManager.isRecentlyPlayed(this.guild.id, this.prefetchedSong, 25)) {
+      if (this.prefetchedSong._seedUrl && lastSong?.url && this.prefetchedSong._seedUrl !== lastSong.url) {
+        this.prefetchedSong = null;
+      } else if (historyManager.isRecentlyPlayed(this.guild.id, this.prefetchedSong, 25)) {
         this.prefetchedSong = null;
       } else {
         const nextTrack = this._sanitizeTrack(this.prefetchedSong);
@@ -815,6 +823,9 @@ class MusicQueue {
     if (this.autoplayPool && this.autoplayPool.length > 0 && humanCount > 0 && guildSettings.autoplay !== false && !wasLofiTrack) {
       while (this.autoplayPool.length > 0) {
         const candidate = this.autoplayPool.shift();
+        if (candidate._seedUrl && lastSong?.url && candidate._seedUrl !== lastSong.url) {
+          continue;
+        }
         if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== songToRelate?.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
           const sanitizedRel = this._sanitizeTrack(candidate);
           if (sanitizedRel) {
@@ -895,7 +906,8 @@ class MusicQueue {
             for (const fallbackQuery of fallbackQueries) {
               if (relatedTrack) break;
               console.log(`[Autoplay Fallback Query (${targetRegion})] Thử tìm bài thay thế: "${fallbackQuery}"`);
-              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, 'official');
+              const fallbackLocale = targetRegion === 'INTL' ? 'en' : (targetRegion === 'VI' ? 'vi' : 'en');
+              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, 'official', fallbackLocale);
               if (fallbackResults && fallbackResults.length > 0) {
                 relatedTrack = fallbackResults.find(t => 
                   t && t.url &&
@@ -1307,6 +1319,7 @@ class MusicQueue {
   async addSong(song, requestUser) {
     this.clear247IdleTimer();
     this.autoplayPool = []; // Làm mới bộ đệm Autoplay khi người dùng chủ động order bài mới
+    this.prefetchedSong = null;
     song = this._sanitizeTrack(song);
     if (!song) return null;
     this._attachRequester(song, requestUser);
@@ -1386,6 +1399,7 @@ class MusicQueue {
   async addSongs(songArray, requestUser) {
     this.clear247IdleTimer();
     this.autoplayPool = []; // Làm mới bộ đệm Autoplay khi thêm danh sách bài mới
+    this.prefetchedSong = null;
     const existingUrls = new Set((this.songs || []).map(s => s.url).filter(Boolean));
     if (this.currentSong?.url) existingUrls.add(this.currentSong.url);
 
@@ -1534,13 +1548,22 @@ class MusicQueue {
     if (!nextTrack) {
       const guildSettings = settingsManager.get(this.guild.id);
       if (guildSettings.autoplay !== false && this.getHumanMemberCount() > 0 && this.currentSong.requestedBy !== 'Auto (24/7)') {
+        // Đối chiếu bài prefetched hiện có với bài đang phát
+        if (this.prefetchedSong && this.currentSong?.url && this.prefetchedSong._seedUrl !== this.currentSong.url) {
+          this.prefetchedSong = null;
+        }
+
         // A. Kiểm tra Autoplay Pool trước (0ms)
         if (this.autoplayPool && this.autoplayPool.length > 0) {
           while (this.autoplayPool.length > 0) {
             const candidate = this.autoplayPool.shift();
+            if (candidate._seedUrl && this.currentSong?.url && candidate._seedUrl !== this.currentSong.url) {
+              continue;
+            }
             if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== this.currentSong.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
               const isEnCandidate = settingsManager.get(this.guild.id)?.language === 'en';
-            candidate.requestedBy = isEnCandidate ? 'Autoplay' : 'Tự động phát';
+              candidate.requestedBy = isEnCandidate ? 'Autoplay' : 'Tự động phát';
+              candidate._seedUrl = this.currentSong?.url;
               this.prefetchedSong = candidate;
               nextTrack = candidate;
               console.log(`[Autoplay Preload Pool Hit (0ms)] Nạp sẵn bài từ bộ đệm: "${candidate.title}"`);
@@ -1554,6 +1577,10 @@ class MusicQueue {
           await this._prefetchAutoplayTrack();
           nextTrack = this.prefetchedSong;
         } else if (!nextTrack && this.prefetchedSong) {
+          if (this.currentSong?.url && this.prefetchedSong._seedUrl !== this.currentSong.url) {
+            this.prefetchedSong = null;
+            await this._prefetchAutoplayTrack();
+          }
           nextTrack = this.prefetchedSong;
         }
       }
@@ -1578,6 +1605,8 @@ class MusicQueue {
     if (this._isPlayingNext) return;
     this._isPlayingNext = true;
     this.skipVotes.clear();
+    this.prefetchedSong = null;
+    this.autoplayPool = [];
 
     try {
       if (this.songs.length === 0) return;
@@ -2203,12 +2232,12 @@ class MusicQueue {
       this.paused = false;
       try { this.player.unpause(); } catch (e) {}
       this.autoplayPool = [];
+      this.prefetchedSong = null;
       this.clearPreloadTimer();
       this.clearCrossfadeTimer();
       this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
       this.preloadedSongUrl = null;
-      this.prefetchedSong = null;
       this.songs.unshift(targetTrack);
       this.skip();
       return true;
@@ -2230,6 +2259,7 @@ class MusicQueue {
   async playTrackNow(song, requestUser = null) {
     this.clear247IdleTimer();
     this.autoplayPool = [];
+    this.prefetchedSong = null;
     let sanitized = this._sanitizeTrack(song);
     if (!sanitized) return false;
     if (requestUser) {
@@ -3072,6 +3102,7 @@ class MusicQueue {
           const candidate = this.autoplayPool.shift();
           if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== this.currentSong.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
             candidate.requestedBy = 'Tự động phát';
+            candidate._seedUrl = this.currentSong?.url;
             this.prefetchedSong = candidate;
             console.log(`[Autoplay Pre-fetch Pool Hit (0ms)] Nạp sẵn từ bộ đệm: "${candidate.title}"`);
             this._prefetchQueueLyrics();
@@ -3089,9 +3120,11 @@ class MusicQueue {
         if (pool && pool.length > 0) {
           const nextTrack = pool[0];
           nextTrack.requestedBy = 'Tự động phát';
+          nextTrack._seedUrl = this.currentSong?.url;
           this.prefetchedSong = nextTrack;
           this.autoplayPool = pool.slice(1).map(t => {
             t.requestedBy = 'Tự động phát';
+            t._seedUrl = this.currentSong?.url;
             return t;
           });
           console.log(`[Autoplay Metadata Pre-fetch (${targetRegion})] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'}) và lưu ${this.autoplayPool.length} bài vào pool`);
