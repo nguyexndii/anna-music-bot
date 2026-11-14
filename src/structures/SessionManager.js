@@ -95,6 +95,7 @@ class SessionManager {
         requestedById: s.requestedById
       })) : []) : (existing.songs || []),
       position: data.position !== undefined ? Math.max(0, Math.floor(Number(data.position) || 0)) : (existing.position || 0),
+      voiceSessionStartTime: data.voiceSessionStartTime !== undefined ? data.voiceSessionStartTime : (existing.voiceSessionStartTime || null),
       updatedAt: new Date()
     };
 
@@ -143,6 +144,7 @@ class SessionManager {
       currentSong: null,
       songs: [],
       position: 0,
+      voiceSessionStartTime: null,
       updatedAt: new Date()
     };
 
@@ -240,6 +242,7 @@ class SessionManager {
             currentSong: doc.currentSong || null,
             songs: doc.songs || [],
             position: doc.position || 0,
+            voiceSessionStartTime: doc.voiceSessionStartTime || local?.voiceSessionStartTime || null,
             updatedAt: doc.updatedAt
           });
         }

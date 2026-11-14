@@ -95,6 +95,7 @@ class MusicQueue {
     this.loopMode = 'off';
     this.mode247 = true;
     this.paused = false;
+    this.voiceSessionStartTime = sessionManager.getSession(this.guild.id)?.voiceSessionStartTime || Date.now();
 
     this.previousSongs = []; // Tối đa 5 bài hát đã nghe trước đó
     this.lastUserTrack = null; // Ghi nhớ bài hát gần nhất của user để phát lại khi quay về từ Lofi
@@ -525,6 +526,9 @@ class MusicQueue {
     });
 
     this.connection.on(VoiceConnectionStatus.Ready, () => {
+      if (!this.voiceSessionStartTime) {
+        this.voiceSessionStartTime = Date.now();
+      }
       logAction('VOICE_CONNECTION_READY', {
         guild: this.guild.name,
         guildId: this.guild.id,
@@ -2305,6 +2309,10 @@ class MusicQueue {
     if (this.loopMode === 'song' || this.loopMode === 'queue') {
       this.loopMode = 'off';
     }
+    // Nếu kết nối voice đã bị hủy hoặc ngắt hoàn toàn thì reset mốc session
+    if (!this.connection || this.connection.state?.status === VoiceConnectionStatus.Destroyed || this.connection.state?.status === VoiceConnectionStatus.Disconnected) {
+      this.voiceSessionStartTime = null;
+    }
   }
 
   stop() {
@@ -3033,6 +3041,7 @@ class MusicQueue {
     this.autoplayPool = [];
     this.songs = [];
     this.currentSong = null;
+    this.voiceSessionStartTime = null;
     this.isQueueOnHold = false;
     this._cleanupResource(this.currentResource);
     this.currentResource = null;
@@ -3167,7 +3176,8 @@ class MusicQueue {
         status: (this.isPlaying && !isLofiCurrent) ? 'active' : 'idle_247',
         currentSong: (!isLofiCurrent && this.currentSong) ? this.currentSong : null,
         songs: userSongs,
-        position: position
+        position: position,
+        voiceSessionStartTime: this.voiceSessionStartTime
       });
     } catch (e) {
       return Promise.resolve();

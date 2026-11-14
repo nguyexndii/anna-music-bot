@@ -604,6 +604,11 @@ module.exports = function createApiRouter(client) {
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
     const guildSettings = settingsManager.get(guildId);
 
+    const sessionUptimeSec = queue?.voiceSessionStartTime
+      ? Math.max(0, Math.floor((Date.now() - queue.voiceSessionStartTime) / 1000))
+      : Math.floor(process.uptime());
+    const botUptimeSec = Math.floor(process.uptime());
+
     const voiceChannel = queue?.getVoiceChannel ? queue.getVoiceChannel() : (queue?.voiceChannel || guild.members.me?.voice?.channel);
     let voiceMembers = [];
     if (voiceChannel && guild.voiceStates?.cache) {
@@ -643,6 +648,8 @@ module.exports = function createApiRouter(client) {
 
     return res.json({
       success: true,
+      sessionUptimeSec,
+      botUptimeSec,
       guild: {
         id: guild.id,
         name: guild.name,
@@ -668,6 +675,8 @@ module.exports = function createApiRouter(client) {
       player: {
         isPlaying: queue ? queue.isPlaying : false,
         isPaused: queue ? queue.isPaused : false,
+        sessionUptimeSec,
+        botUptimeSec,
         is247LofiMode: Boolean(currentTrack && (currentTrack.is247 || currentTrack.requestedBy === 'Auto (24/7)' || currentTrack.requestedBy === 'Auto (24/7 Lofi)' || (typeof currentTrack.requestedBy === 'string' && currentTrack.requestedBy.includes('24/7')))),
         volume: queue ? queue.volume : (guildSettings.defaultVolume || 80),
         loopMode: queue ? queue.loopMode : (guildSettings.loopMode || 'off'),
@@ -806,6 +815,54 @@ module.exports = function createApiRouter(client) {
           favorites: caller?.userId ? ((await favoriteManager.getFavorites(caller.userId)) || []) : [],
           userPlaylists: caller?.userId ? ((await userPlaylistManager.getUserPlaylists(caller.userId)) || []) : []
         } : {})
+      }
+    });
+  });
+
+  // 3.1 Helper format/serialize trạng thái player và endpoint /api/player (Telemetry & Uptime)
+  function formatQueueState(queue, guild) {
+    const sessionUptimeSec = queue?.voiceSessionStartTime
+      ? Math.max(0, Math.floor((Date.now() - queue.voiceSessionStartTime) / 1000))
+      : Math.floor(process.uptime());
+    const botUptimeSec = Math.floor(process.uptime());
+    return {
+      sessionUptimeSec,
+      botUptimeSec,
+      isPlaying: queue ? queue.isPlaying : false,
+      isPaused: queue ? queue.isPaused : false,
+      volume: queue ? queue.volume : 80,
+      loopMode: queue ? queue.loopMode : 'off',
+      mode247: queue ? queue.mode247 : true,
+      voiceSessionStartTime: queue?.voiceSessionStartTime || null,
+      currentSong: queue?.currentSong || null,
+      songs: queue?.songs || []
+    };
+  }
+
+  router.get('/player', requireAuth, async (req, res) => {
+    const guildId = req.query.guildId || req.user?.guildId;
+    if (!guildId) {
+      return res.status(400).json({ success: false, error: 'Thiếu guildId' });
+    }
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      return res.status(404).json({ success: false, error: 'Không tìm thấy máy chủ' });
+    }
+    const queue = client.musicManager ? client.musicManager.get(guildId) : null;
+    const sessionUptimeSec = queue?.voiceSessionStartTime
+      ? Math.max(0, Math.floor((Date.now() - queue.voiceSessionStartTime) / 1000))
+      : Math.floor(process.uptime());
+    const botUptimeSec = Math.floor(process.uptime());
+
+    return res.json({
+      success: true,
+      guildId,
+      sessionUptimeSec,
+      botUptimeSec,
+      player: {
+        ...formatQueueState(queue, guild),
+        sessionUptimeSec,
+        botUptimeSec
       }
     });
   });
