@@ -1,0 +1,53 @@
+# Git & Env
+.git/
+.env*
+!.env.example
+
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Public static & Frontend build bundles (Exclude completely to prevent token overflow)
+public/
+public/**
+
+# Logs & temp
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.DS_Store
+
+# Large media, SVGs & archives
+**/*.svg
+**/*.mp3
+**/*.mp4
+**/*.wav
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp
+**/*.ico
+**/*.zip
+**/*.tar.*
+
+# Lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Repomix outputs
+repomix-output*
+*.txt
+
+# Security & Temp
+youtube.cookies*
+*.bak
+graphify-out/
+.agents/
+data/
+

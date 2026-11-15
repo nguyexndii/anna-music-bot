@@ -61,9 +61,9 @@ class UserPlaylistManager {
   /**
    * Lấy danh sách playlist của người dùng (RAM cache siêu tốc 0ms)
    */
-  async getUserPlaylists(userId) {
+  async getUserPlaylists(userId, forceFresh = false) {
     if (!userId) return [];
-    if (this.memoryCache.has(userId)) {
+    if (!forceFresh && this.memoryCache.has(userId)) {
       return this.memoryCache.get(userId);
     }
     try {
@@ -77,7 +77,9 @@ class UserPlaylistManager {
       // Fallback
     }
     const fallback = this.fallbackData.get(userId) || [];
-    this._setMemoryCache(userId, fallback);
+    if (fallback.length > 0) {
+      this._setMemoryCache(userId, fallback);
+    }
     return fallback;
   }
 

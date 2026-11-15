@@ -27,6 +27,7 @@ try {
 const ytdlp = require('yt-dlp-exec');
 const play = require('play-dl');
 const yts = require('yt-search');
+const audioCacheManager = require('../structures/AudioCacheManager');
 const ffmpeg = (process.platform === 'linux' && fs.existsSync('/usr/bin/ffmpeg'))
   ? '/usr/bin/ffmpeg'
   : (require('ffmpeg-static') || 'ffmpeg');
@@ -56,6 +57,20 @@ function getCookiesFile() {
           if (sample.includes('NETSCAPE') || sample.includes('.youtube.com') || sample.includes('# HTTP Cookie File')) {
             return c;
           }
+        } else if (stat.isFile() && stat.size <= 100) {
+          // Cơ chế Auto-Heal: Tự động khôi phục nếu file cookie bị tiến trình truncate về 0 byte
+          const bakFile = c + '.bak';
+          if (fs.existsSync(bakFile) && fs.statSync(bakFile).size > 100) {
+            console.log(`[Cookie Auto-Heal] Phát hiện file cookie bị rỗng, tự động khôi phục từ: ${bakFile}`);
+            try {
+              fs.chmodSync(c, 0o666);
+              fs.copyFileSync(bakFile, c);
+              fs.chmodSync(c, 0o444);
+              return c;
+            } catch (healErr) {
+              return bakFile;
+            }
+          }
         }
       }
     } catch (e) {}
@@ -64,7 +79,7 @@ function getCookiesFile() {
 }
 
 // Cấu hình player client bypass kiểm tra bot của YouTube trên Datacenter IP
-const YTDLP_EXTRACTOR_ARGS = 'youtube:player_client=android,mweb';
+const YTDLP_EXTRACTOR_ARGS = 'youtube:player_client=ios,android,mweb';
 /**
  * Định dạng mili-giây sang MM:SS
  */
@@ -77,12 +92,23 @@ function formatMs(ms) {
 }
 
 function parseDurationToSec(str) {
+  if (typeof str === 'number' && !isNaN(str)) return Math.max(0, Math.floor(str));
   if (!str || typeof str !== 'string' || str.toLowerCase().includes('live')) return 0;
   const parts = str.split(':').map(Number);
   if (parts.some(isNaN)) return 0;
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   return parts[0];
+}
+
+function stripYouTubeTranslatedLabels(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/\(\s*(?:mv|video|audio|bản\s*âm\s*thanh|lời\s*bài\s*hát|video\s*âm\s*nhạc|hình\s*ảnh)\s*chính\s*thức\s*\)/gi, ' ')
+    .replace(/\[\s*(?:mv|video|audio|bản\s*âm\s*thanh|lời\s*bài\s*hát|video\s*âm\s*nhạc)\s*chính\s*thức\s*\]/gi, ' ')
+    .replace(/\b(?:mv|video|bản\s*âm\s*thanh|video\s*âm\s*nhạc)\s+chính\s*thức\b/gi, ' ')
+    .replace(/\s+(?:và|của|với|cùng)\s+(?=[a-zA-Z0-9(\[])/gi, ' ')
+    .trim();
 }
 
 function parseViews(str) {
@@ -143,7 +169,7 @@ class PrioritySemaphore {
   }
 }
 
-const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 2;
+const MAX_CONCURRENT_EXTRACTION = process.env.MAX_CONCURRENT_EXTRACTION ? parseInt(process.env.MAX_CONCURRENT_EXTRACTION, 10) : 1;
 const extractionSemaphore = new PrioritySemaphore(MAX_CONCURRENT_EXTRACTION);
 
 // RAM Cache tái sử dụng Metadata & Direct Stream URL (tối đa 200 mục, TTL theo tham số expire còn hạn >= 30p)
@@ -183,11 +209,15 @@ function setCachedStreamUrl(targetUrl, streamUrl) {
   streamUrlCache.set(targetUrl, { streamUrl, expiresAt });
 }
 
-// Circuit Breaker (Cầu chì tự ngắt YouTube khi lỗi 3 lần liên tiếp)
+// Circuit Breaker (Cầu chì tự ngắt YouTube khi lỗi 3 bài liên tiếp)
 let ytStreamFailures = 0;
 let skipYouTubeStreamUntil = 0;
 
-function isYouTubeCircuitOpen() {
+function isYouTubeCircuitOpen(options = {}) {
+  // Nếu là yêu cầu trực tiếp từ người dùng (/play, web playNow), cho phép thử phát YouTube ngay để kiểm tra phục hồi (Half-Open)
+  if (options?.priority === 'high') {
+    return false;
+  }
   return Date.now() < skipYouTubeStreamUntil;
 }
 
@@ -195,8 +225,8 @@ function recordYouTubeFailure(errorMsg) {
   ytStreamFailures++;
   console.warn(`[YouTube Circuit Breaker] Ghi nhận lỗi phát YouTube (${ytStreamFailures}/3): ${errorMsg}`);
   if (ytStreamFailures >= 3) {
-    skipYouTubeStreamUntil = Date.now() + 10 * 60 * 1000; // Ngắt 10 phút
-    console.warn('[YouTube Circuit Breaker] Đã lỗi 3 lần liên tiếp! Kích hoạt cầu chì tạm ngắt YouTube 10 phút, chuyển thẳng sang SoundCloud.');
+    skipYouTubeStreamUntil = Date.now() + 3 * 60 * 1000; // Ngắt 3 phút (thay vì 10 phút để tránh kẹt SoundCloud quá lâu)
+    console.warn('[YouTube Circuit Breaker] Đã lỗi 3 bài liên tiếp! Kích hoạt cầu chì tạm ngắt YouTube 3 phút, chuyển sang SoundCloud.');
     try {
       const { notifyCookieExpired, checkYouTubeCookieHealth } = require('./statusNotifier');
       const client = global._discordClient;
@@ -496,12 +526,12 @@ async function enrichSpotifyTracksWithThumbnails(tracks, defaultCover) {
     }));
   };
 
-  // 2. Tải ngay 15 bài đầu tiên (~300-500ms) để phản hồi API siêu nhanh cho người dùng
-  const firstBatch = tracks.slice(0, 15);
+  // 2. Tải trước 5 bài đầu tiên (~100-200ms) để phản hồi API siêu nhanh mà không nghẽn Event Loop
+  const firstBatch = tracks.slice(0, 5);
   await enrichBatch(firstBatch);
 
   // 3. Tải tiếp các bài còn lại ở background để không làm nghẽn API (mỗi đợt 25 bài)
-  const remaining = tracks.slice(15);
+  const remaining = tracks.slice(5);
   if (remaining.length > 0) {
     (async () => {
       const batchSize = 25;
@@ -526,6 +556,36 @@ const ALLOWED_MUSIC_HOSTNAMES = new Set([
   'm.soundcloud.com',
   'on.soundcloud.com'
 ]);
+
+let soundCloudClientId = null;
+async function ensureSoundCloudAuth() {
+  if (soundCloudClientId) return soundCloudClientId;
+  try {
+    soundCloudClientId = await play.getFreeClientID();
+    if (soundCloudClientId) {
+      await play.setToken({ soundcloud: { client_id: soundCloudClientId } });
+    }
+  } catch (e) {
+    console.warn('[SoundCloud Auth Warning]:', e.message);
+  }
+  return soundCloudClientId;
+}
+
+function extractSoundCloudTitleFromUrl(url) {
+  if (!url) return 'SoundCloud Track';
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const slug = parts[parts.length - 1];
+      return slug
+        .split('-')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    }
+  } catch (e) {}
+  return 'SoundCloud Track';
+}
 
 /**
  * Kiểm tra và chuẩn hóa URL âm nhạc: Chống Argument Injection, Whitelist Hostname HTTPS và Chặn SSRF
@@ -625,15 +685,17 @@ async function searchTrack(query, targetDurationSec = 0) {
   try {
     if (!query || typeof query !== 'string') return null;
 
-    let cleanQuery = query.trim();
+    let cleanQuery = query.trim().slice(0, 150).trim();
     // Chống Argument Injection: chặn chuỗi bắt đầu bằng dấu trừ
     if (cleanQuery.startsWith('-')) return null;
 
-    // Giới hạn độ dài từ khóa tìm kiếm tối đa 150 ký tự
-    cleanQuery = cleanQuery.slice(0, 150).trim();
+    // Tự động chuẩn hóa link Spotify nếu thiếu protocol trước khi kiểm tra an toàn URL
+    if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !/^https?:\/\//i.test(cleanQuery)) {
+      cleanQuery = 'https://' + cleanQuery;
+    }
 
     // Kiểm tra an toàn bảo mật SSRF cho đường dẫn URL ngoại vi
-    if (cleanQuery.startsWith('http://') || cleanQuery.startsWith('https://')) {
+    if (/^https?:\/\//i.test(cleanQuery)) {
       const sanitizedUrl = validateAndSanitizeMusicUrl(cleanQuery);
       if (!sanitizedUrl) {
         console.warn(`[Security Alert: SSRF / Invalid Hostname Blocked] URL không an toàn bị từ chối: ${cleanQuery}`);
@@ -642,10 +704,8 @@ async function searchTrack(query, targetDurationSec = 0) {
       cleanQuery = sanitizedUrl;
     }
 
-    // Tự động chuẩn hóa link Spotify nếu thiếu protocol
-    if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !cleanQuery.startsWith('http://') && !cleanQuery.startsWith('https://')) {
-      cleanQuery = 'https://' + cleanQuery;
-    }
+    // Đồng bộ biến query cho tất cả các nhánh xử lý bên dưới
+    query = cleanQuery;
 
     // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 100 bài)
     if (cleanQuery.includes('spotify.com/playlist/') || cleanQuery.includes('spotify.com/album/')) {
@@ -691,8 +751,8 @@ async function searchTrack(query, targetDurationSec = 0) {
             };
           }).filter(t => t.title && t.title.trim() !== '');
 
-          // Tải song song thumbnail từng bài hát từ Spotify oEmbed (tối đa 25 bài/đợt, cực nhanh ~1-2s)
-          await enrichSpotifyTracksWithThumbnails(limited, defaultCover);
+          // Tải song song thumbnail từng bài hát từ Spotify oEmbed ở nền để phản hồi playlist ngay lập tức
+          enrichSpotifyTracksWithThumbnails(limited, defaultCover).catch(() => {});
           return limited;
         }
       } catch (spErr) {
@@ -747,7 +807,9 @@ async function searchTrack(query, targetDurationSec = 0) {
           flatPlaylist: true,
           playlistEnd: 100,
           yesPlaylist: true,
-          noWarnings: true
+          noWarnings: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K'
         };
         const cFile = getCookiesFile();
         if (cFile) plOpts.cookies = cFile;
@@ -777,36 +839,6 @@ async function searchTrack(query, targetDurationSec = 0) {
         console.warn('[YouTube Playlist extraction error]:', ytErr.message);
       }
     }
-
-let soundCloudClientId = null;
-async function ensureSoundCloudAuth() {
-  if (soundCloudClientId) return soundCloudClientId;
-  try {
-    soundCloudClientId = await play.getFreeClientID();
-    if (soundCloudClientId) {
-      await play.setToken({ soundcloud: { client_id: soundCloudClientId } });
-    }
-  } catch (e) {
-    console.warn('[SoundCloud Auth Warning]:', e.message);
-  }
-  return soundCloudClientId;
-}
-
-function extractSoundCloudTitleFromUrl(url) {
-  if (!url) return 'SoundCloud Track';
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean);
-    if (parts.length >= 2) {
-      const slug = parts[parts.length - 1];
-      return slug
-        .split('-')
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' ');
-    }
-  } catch (e) {}
-  return 'SoundCloud Track';
-}
 
     // 4. Xử lý SoundCloud (Cả bài hát đơn và Playlist / Album - Giới hạn 100 bài)
     if (query.includes('soundcloud.com')) {
@@ -888,7 +920,7 @@ function extractSoundCloudTitleFromUrl(url) {
 
     // 5. Xử lý đường dẫn Direct HTTP/HTTPS (File audio hoặc Livestream)
     if (query.startsWith('http://') || query.startsWith('https://')) {
-      // 5.1 Xử lý Single YouTube video bằng oEmbed / yts (Tránh spawn yt-dlp ngốn 100% CPU trên VPS 1 core)
+      // 5.1 Xử lý Single YouTube video bằng oEmbed + InnerTube siêu nhẹ (< 1ms CPU, không block Main Thread)
       const ytMatch = query.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
       if (ytMatch && ytMatch[1] && !query.includes('list=')) {
         const videoId = ytMatch[1];
@@ -896,36 +928,96 @@ function extractSoundCloudTitleFromUrl(url) {
         const defaultThumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
         try {
-          const oEmbedPromise = fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null);
+          // Bước 1: Kiểm tra cache trong searchService nếu đã có metadata
+          let cachedMeta = null;
+          try {
+            const { getCachedResults } = require('./searchService');
+            const cachedList = getCachedResults(videoUrl) || getCachedResults(videoId);
+            if (Array.isArray(cachedList) && cachedList.length > 0 && cachedList[0].url) {
+              cachedMeta = cachedList[0];
+            }
+          } catch (e) {}
 
-          const ytsPromise = Promise.race([
-            yts({ videoId }),
-            new Promise(resolve => setTimeout(() => resolve(null), 2500))
-          ]).catch(() => null);
+          if (cachedMeta) {
+            return [{
+              title: cachedMeta.title,
+              url: videoUrl,
+              duration: cachedMeta.duration || '3:30',
+              thumbnail: cachedMeta.thumbnail || defaultThumb,
+              artist: cachedMeta.artist || 'YouTube',
+              isLive: Boolean(cachedMeta.isLive)
+            }];
+          }
 
-          const [oembedData, ytsData] = await Promise.all([oEmbedPromise, ytsPromise]);
-          const rawTitle = ytsData?.title || oembedData?.title || '';
-          const rawArtist = oembedData?.author_name || ytsData?.author?.name || 'YouTube';
+          // Bước 2: Gọi đồng thời oEmbed và InnerTube Player API (Client IOS siêu nhẹ ~15KB JSON, không parse DOM HTML)
+          const oEmbedPromise = fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+            signal: AbortSignal.timeout(2000)
+          }).then(res => res.ok ? res.json() : null).catch(() => null);
+
+          const innerTubePromise = fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)'
+            },
+            body: JSON.stringify({
+              videoId,
+              context: {
+                client: {
+                  clientName: 'IOS',
+                  clientVersion: '19.45.4',
+                  hl: 'vi',
+                  gl: 'VN'
+                }
+              }
+            }),
+            signal: AbortSignal.timeout(2000)
+          }).then(res => res.ok ? res.json() : null).catch(() => null);
+
+          const [oembedData, innerData] = await Promise.all([oEmbedPromise, innerTubePromise]);
+          const innerDetails = innerData?.videoDetails;
+
+          const rawTitle = innerDetails?.title || oembedData?.title || '';
+          const rawArtist = oembedData?.author_name || innerDetails?.author || 'YouTube';
           const cleanTitle = String(rawTitle).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
           const cleanArtist = String(rawArtist).replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
 
-          const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (videoId ? `Bài hát không tên (${videoId})` : 'Bài hát không tên'));
+          const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : `Bài hát YouTube (${videoId})`);
           const safeArtist = cleanArtist || 'YouTube';
 
-          if (rawTitle || safeTitle) {
-            return [{
-              title: safeTitle,
-              url: videoUrl,
-              duration: ytsData?.timestamp || (ytsData?.seconds ? `${Math.floor(ytsData.seconds / 60)}:${String(ytsData.seconds % 60).padStart(2, '0')}` : '3:30'),
-              thumbnail: defaultThumb,
-              artist: safeArtist,
-              isLive: Boolean(ytsData?.live)
-            }];
+          let parsedDuration = '3:30';
+          let durationSec = 210;
+          if (innerDetails?.lengthSeconds) {
+            const sec = parseInt(innerDetails.lengthSeconds, 10);
+            if (!isNaN(sec) && sec > 0) {
+              durationSec = sec;
+              parsedDuration = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+            }
           }
+
+          // Bước 3: Luôn trả về kết quả ngay lập tức cho YouTube Watch URL đơn lẻ, TUYỆT ĐỐI không rơi xuống fallback yt-dlp nặng nề
+          return [{
+            title: safeTitle,
+            url: videoUrl,
+            duration: parsedDuration,
+            seconds: durationSec,
+            ytDurationSec: durationSec,
+            rawDurationSec: durationSec,
+            thumbnail: defaultThumb,
+            artist: safeArtist,
+            isLive: Boolean(innerDetails?.isLiveContent)
+          }];
         } catch (fastYtErr) {
           console.warn('[Fast YouTube single video fallback]:', fastYtErr.message);
+          // Trường hợp lỗi mạng, vẫn trả về metadata tối thiểu để phát nhạc, không spawn yt-dlp làm sập CPU
+          return [{
+            title: `Bài hát YouTube (${videoId})`,
+            url: videoUrl,
+            duration: '3:30',
+            thumbnail: defaultThumb,
+            artist: 'YouTube',
+            isLive: false
+          }];
         }
       }
 
@@ -935,7 +1027,9 @@ function extractSoundCloudTitleFromUrl(url) {
           noWarnings: true,
           callHome: false,
           preferFreeFormats: true,
-          youtubeSkipDashManifest: true
+          youtubeSkipDashManifest: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K'
         };
         const cFile = getCookiesFile();
         if (cFile) infoOpts.cookies = cFile;
@@ -1057,51 +1151,58 @@ function isTrackInHistory(track, guildId, playedList, limit = 25) {
 const VIETNAMESE_ACCENTED_REGEX = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 /**
+ * Danh sách nghệ sĩ Việt Nam phổ biến (có dấu và không dấu) để phân loại và lọc vùng chuẩn xác
+ */
+const VN_ARTISTS_REGEX = /\b(son tung|sơn tùng|m-tp|soobin|justatee|binz|karik|rhymastic|touliver|low g|tlinh|mck|rpt|obito|hieuthuhai|hurrykng|manbo|negav|wren evans|grey d|chillies|vũ\.|madihu|bích phương|tăng duy tân|mono|hoàng thùy linh|đen vâu|b ray|andree|bâus|wxrdie|dangrangto|teuyungboy|wokeup|richie d|16 typh|lil wuyn|vsoul|datmaniac|kimmese|suboi|pháo|double2t|hòa minzy|erik|đức phúc|noo phước thịnh|đông nhi|mỹ tâm|bùi anh tuấn|hồ ngọc hà|trúc nhân|phan mạnh quỳnh|hà anh tuấn|đạt g|du uyên|jack|k-icm|châu khải phong|khắc việt|mr\.?\s*siro)\b/i;
+
+/**
+ * Biểu thức chính quy chặn tuyệt đối các video không phải âm nhạc (phân tích, cốt truyện, review, gameplay, podcast, v.v.)
+ */
+const NON_MUSIC_BLACKLIST_REGEX = /\b(phân\s*tích|cốt\s*truyện|giải\s*thích|tóm\s*tắt|review|đánh\s*giá|hướng\s*dẫn|cách\s*chơi|build\s*nhân\s*vật|tiêu\s*điểm\s*tướng|gameplay|walkthrough|playthrough|let'?s\s*play|highlight|highlights|full\s*match|bình\s*luận|reaction|phản\s*ứng|podcast|talkshow|phỏng\s*vấn|interview|tin\s*tức|điểm\s*tin|tâm\s*sự|vlog|thử\s*thách|challenge|prank|thuyết\s*minh|lồng\s*tiếng|tập\s*\d+|ep\.?\s*\d+|episode\s*\d+|movie\s*recap|tier\s*list|lore|theory|giả\s*thuyết|analysis|explained|video\s*essay|documentary|tài\s*liệu|speedrun|stream\s*vod|livestream\s*archive|trailer\s*breakdown|easter\s*eggs)\b/i;
+
+/**
  * 1. Nhận diện vùng quốc gia/ngôn ngữ của bài hát: 'VI', 'KR', 'JP', 'CN', 'INTL'
  */
 function detectTrackRegion(title = '', artist = '') {
   const combined = `${title} ${artist}`.trim();
   if (!combined) return 'INTL';
 
-  // 1. Kiểm tra ký tự tiếng Việt có dấu
-  if (VIETNAMESE_ACCENTED_REGEX.test(combined)) {
+  const cleanedCombined = stripYouTubeTranslatedLabels(combined);
+
+  // 1. Kiểm tra nghệ sĩ Việt Nam đã biết
+  if (VN_ARTISTS_REGEX.test(cleanedCombined)) {
     return 'VI';
   }
 
-  // 2. Kiểm tra tiếng Hàn (Hangul)
-  if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(combined) || /\b(k-pop|kpop|ost\s*part)\b/i.test(combined)) {
+  // 2. Kiểm tra tiếng Hàn (Hangul) & Nghệ sĩ K-Pop (kể cả K/DA, i-dle, Soyeon...)
+  const krKeywords = /\b(k\/da|kda|i-dle|\(g\)i-dle|gidle|g-idle|miyeon|soyeon|minnie|yuqi|shuhua|bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|big bang|seventeen|red velvet|itzy|nmixx|babymonster|illit|kiss of life|treasure|ateez|nct|riize|zerobaseone|psy|g-dragon|jennie|lisa|rose|jisoo|jungkook)\b/i;
+  if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(cleanedCombined) || /\b(k-pop|kpop|ost\s*part)\b/i.test(cleanedCombined) || krKeywords.test(cleanedCombined)) {
     return 'KR';
   }
 
-  // 3. Kiểm tra tiếng Nhật (Hiragana / Katakana)
-  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(combined) || /\b(j-pop|jpop|anime\s*ost)\b/i.test(combined)) {
+  // 3. Kiểm tra tiếng Nhật (Hiragana / Katakana) & Nghệ sĩ J-Pop
+  const jpKeywords = /\b(yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i;
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(cleanedCombined) || /\b(j-pop|jpop|anime\s*ost)\b/i.test(cleanedCombined) || jpKeywords.test(cleanedCombined)) {
     return 'JP';
   }
 
   // 4. Kiểm tra tiếng Trung (Hán tự)
-  if (/[\u4E00-\u9FFF]/.test(combined) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(combined)) {
+  if (/[\u4E00-\u9FFF]/.test(cleanedCombined) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(cleanedCombined)) {
     return 'CN';
   }
 
-  // 5. Danh sách từ khóa & nghệ sĩ V-Pop không dấu phổ biến
-  const vnKeywords = /\b(v-pop|vpop|nhac tre|viet nam|vietnamese|nhac viet|bolero|nhac vang|son tung|mtp|hieuthuhai|mck|madihu|grey d|chillies|hoang dung|den vau|erik|duc phuc|soobin|mono|wren evans|suni ha linh|phuong ly|justatee|rhymastic|binz|tlinh|low g|obito|24k\.right|b ray|karik|quang dung|tuan ngoc|le quyen|bui anh tuan|mr siro|phan manh quynh|trung quan|bao anh|hoa minzy|hoang thuy linh|bich phuong|ha anh tuan|my tam|vinahouse|nhac song|lien khuc)\b/i;
-  if (vnKeywords.test(combined)) {
+  // 5. Kiểm tra ký tự tiếng Việt có dấu (sau khi đã loại bỏ nhãn dịch tự động của YouTube)
+  if (VIETNAMESE_ACCENTED_REGEX.test(cleanedCombined)) {
     return 'VI';
   }
 
-  // 6. Danh sách nghệ sĩ K-Pop phổ biến không dấu
-  const krKeywords = /\b(bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|big bang|seventeen|red velvet|itzy|nmixx|gidle|g-idle)\b/i;
-  if (krKeywords.test(combined)) {
-    return 'KR';
+  // 6. Danh sách từ khóa & nghệ sĩ V-Pop không dấu phổ biến
+  const vnKeywords = /\b(v-pop|vpop|nhac tre|viet nam|vietnamese|nhac viet|bolero|nhac vang|hoang dung|suni ha linh|phuong ly|24k\.right|quang dung|tuan ngoc|le quyen|trung quan|bao anh|vinahouse|nhac song|lien khuc)\b/i;
+  if (vnKeywords.test(cleanedCombined)) {
+    return 'VI';
   }
 
-  // 7. Danh sách nghệ sĩ J-Pop phổ biến
-  const jpKeywords = /\b(yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i;
-  if (jpKeywords.test(combined)) {
-    return 'JP';
-  }
-
-  // 8. Mặc định là Nhạc Quốc Tế / US-UK
+  // 7. Mặc định là Nhạc Quốc Tế / US-UK
   return 'INTL';
 }
 
@@ -1134,9 +1235,11 @@ function analyzeTrackOriginAndMeta(song) {
     realTitle = parsed.songName || rawTitle;
   }
 
-  const region = detectTrackRegion(`${realTitle} ${realArtist}`, realArtist);
+  const region = detectTrackRegion(realTitle, realArtist);
+
   const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
   const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
+  const isCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(rawTitle);
 
   return {
     realTitle: realTitle || rawTitle,
@@ -1144,6 +1247,7 @@ function analyzeTrackOriginAndMeta(song) {
     region,
     isRemix,
     isAcoustic,
+    isCover,
     rawTitle,
     rawArtist
   };
@@ -1158,19 +1262,31 @@ function isCandidateMatchingRegion(candidate, targetRegion, seedMeta = null) {
   const candArtist = candidate.artist || candidate.uploader || '';
   const candCombined = `${candTitle} ${candArtist}`;
 
+  // 0. CHẶN TUYỆT ĐỐI VIDEO PHÂN TÍCH GAME / CỐT TRUYỆN / REVIEW / GAMEPLAY / PODCAST:
+  if (NON_MUSIC_BLACKLIST_REGEX.test(candTitle) || NON_MUSIC_BLACKLIST_REGEX.test(candCombined)) {
+    return false;
+  }
+
   // 1. CHẶN TUYỆT ĐỐI NHẢY VÙNG (STRICT REGION LOCK):
   const hasViAccents = VIETNAMESE_ACCENTED_REGEX.test(candCombined);
-  const hasViKeywords = /\b(nhac tre|v-pop|vpop|nhac viet|remix viet|karaoke|beat chuan|tong nam|tong nu|tone nam|tone nu|nhac song|lien khuc|nhac vang|bolero|dan ca)\b/i.test(candCombined);
+  const isVnArtist = VN_ARTISTS_REGEX.test(candCombined);
+  const VN_INTL_BLACKLIST = /\b(vpop|v-pop|nhạc việt|nhac viet|nhạc trẻ|nhac tre|rap việt|rap viet|vinahouse|vinahey|lời việt|loi viet|vietnamese|vietsub)\b/i;
+  const hasViKeywords = VN_INTL_BLACKLIST.test(candCombined) || /\b(remix viet|karaoke|beat chuan|tong nam|tong nu|tone nam|tone nu|nhac song|lien khuc|nhac vang|bolero|dan ca)\b/i.test(candCombined);
 
-  if (targetRegion && targetRegion !== 'VI') {
-    // Đang nghe nhạc ngoại (INTL, KR, JP, CN) -> CHẶN TUYỆT ĐỐI bài Việt Nam!
-    if (hasViAccents || hasViKeywords) {
+  if (targetRegion === 'INTL') {
+    // Đang nghe nhạc ngoại US-UK (INTL) -> Chặn tuyệt đối dấu tiếng Việt, nghệ sĩ Việt Nam và từ khóa nhạc Việt
+    if (hasViAccents || isVnArtist || VN_INTL_BLACKLIST.test(candCombined) || hasViKeywords) {
+      return false;
+    }
+  } else if (targetRegion && targetRegion !== 'VI') {
+    // Đang nghe nhạc ngoại khác (KR, JP, CN) -> CHẶN TUYỆT ĐỐI bài Việt Nam!
+    if (hasViAccents || isVnArtist || hasViKeywords) {
       return false;
     }
   } else if (targetRegion === 'VI') {
     // Đang nghe nhạc Việt -> Ưu tiên tuyệt đối bài Việt Nam
     const candRegion = detectTrackRegion(candTitle, candArtist);
-    if (candRegion !== 'VI' && !hasViAccents && !hasViKeywords) {
+    if (candRegion !== 'VI' && !hasViAccents && !isVnArtist && !hasViKeywords) {
       return false;
     }
   }
@@ -1181,13 +1297,27 @@ function isCandidateMatchingRegion(candidate, targetRegion, seedMeta = null) {
     return false;
   }
 
-  // 3. LỌC NỘI DUNG RÁC (Karaoke, Beat, Reaction, Tập phim, Parody, Live Stage)
+  // 3. LỌC NỘI DUNG RÁC (Karaoke, Beat, Reaction, Tập phim, Parody, Live Stage) & BÀI COVER
   const junkRegex = /\b(karaoke|beat chuẩn|beat karaoke|reaction|parody|tập\s*\d+|phim ngắn|hậu trường|behind the scenes|tiktok compilation)\b/i;
   if (junkRegex.test(candTitle)) {
     return false;
   }
   if (isLiveStageVideo(candTitle)) {
     return false;
+  }
+
+  // 3.1. Chặn tuyệt đối nhạc Bolero, Nhạc vàng, Tuyển chọn, Liên khúc nếu bài gốc không phải thể loại này
+  const isVintageOrBolero = seedMeta && /\b(bolero|nhạc\s*vàng|nhac\s*vang|trữ\s*tình|tru\s*tinh|nhạc\s*xưa|nhac\s*xua)\b/i.test(`${seedMeta.realTitle} ${seedMeta.realArtist}`);
+  if (!isVintageOrBolero) {
+    if (/\b(bolero|nhạc\s*vàng|nhac\s*vang|trữ\s*tình|tru\s*tinh|liên\s*khúc|lien\s*khuc|tuyển\s*chọn|tuyen\s*chon|nhạc\s*xưa|nhac\s*xua|nhạc\s*sống|nhac\s*song)\b/i.test(candCombined)) {
+      return false;
+    }
+  }
+  // Nếu bài gốc KHÔNG PHẢI bài cover -> CHẶN TUYỆT ĐỐI các bài cover/hát lại để tránh Autoplay tự động nhảy sang bản cover
+  if (seedMeta && !seedMeta.isCover) {
+    if (/\b(cover|hát lại|hat lai|covered\s*by|cover\s*version)\b/i.test(candTitle)) {
+      return false;
+    }
   }
 
   // 4. LỌC VIBE & PHONG CÁCH:
@@ -1222,14 +1352,20 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = [], targetRe
 
     const seedMeta = analyzeTrackOriginAndMeta(lastSong);
     const region = targetRegion || seedMeta.region;
+    const isIntl = region === 'INTL';
 
     const mixOpts = {
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
       playlistEnd: 25,
-      extractorArgs: YTDLP_EXTRACTOR_ARGS
+      extractorArgs: isIntl ? `${YTDLP_EXTRACTOR_ARGS};youtube:lang=en` : YTDLP_EXTRACTOR_ARGS,
+      httpChunkSize: '10M',
+      bufferSize: '64K'
     };
+    if (isIntl) {
+      mixOpts.geoBypassCountry = 'US';
+    }
 
     let res = null;
     try {
@@ -1344,8 +1480,8 @@ async function getLastfmSimilar(lastSong, guildId = null, playedList = [], targe
       }
 
       // Xác định locale cho searchTrack theo vùng
-      const searchLocale = region === 'VI' ? 'vi' : 'en';
-      const results = await searchMultipleTracks(fullQuery, 5, seedMeta.isRemix ? 'all' : 'official');
+      const searchLocale = region === 'INTL' ? 'en' : (region === 'VI' ? 'vi' : 'en');
+      const results = await searchMultipleTracks(fullQuery, 5, seedMeta.isRemix ? 'all' : 'official', searchLocale);
       if (results && results.length > 0) {
         for (const found of results) {
           if (found && found.url && found.url !== lastSong.url && !isTrackInHistory(found, guildId, playedList, 25)) {
@@ -1453,22 +1589,16 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
 
     for (const query of searchQueries) {
       try {
-        const relOpts = {
-          dumpSingleJson: true,
-          noWarnings: true,
-          flatPlaylist: true,
-          extractorArgs: YTDLP_EXTRACTOR_ARGS
-        };
-        const cFile = getCookiesFile();
-        if (cFile) relOpts.cookies = cFile;
-        const res = await ytdlp(query, relOpts);
+        const cleanQ = query.replace(/^ytsearch\d+:/, '').trim();
+        const searchLocale = region === 'INTL' ? 'en' : (region === 'VI' ? 'vi' : 'en');
+        const results = await executeSearch(cleanQ, 8, 'official', searchLocale);
 
-        if (res && res.entries && res.entries.length > 0) {
-          for (const entry of res.entries) {
+        if (results && results.length > 0) {
+          for (const entry of results) {
             if (!entry || !entry.title) continue;
 
-            const trackUrl = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
-            if (trackUrl === lastSong.url) continue;
+            const trackUrl = entry.url || (entry.videoId ? `https://www.youtube.com/watch?v=${entry.videoId}` : null);
+            if (!trackUrl || trackUrl === lastSong.url) continue;
             if (isTrackInHistory(entry, guildId, playedList, 25)) continue;
 
             if (!isCandidateMatchingRegion(entry, region, seedMeta)) {
@@ -1478,9 +1608,9 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
             return {
               title: entry.title,
               url: trackUrl,
-              duration: entry.duration ? `${Math.floor(entry.duration / 60)}:${String(entry.duration % 60).padStart(2, '0')}` : '3:30',
-              thumbnail: entry.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
-              isLive: false,
+              duration: entry.duration || '3:30',
+              thumbnail: entry.thumbnail || (entry.videoId ? `https://i.ytimg.com/vi/${entry.videoId}/hqdefault.jpg` : null),
+              isLive: Boolean(entry.isLive),
               requestedBy: 'Auto'
             };
           }
@@ -1514,20 +1644,44 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
     : ['ytmix', 'lastfm', 'heuristic'];
 
   for (const layer of configuredLayers) {
-    if (layer === 'ytmix') {
+    if (layer === 'ai') {
+      try {
+        const { getGeminiRecommendation } = require('./geminiHelper');
+        const aiRec = await getGeminiRecommendation(lastSong, playedList, region);
+        if (aiRec) {
+          console.log(`[Autoplay Pool] Gợi ý thành công từ AI Gemini: "${aiRec.title}" (${aiRec.artist || 'AI'})`);
+          const query = aiRec.searchQuery || `${aiRec.title} ${aiRec.artist || ''}`.trim();
+          const searchRes = await searchTrack(query);
+          if (Array.isArray(searchRes) && searchRes.length > 0 && searchRes[0]?.url) {
+            const track = {
+              ...searchRes[0],
+              requestedBy: 'Auto'
+            };
+            if (!NON_MUSIC_BLACKLIST_REGEX.test(track.title || '')) {
+              return [track];
+            }
+          }
+        }
+      } catch (aiErr) {
+        console.warn('[Autoplay AI Gemini Error]:', aiErr.message);
+      }
+    } else if (layer === 'ytmix') {
       const candidates = await getYoutubeMix(lastSong, guildId, playedList, region, true);
       if (Array.isArray(candidates) && candidates.length > 0) {
-        console.log(`[Autoplay Pool] Nạp ${candidates.length} bài vào bộ đệm từ YouTube Mix (${region})`);
-        return candidates;
+        const filtered = candidates.filter(t => t && !NON_MUSIC_BLACKLIST_REGEX.test(t.title || ''));
+        if (filtered.length > 0) {
+          console.log(`[Autoplay Pool] Nạp ${filtered.length} bài vào bộ đệm từ YouTube Mix (${region})`);
+          return filtered;
+        }
       }
     } else if (layer === 'lastfm') {
       const lastfmTrack = await getLastfmSimilar(lastSong, guildId, playedList, region);
-      if (lastfmTrack) {
+      if (lastfmTrack && !NON_MUSIC_BLACKLIST_REGEX.test(lastfmTrack.title || '')) {
         return [lastfmTrack];
       }
     } else if (layer === 'heuristic') {
       const heuristicTrack = await getHeuristicRelatedTrack(lastSong, guildId, playedList, region);
-      if (heuristicTrack) {
+      if (heuristicTrack && !NON_MUSIC_BLACKLIST_REGEX.test(heuristicTrack.title || '')) {
         return [heuristicTrack];
       }
     }
@@ -1541,7 +1695,7 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
  */
 async function getRelatedTrack(lastSong, guildIdOrHistory = [], useAi = false, targetRegion = null) {
   const pool = await getRelatedTracksPool(lastSong, guildIdOrHistory, useAi, targetRegion);
-  return (pool && pool.length > 0) ? pool[0] : null;
+  return (pool && pool.length > 0) ? pool.find(t => t && !NON_MUSIC_BLACKLIST_REGEX.test(t.title || '')) || null : null;
 }
 
 // Bộ quản lý tiến trình con (FFmpeg & yt-dlp) để chống tràn / rò rỉ RAM (Zombie processes)
@@ -1583,15 +1737,14 @@ function cleanupAllProcesses() {
   }
 }
 
-// Tự động dọn dẹp tiến trình con khi Node.js process thoát
+// Tự động dọn dẹp tiến trình con khi Node.js process thoát (Ủy quyền SIGINT/SIGTERM cho index.js gracefulShutdown)
 process.on('exit', cleanupAllProcesses);
-process.on('SIGINT', () => { cleanupAllProcesses(); process.exit(); });
-process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 
 /**
  * Phát trực tiếp từ stream URL đã được lưu trong bộ nhớ đệm mà không cần gọi yt-dlp
  */
-function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0) {
+function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
       '-reconnect', '1',
@@ -1606,6 +1759,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     // Cấu hình FFmpeg xuất luồng âm thanh nguyên bản (Bit-perfect Pure Stream) chuẩn Discord Voice:
     // TUYỆT ĐỐI KHÔNG dùng filter động (-af dynaudnorm, loudnorm, acompressor, alc...) để tránh phập phù âm lượng (Audio Pumping)
     ffmpegArgs.push(
+      '-thread_queue_size', '512',
       '-i', streamUrl,
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1621,11 +1775,10 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
-    try {
-      if (ffmpegProcess.pid && process.platform === 'linux') {
-        os.setPriority(ffmpegProcess.pid, 10);
-      }
-    } catch (e) {}
+
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
+    }
 
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
@@ -1639,7 +1792,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1653,9 +1806,9 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         killProcess(ffmpegProcess);
-        reject(new Error('Quá thời gian chờ âm thanh từ Direct Stream (Timeout 25s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ Direct Stream (Timeout 12s)'));
       }
-    }, 25000);
+    }, 12000);
 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;
@@ -1684,10 +1837,104 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 }
 
 /**
+ * Phát trực tiếp từ file âm thanh trên ổ cứng SSD (Local Audio Disk Cache)
+ * Không tải mạng, độ trễ 0ms, mức sử dụng CPU ~ 0%
+ */
+function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
+  return new Promise((resolve, reject) => {
+    const ffmpegArgs = [
+      '-loglevel', 'error'
+    ];
+    if (seekSeconds && Number(seekSeconds) > 0) {
+      ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
+    }
+    ffmpegArgs.push(
+      '-thread_queue_size', '512',
+      '-i', filePath,
+      '-vn',
+      '-c:a', 'pcm_s16le',
+      '-f', 's16le',
+      '-ar', '48000',
+      '-ac', '2',
+      '-threads', '1'
+    );
+    if (playDurationSec && Number(playDurationSec) > 0) {
+      ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+    }
+    ffmpegArgs.push('pipe:1');
+
+    const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    registerProcess(ffmpegProcess);
+
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
+    }
+
+    let ffmpegStderr = '';
+    ffmpegProcess.stderr.on('data', (chunk) => {
+      ffmpegStderr += chunk.toString();
+      if (ffmpegStderr.length > 4000) ffmpegStderr = ffmpegStderr.slice(-2000);
+    });
+
+    ffmpegProcess.stdin?.on('error', () => {});
+    ffmpegProcess.on('error', (err) => {
+      if (err.code !== 'EPIPE') console.error('[FFmpeg File Direct Error]:', err.message);
+    });
+
+    let firstChunkReceived = false;
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
+    passThroughStream.on('error', (err) => {
+      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+        console.warn('[PassThroughStream File Error]:', err.message);
+      }
+    });
+    passThroughStream.on('close', () => {
+      killProcess(ffmpegProcess);
+    });
+    ffmpegProcess.stdout.pipe(passThroughStream);
+
+    const safetyTimeout = setTimeout(() => {
+      if (!firstChunkReceived) {
+        killProcess(ffmpegProcess);
+        reject(new Error('Quá thời gian chờ âm thanh từ SSD Cache File (Timeout 15s)'));
+      }
+    }, 15000);
+
+    ffmpegProcess.stdout.once('data', () => {
+      firstChunkReceived = true;
+      clearTimeout(safetyTimeout);
+      const resource = createAudioResource(passThroughStream, {
+        inputType: StreamType.Raw,
+        inlineVolume: true
+      });
+      resource.destroy = () => {
+        killProcess(ffmpegProcess);
+      };
+      resolve(resource);
+    });
+
+    ffmpegProcess.on('close', (code) => {
+      clearTimeout(safetyTimeout);
+      if (!firstChunkReceived) {
+        killProcess(ffmpegProcess);
+        const lastErr = ffmpegStderr.slice(-200).trim();
+        reject(new Error(`FFmpeg File Direct exited with code ${code}: ${lastErr}`));
+      } else {
+        killProcess(ffmpegProcess);
+      }
+    });
+  });
+}
+
+const createCachedFfmpegStream = createDirectFileStream;
+
+/**
  * Tạo một luồng phát đơn qua yt-dlp & FFmpeg với cơ chế kiểm tra gói dữ liệu đầu tiên (First-Chunk Confirmation)
  * Nếu YouTube bị chặn bot (ra 0 byte / code 183), hàm sẽ reject ngay lập tức để kích hoạt cơ chế Failover.
  */
-async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0) {
+async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSeconds = 0, isSoundCloud = false, bypassCookie = false, playDurationSec = 0, cacheOptions = null, options = {}) {
+  const isLowPriority = (options?.priority === 'low');
   if (typeof targetQueryOrUrl !== 'string' || !targetQueryOrUrl.trim()) {
     throw new Error('Target không hợp lệ');
   }
@@ -1706,7 +1953,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
   if (cachedStreamUrl && !bypassCookie) {
     try {
       console.log(`[Stream Cache Hit] Tái sử dụng trực tiếp Stream URL cho: "${cleanTarget}"`);
-      return await createDirectFfmpegStream(cachedStreamUrl, seekSeconds, playDurationSec);
+      return await createDirectFfmpegStream(cachedStreamUrl, seekSeconds, playDurationSec, options);
     } catch (cacheErr) {
       console.warn('[Stream Cache Failed, fallback sang yt-dlp stream]:', cacheErr.message);
       streamUrlCache.delete(cleanTarget);
@@ -1723,7 +1970,8 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       noProgress: true,
       socketTimeout: 10,
       retries: 2,
-      bufferSize: '16K',
+      bufferSize: '64K',
+      httpChunkSize: '10M',
       concurrentFragments: 1,
       noCheckCertificates: true,
       jsRuntimes: `node:${process.execPath}`
@@ -1731,7 +1979,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     if (!isSoundCloud) {
       ytdlpOptions.preferFreeFormats = true;
-      ytdlpOptions.extractorArgs = bypassCookie ? 'youtube:player_client=android,ios' : YTDLP_EXTRACTOR_ARGS;
+      ytdlpOptions.extractorArgs = bypassCookie ? 'youtube:player_client=ios,android' : YTDLP_EXTRACTOR_ARGS;
       const cookiesFile = bypassCookie ? null : getCookiesFile();
       if (cookiesFile) {
         ytdlpOptions.cookies = cookiesFile;
@@ -1744,17 +1992,16 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     try {
       ytdlpStreamProcess = ytdlp.exec('', ytdlpOptions);
       if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
-      try {
-        if (ytdlpStreamProcess && ytdlpStreamProcess.pid && process.platform === 'linux') {
-          os.setPriority(ytdlpStreamProcess.pid, 10);
-        }
-      } catch (e) {}
     } catch (err) {
       return reject(err);
     }
 
     if (!ytdlpStreamProcess || !ytdlpStreamProcess.stdout) {
       return reject(new Error(`Không thể khởi chạy yt-dlp cho: ${cleanTarget}`));
+    }
+
+    if (process.platform === 'linux' && ytdlpStreamProcess.pid) {
+      try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 19 : 5); } catch (e) {}
     }
 
     const ffmpegArgs = [];
@@ -1767,6 +2014,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ffmpegArgs.push(
       '-analyzeduration', '0',
       '-probesize', '64k',
+      '-thread_queue_size', '512',
       '-i', 'pipe:0',
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1780,13 +2028,39 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     }
     ffmpegArgs.push('pipe:1');
 
+    // Nếu có tùy chọn lưu cache SSD (Cache Miss): Chỉ nén thêm luồng thứ hai libopus nếu người dùng cấu hình rõ ràng (tránh tốn CPU x3 trên VPS 1 core)
+    const enableDiskCache = process.env.ENABLE_DISK_AUDIO_CACHE === 'true';
+    if (enableDiskCache && cacheOptions?.tempPath) {
+      const { isCpuOverloaded } = require('./systemMonitor');
+      const isCpuBusyForCache = (typeof isCpuOverloaded === 'function' ? isCpuOverloaded(0.85) : Boolean(os.loadavg && os.loadavg()[0] > 0.85));
+      if (isCpuBusyForCache) {
+        cacheOptions?.onAbort?.();
+        cacheOptions = null;
+      } else {
+        ffmpegArgs.push(
+          '-vn',
+          '-c:a', 'libopus',
+          '-b:a', '128k',
+          '-compression_level', '0',
+          '-f', 'ogg'
+        );
+        if (playDurationSec && Number(playDurationSec) > 0) {
+          ffmpegArgs.push('-t', String(Math.ceil(Number(playDurationSec))));
+        }
+        ffmpegArgs.push('-y', cacheOptions.tempPath);
+      }
+    } else if (cacheOptions?.tempPath) {
+      // Bỏ qua ghi cache ngầm khi đang phát trên VPS 1 core để dành 100% tài nguyên cho luồng âm thanh thời gian thực
+      cacheOptions?.onAbort?.();
+      cacheOptions = null;
+    }
+
     const ffmpegProcess = spawn(ffmpeg || 'ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     registerProcess(ffmpegProcess);
-    try {
-      if (ffmpegProcess.pid && process.platform === 'linux') {
-        os.setPriority(ffmpegProcess.pid, 10);
-      }
-    } catch (e) {}
+
+    if (process.platform === 'linux' && ffmpegProcess.pid) {
+      try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 19 : -5); } catch (e) {}
+    }
 
     let ffmpegStderr = '';
     ffmpegProcess.stderr.on('data', (chunk) => {
@@ -1827,7 +2101,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1 << 16 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1837,18 +2111,20 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
       killProcess(ffmpegProcess);
       killProcess(ytdlpStreamProcess);
+      cacheOptions?.onAbort?.();
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
-    // Timeout bảo vệ: Nếu sau 35 giây không có dữ liệu âm thanh nào, tự hủy để failover
+    // Timeout bảo vệ: Cần 36 giây vì trên VPS 1 core CPU, yt-dlp + deno mất khoảng 18-22 giây để giải mã JS challenge của YouTube
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 35s)'));
+        cacheOptions?.onAbort?.();
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 36s)'));
       }
-    }, 35000);
+    }, 36000);
 
     // Khi nhận được gói âm thanh đầu tiên: Xác nhận luồng chạy tốt 100%!
     ffmpegProcess.stdout.once('data', () => {
@@ -1864,6 +2140,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
       };
 
       resolve(resource);
@@ -1875,12 +2152,17 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
         const lastErr = (ytdlpStderr || ffmpegStderr).slice(-200).trim();
         reject(new Error(`FFmpeg exited with code ${code}: ${lastErr}`));
       } else {
         if (code !== 0 && code !== null) {
           const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
           if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+          cacheOptions?.onAbort?.();
+        } else {
+          // Lưu cache thành công khi FFmpeg hoàn tất tiến trình với mã 0
+          cacheOptions?.onCommit?.();
         }
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
@@ -1893,7 +2175,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 /**
  * TẦNG 2: Failover sang SoundCloud khi YouTube bị chặn hoặc Circuit Breaker kích hoạt
  */
-async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds = 0, seekSeconds = 0, playDurationSec = 0) {
+async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds = 0, seekSeconds = 0, playDurationSec = 0, options = {}) {
   console.log(`[Failover] Đang tìm kiếm bản phát chuẩn trên SoundCloud cho "${trackTitle}"...`);
   try {
     const is247Track = Boolean(trackItem && (trackItem.is247 || trackItem.requestedBy === 'Auto (24/7)' || trackItem.requestedBy === 'Auto'));
@@ -1902,6 +2184,8 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
+      httpChunkSize: '10M',
+      bufferSize: '64K',
       '--': [`scsearch10:${scSearchQuery}`]
     });
 
@@ -1913,6 +2197,8 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
           dumpSingleJson: true,
           flatPlaylist: true,
           noWarnings: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K',
           '--': [`scsearch10:${compactScQuery}`]
         });
       } catch (e) {}
@@ -1950,31 +2236,40 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
         });
       }
 
+      const userWantsCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(trackTitle || '');
       const expectedSec = (typeof trackItem === 'object' && trackItem !== null)
         ? (trackItem.spotifyDurationSec || (trackItem.durationMs ? Math.round(trackItem.durationMs / 1000) : (trackItem.duration ? parseDurationToSec(trackItem.duration) : 0)))
         : 0;
 
-      if (!userWantsRemix) {
-        candidateTracks.sort((a, b) => {
-          const aKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(a.title || '');
-          const bKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(b.title || '');
-          if (aKaraoke && !bKaraoke) return 1;
-          if (!aKaraoke && bKaraoke) return -1;
+      candidateTracks.sort((a, b) => {
+        // Ưu tiên 1: Đẩy bài Karaoke/Beat xuống sau nếu user không hỏi karaoke
+        const aKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(a.title || '');
+        const bKaraoke = /karaoke|ガイド無し|instrumental|off\s*vocal|backing\s*track/i.test(b.title || '');
+        if (aKaraoke && !bKaraoke) return 1;
+        if (!aKaraoke && bKaraoke) return -1;
 
-          if (expectedSec > 45 && a.duration && b.duration) {
-            const diffA = Math.abs(a.duration - expectedSec);
-            const diffB = Math.abs(b.duration - expectedSec);
-            return diffA - diffB;
-          }
-          return 0;
-        });
-      }
+        // Ưu tiên 2: Đẩy bài Cover/Hát lại xuống sau nếu bài gốc không phải cover
+        if (!userWantsCover) {
+          const aCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(a.title || '');
+          const bCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(b.title || '');
+          if (aCover && !bCover) return 1;
+          if (!aCover && bCover) return -1;
+        }
+
+        // Ưu tiên 3: Khớp thời lượng gần nhất với bài gốc
+        if (expectedSec > 45 && a.duration && b.duration) {
+          const diffA = Math.abs(a.duration - expectedSec);
+          const diffB = Math.abs(b.duration - expectedSec);
+          return diffA - diffB;
+        }
+        return 0;
+      });
 
       for (const candidate of candidateTracks.slice(0, 6)) {
         try {
           const streamUrl = candidate.webpage_url || candidate.url;
           console.log(`[SoundCloud] Đang thử phát ứng viên: "${candidate.title}" (${candidate.duration}s)...`);
-          const resource = await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true, false, playDurationSec);
+          const resource = await createSingleStream(streamUrl, crossfadeSeconds, seekSeconds, true, false, playDurationSec, null, options);
           console.log(`[SoundCloud] Phát thành công bản chuẩn: "${candidate.title}"`);
           if (typeof trackItem === 'object' && trackItem !== null) {
             trackItem.url = streamUrl;
@@ -1996,7 +2291,7 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
 /**
  * Trích xuất luồng âm thanh theo kiến trúc Failover 3 tầng có tích hợp Circuit Breaker
  */
-async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0) {
+async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, options = {}) {
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
   const trackTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery) : trackItem;
 
@@ -2016,11 +2311,14 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
         targetUrl = searchRes[0].url;
         if (typeof trackItem === 'object' && trackItem !== null) {
           trackItem.url = targetUrl;
-          if (searchRes[0].duration) {
+          const resolvedSec = searchRes[0].ytDurationSec || searchRes[0].seconds || parseDurationToSec(searchRes[0].duration);
+          if (resolvedSec > 0) {
+            trackItem.ytDurationSec = resolvedSec;
+            trackItem.rawDurationSec = resolvedSec;
+            trackItem.duration = searchRes[0].duration || `${Math.floor(resolvedSec / 60)}:${String(resolvedSec % 60).padStart(2, '0')}`;
+            trackItem.durationMs = resolvedSec * 1000;
+          } else if (searchRes[0].duration) {
             trackItem.duration = searchRes[0].duration;
-          }
-          if (searchRes[0].seconds) {
-            trackItem.durationMs = searchRes[0].seconds * 1000;
           }
           if (!trackItem.thumbnail && searchRes[0].thumbnail) {
             trackItem.thumbnail = searchRes[0].thumbnail;
@@ -2051,20 +2349,62 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
   const effectiveSeek = trimStart + userSeek;
   const playDurationSec = (trimEnd > effectiveSeek) ? (trimEnd - effectiveSeek) : 0;
 
-  if (isYouTubeCircuitOpen()) {
+  // ⚡ LOCAL AUDIO DISK CACHE: Kiểm tra Cache Hit trên SSD (Tìm thông minh theo Video ID)
+  const cachedEntry = audioCacheManager.findCachedEntry(trackItem, trimStart, trimEnd);
+  if (cachedEntry && fs.existsSync(cachedEntry.filePath)) {
+    try {
+      console.log(`[AudioCache Hit] Phát tức thì từ SSD Cache: "${trackTitle}" (Seek: ${userSeek}s, Trim: ${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s)`);
+      // Lưu ý: File trong SSD Cache đã được cắt sẵn phần đầu trimStart lúc lưu.
+      // Khi phát lại, vị trí 00:00 của file chính là đầu bài hát đã cắt.
+      // Do đó chỉ seek theo yêu cầu tua của người dùng (userSeek), tuyệt đối không cộng trimStart!
+      const cachePlayDurationSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+        ? Math.max(0, (cachedEntry.trimEnd - cachedEntry.trimStart) - userSeek)
+        : playDurationSec;
+      return await createDirectFileStream(cachedEntry.filePath, userSeek, cachePlayDurationSec, options);
+    } catch (cachePlayErr) {
+      console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
+    }
+  }
+
+  // Khởi tạo tùy chọn ghi cache khi Cache Miss (chỉ cache khi bài phát từ đầu 00:00)
+  let cacheOptions = null;
+  if (userSeek === 0 && audioCacheManager.isCacheable(trackItem)) {
+    const tempPath = audioCacheManager.createTempFilePath(trackItem, trimStart, trimEnd);
+    if (tempPath) {
+      let isDone = false;
+      cacheOptions = {
+        tempPath,
+        onCommit: () => {
+          if (!isDone) {
+            isDone = true;
+            audioCacheManager.commitCache(trackItem, tempPath, trimStart, trimEnd).catch(() => {});
+          }
+        },
+        onAbort: () => {
+          if (!isDone) {
+            isDone = true;
+            audioCacheManager.abortTemp(tempPath);
+          }
+        }
+      };
+    }
+  }
+
+  if (isYouTubeCircuitOpen(options)) {
+    cacheOptions?.onAbort?.();
     console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000)}p), chuyển thẳng sang SoundCloud.`);
-    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec);
+    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 
   // TẦNG 1: Thử phát từ YouTube URL chính
   try {
-    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec);
+    const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, cacheOptions, options);
     recordYouTubeSuccess();
     return res;
   } catch (ytErr) {
+    cacheOptions?.onAbort?.();
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
-    recordYouTubeFailure(errMsg);
 
     // Xử lý lỗi Cookie YouTube / Bot Detection
     const isCookieBotError = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookie|bot verification|403|429/i.test(errMsg);
@@ -2080,7 +2420,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
       // Tự động thử lại không dùng cookie với player_client=android,ios
       try {
         console.log(`[YouTube Failover] Thử lại trực tiếp "${targetUrl}" không dùng cookie (android,ios)...`);
-        const noCookieRes = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, true, playDurationSec);
+        const noCookieRes = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, true, playDurationSec, null, options);
         recordYouTubeSuccess();
         return noCookieRes;
       } catch (noCookieErr) {
@@ -2099,6 +2439,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             : '';
           const userWantsRemix = /\b(remix|mashup|vinahouse|dj\b|mix|nonstop|liên\s*khúc)\b/i.test(trackTitle || '');
           const userWantsLive = /(?:\[\s*live|\(\s*live|\blive\b|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bdemo\b)/i.test(trackTitle || '');
+          const userWantsCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(trackTitle || '');
           const songSegments = (rawTitle || '').replace(/\[.*?\]|【.*?】|\(.*?\)/g, ' ').split(/\s*[-–—|:]\s*/).filter(Boolean);
           const songTitlePart = songSegments.length >= 2 ? songSegments.slice(1).join(' ') : (rawTitle || '');
           const coreTitleWords = songTitlePart
@@ -2114,6 +2455,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             if (targetId && v.videoId === targetId) return false;
             if (v.seconds && (v.seconds < 45 || v.seconds > 600)) return false;
             if (!userWantsLive && isLiveStageVideo(v.title)) return false;
+            if (!userWantsCover && /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(v.title || '')) return false;
             if (!userWantsRemix) {
               const t = (v.title || '').toLowerCase();
               if (/\b(remix|mashup|vinahouse|bass\s*boosted|parody|karaoke|beat|slowed|speed\s*up)\b/i.test(t)) return false;
@@ -2134,10 +2476,18 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
             return true;
           });
 
-          for (const altVideo of candidateVideos.slice(0, 4)) {
+          // Ưu tiên các bản Audio / Lyrics / Topic / Visualizer lên đầu (nhẹ và ít kẹt luồng hơn MV 4K)
+          const isAudioLyric = (video) => /\b(official\s*audio|audio|lyrics?|lyric\s*video|topic|visualizer)\b/i.test(`${video.title || ''} ${video.author?.name || ''}`);
+          candidateVideos.sort((a, b) => {
+            const aMatch = isAudioLyric(a) ? 1 : 0;
+            const bMatch = isAudioLyric(b) ? 1 : 0;
+            return bMatch - aMatch;
+          });
+
+          for (const altVideo of candidateVideos.slice(0, 2)) {
             try {
               console.log(`[YouTube Alternate] Thử phát bản thay thế: "${altVideo.title}" (${altVideo.url})`);
-              const resource = await createSingleStream(altVideo.url, crossfadeSeconds, effectiveSeek, false, false, playDurationSec);
+              const resource = await createSingleStream(altVideo.url, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, null, options);
               if (typeof trackItem === 'object' && trackItem !== null) {
                 trackItem.url = altVideo.url;
               }
@@ -2145,7 +2495,6 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
               return resource;
             } catch (altErr) {
               console.warn(`[YouTube Alternate Failed]: "${altVideo.title}" - ${altErr.message.split('\n')[0]}`);
-              recordYouTubeFailure(altErr.message);
             }
           }
         }
@@ -2154,8 +2503,11 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
       }
     }
 
+    // Chỉ khi TẤT CẢ các nhánh thử YouTube (Chính + No Cookie + Alternate) đều thất bại thì mới ghi nhận 1 lần lỗi bài hát cho Circuit Breaker
+    recordYouTubeFailure(errMsg);
+
     // TẦNG 2: Failover sang SoundCloud
-    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec);
+    return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 }
 
@@ -2167,14 +2519,14 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, options = {}) {
   const priority = options?.priority || trackItem?.priority || 'high';
   return await extractionSemaphore.run(async () => {
-    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds);
+    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds, { ...options, priority });
   }, priority);
 }
 
 /**
  * Tìm kiếm danh sách nhiều bài hát phục vụ Live Search trên Web & Discord Autocomplete (Siêu tốc độ qua Worker Thread)
  */
-async function searchMultipleTracks(query, limit = 20, mode = 'official') {
+async function searchMultipleTracks(query, limit = 20, mode = 'official', locale = 'vi') {
   if (!query || typeof query !== 'string' || !query.trim()) return [];
   query = query.trim();
 
@@ -2184,7 +2536,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
   }
 
   try {
-    return await executeSearch(query, limit, mode);
+    return await executeSearch(query, limit, mode, locale);
   } catch (err) {
     console.warn('[searchMultipleTracks worker error]:', err.message);
     return [];
@@ -2192,6 +2544,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official') {
 }
 
 module.exports = {
+  cleanupAllProcesses,
   validateAndSanitizeMusicUrl,
   searchTrack,
   searchMultipleTracks,

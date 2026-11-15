@@ -11,8 +11,11 @@ __pycache__/
 vps_credentials.json
 vps_*.json
 *.cookies
+*.cookies.bak
 youtube.cookies
+youtube.cookies.bak
 cookies.txt
+*.bak
 
 # Operational & Maintenance Functional Scripts (Các script chức năng vận hành)
 scripts/
@@ -21,6 +24,9 @@ scratch/
 
 # Runtime Data & Storage
 data/
+!data/audio-cache/.gitkeep
+active_tunnel.url
+*.url
 *.tmp
 
 # Logs, Dumps & Archives
@@ -38,6 +44,8 @@ logs/
 .impeccable/
 memory-bank/
 skills-lock.json
+graphify-out/
+repomix-output*
 .DS_Store
 Thumbs.db
 .vscode/

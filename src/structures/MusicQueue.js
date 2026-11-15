@@ -1,3 +1,4 @@
+const os = require('os');
 const {
   joinVoiceChannel,
   createAudioPlayer,
@@ -27,11 +28,13 @@ const {
   clearVoiceChannelStatus
 } = require('../utils/embed');
 const settingsManager = require('./SettingsManager');
+const { t } = require('../utils/i18n');
 const historyManager = require('./HistoryManager');
 const sessionManager = require('./SessionManager');
 const lofiHistoryManager = require('./LofiHistoryManager');
 const { logAction } = require('../utils/debugLogger');
 const { hasEnoughMemoryToPreload, logMemoryUsage } = require('../utils/systemMonitor');
+const { isStrictAdmin } = require('../utils/permissionHelper');
 const config = require('../config');
 
 function parseDurationToSeconds(str) {
@@ -80,7 +83,7 @@ class MusicQueue {
     this.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play,
-        maxMissedFrames: 250
+        maxMissedFrames: 15
       }
     });
 
@@ -93,6 +96,7 @@ class MusicQueue {
     this.loopMode = 'off';
     this.mode247 = true;
     this.paused = false;
+    this.voiceSessionStartTime = sessionManager.getSession(this.guild.id)?.voiceSessionStartTime || Date.now();
 
     this.previousSongs = []; // Tối đa 5 bài hát đã nghe trước đó
     this.lastUserTrack = null; // Ghi nhớ bài hát gần nhất của user để phát lại khi quay về từ Lofi
@@ -103,6 +107,7 @@ class MusicQueue {
     this.crossfadeTimer = null;
     this._playCountTimer = null;
     this.nowPlayingMessage = null;
+    this._repostCardTimer = null;
     this._isPrefetching = false;
     this._isPlayingNext = false;
     this.lastNonLofiSong = null; // Ghi nhớ bài hát gần nhất không phải Lofi để Autoplay tương tự
@@ -121,13 +126,28 @@ class MusicQueue {
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
 
     // Khóa thao tác & Optimistic Button State
     this._isProcessingAction = false;
     this._pendingButtonAction = null;
+    this.skipVotes = new Set();
 
     this._initSettings();
     this._setupPlayerEvents();
+
+    // Đăng ký lắng nghe sự kiện Lời bài hát về muộn (Hot-Attach)
+    const { lyricsEvents } = require('../utils/lyricsHelper');
+    this._onLyricsFound = (event) => {
+      if (!this.currentSong || this.isDestroyed || this.isStopped) return;
+      if (this.hasSyncedLyrics) return; // Đã có lyrics rồi thì không cần nạp đè
+      const currentUrl = this.currentSong.url;
+      if (event && event.url && currentUrl && event.url === currentUrl && event.lyricsData) {
+        this.attachLateLyrics(this.currentSong, event.lyricsData);
+      }
+    };
+    lyricsEvents.on('lyricsFound', this._onLyricsFound);
   }
 
   _clearBufferingWatchdog() {
@@ -301,6 +321,10 @@ class MusicQueue {
   }
 
   async _triggerNextTrackPreload() {
+    return this._prefetchNextTrack();
+  }
+
+  async _prefetchNextTrack() {
     if (this._isPreloading || this.preloadedResource || this.isDestroyed || this.isStopped) return;
     if (!hasEnoughMemoryToPreload()) {
       console.log('[MusicQueue Preload] RAM > 85%, hủy preload ngầm để tiết kiệm tài nguyên');
@@ -312,24 +336,87 @@ class MusicQueue {
     const targetKey = nextTrack.url || nextTrack.searchQuery;
     if (!targetKey) return;
 
+    const audioCacheManager = require('./AudioCacheManager');
+    const cachedEntry = audioCacheManager.findCachedEntry(nextTrack);
+
     const guildSettings = settingsManager.get(this.guild.id);
     if (nextTrack && !nextTrack.trimStart && !nextTrack._sbChecked && guildSettings.autoSkipOfftopic !== false && !nextTrack.is247 && !nextTrack.isLive) {
       nextTrack._sbChecked = true;
       try {
-        const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
-        const trimInfo = await resolveSponsorBlockTrim(nextTrack);
-        if (trimInfo) {
-          nextTrack.trimStart = trimInfo.trimStart;
-          nextTrack.trimEnd = trimInfo.trimEnd;
-          nextTrack.realDurationSec = trimInfo.realDurationSec;
-          nextTrack.rawDurationSec = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
-          nextTrack.rawDuration = nextTrack.rawDuration || nextTrack.duration;
-          nextTrack.duration = formatSecondsToDuration(trimInfo.realDurationSec);
-          nextTrack.durationMs = trimInfo.realDurationSec * 1000;
-          nextTrack.skippedIntroSec = trimInfo.skippedIntroSec;
-          nextTrack.skippedOutroSec = trimInfo.skippedOutroSec;
+        if ((typeof nextTrack.url === 'string' && nextTrack.url.includes('spotify.com')) || (!nextTrack.ytDurationSec && !nextTrack.rawDurationSec)) {
+          try {
+            const { searchTrack } = require('../utils/musicExtractor');
+            const searchTarget = nextTrack.searchQuery || nextTrack.title;
+            const expSec = nextTrack.spotifyDurationSec || (nextTrack.durationMs ? Math.round(nextTrack.durationMs / 1000) : (nextTrack.duration ? parseDurationToSeconds(nextTrack.duration) : 0));
+            const ytRes = await searchTrack(searchTarget, expSec);
+            if (ytRes && ytRes.length > 0 && ytRes[0].url) {
+              nextTrack.url = ytRes[0].url;
+              const sec = ytRes[0].ytDurationSec || ytRes[0].seconds;
+              if (sec > 0) {
+                nextTrack.ytDurationSec = sec;
+                nextTrack.rawDurationSec = sec;
+                nextTrack.duration = formatSecondsToDuration(sec);
+                nextTrack.durationMs = sec * 1000;
+              }
+            }
+          } catch (resolveErr) {}
+        }
+
+        if (cachedEntry) {
+          nextTrack.trimStart = cachedEntry.trimStart;
+          nextTrack.trimEnd = cachedEntry.trimEnd;
+          if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
+            const rawDur = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
+            nextTrack.skippedIntroSec = cachedEntry.trimStart || 0;
+            nextTrack.skippedOutroSec = (rawDur > 0 && cachedEntry.trimEnd > 0 && rawDur > cachedEntry.trimEnd) ? (rawDur - cachedEntry.trimEnd) : 0;
+            if (rawDur > 0) {
+              const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+                ? (cachedEntry.trimEnd - cachedEntry.trimStart)
+                : Math.max(1, rawDur - cachedEntry.trimStart);
+              nextTrack.realDurationSec = realSec;
+              nextTrack.duration = formatSecondsToDuration(realSec);
+              nextTrack.durationMs = realSec * 1000;
+            }
+          }
+          console.log(`[AudioCache SB-Hit] "${nextTrack.title}": Tái sử dụng mốc cắt từ SSD Cache (${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s, bỏ qua mạng SponsorBlock)`);
+        } else {
+          const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
+          const trimInfo = await resolveSponsorBlockTrim(nextTrack);
+          if (trimInfo) {
+            nextTrack.trimStart = trimInfo.trimStart;
+            nextTrack.trimEnd = trimInfo.trimEnd;
+            nextTrack.realDurationSec = trimInfo.realDurationSec;
+            nextTrack.rawDurationSec = nextTrack.rawDurationSec || parseDurationToSeconds(nextTrack.duration);
+            nextTrack.rawDuration = nextTrack.rawDuration || nextTrack.duration;
+            nextTrack.duration = formatSecondsToDuration(trimInfo.realDurationSec);
+            nextTrack.durationMs = trimInfo.realDurationSec * 1000;
+            nextTrack.skippedIntroSec = trimInfo.skippedIntroSec;
+            nextTrack.skippedOutroSec = trimInfo.skippedOutroSec;
+          }
         }
       } catch (sbErr) {}
+    }
+
+    // Cơ chế Single-Core Safe Preload:
+    // Trên VPS 1 core (os.cpus().length <= 1), chỉ thực hiện preload audio resource nếu bài tiếp theo đã có trong SSD Cache.
+    // Nếu chưa có trong cache SSD, không spawn yt-dlp/deno khi bài hiện tại đang phát;
+    // chỉ resolve metadata/URL nhẹ và chờ bài hiện tại kết thúc mới bắt đầu stream bài mới.
+    const isSingleCore = Array.isArray(os.cpus()) && os.cpus().length <= 1;
+    if (isSingleCore && !cachedEntry) {
+      console.log(`[Single-Core Safe Preload] 1 vCPU phát hiện: "${nextTrack.title}" chưa có trong SSD Cache, bỏ qua audio preload ngầm để chống giật lag.`);
+      const isSpotify = typeof nextTrack.url === 'string' && nextTrack.url.includes('spotify.com');
+      if (!nextTrack.url || isSpotify || (!nextTrack.url.startsWith('http') && nextTrack.searchQuery)) {
+        try {
+          const searchTarget = nextTrack.searchQuery || nextTrack.title;
+          const searchRes = await searchTrack(searchTarget);
+          if (searchRes && searchRes.length > 0 && searchRes[0].url) {
+            nextTrack.url = searchRes[0].url;
+            if (searchRes[0].duration && !nextTrack.duration) nextTrack.duration = searchRes[0].duration;
+            if (searchRes[0].thumbnail && !nextTrack.thumbnail) nextTrack.thumbnail = searchRes[0].thumbnail;
+          }
+        } catch (e) {}
+      }
+      return;
     }
 
     this._isPreloading = true;
@@ -340,8 +427,10 @@ class MusicQueue {
           this._cleanupResource(this.preloadedResource);
         }
         this.preloadedResource = res;
-        this.preloadedSongUrl = targetKey;
-        console.log(`[MusicQueue Preload] Đã tải trước thành công bài kế tiếp (priority: low): "${nextTrack.title}"`);
+        // Sau khi createResource, nextTrack.url có thể đã được phân giải sang URL YouTube mới
+        const finalKey = nextTrack.url || nextTrack.searchQuery || targetKey;
+        this.preloadedSongUrl = finalKey;
+        console.log(`[MusicQueue Preload] Đã tải trước thành công bài kế tiếp (priority: low): "${nextTrack.title}" (key: ${finalKey})`);
       } else if (res) {
         this._cleanupResource(res);
       }
@@ -483,6 +572,9 @@ class MusicQueue {
     });
 
     this.connection.on(VoiceConnectionStatus.Ready, () => {
+      if (!this.voiceSessionStartTime) {
+        this.voiceSessionStartTime = Date.now();
+      }
       logAction('VOICE_CONNECTION_READY', {
         guild: this.guild.name,
         guildId: this.guild.id,
@@ -621,7 +713,7 @@ class MusicQueue {
       // Chỉ gửi vào textChannel nếu bài hát do user yêu cầu và không phải lỗi đóng luồng EPIPE/ECONNRESET
       if (this.textChannel && !is247Lofi && !isEpipe) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
+          embeds: [createErrorEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? `Playback error: ${error.message || 'Cannot play this track.'}` : `Lỗi phát nhạc: ${error.message || 'Không thể phát bài hát này.'}`)],
           flags: 4096
         }).catch(() => {});
       }
@@ -632,6 +724,7 @@ class MusicQueue {
   async _handleSongEnd() {
     this.clearCrossfadeTimer();
     this.clearPreloadTimer();
+    this.skipVotes.clear();
     if (this._isPlayingNext || this.isDestroyed || this.isStopped || this._switchingTo247) return;
     const lastSong = this.currentSong;
     const wasExplicitSkip = Boolean(this._skipRequested);
@@ -645,6 +738,9 @@ class MusicQueue {
     if (wasPreemptingLofi && this.songs.length > 0) {
       this.clearPlayCountTimer();
       this.currentSong = null;
+      this._cleanupResource(this.preloadedResource);
+      this.preloadedResource = null;
+      this.preloadedSongUrl = null;
       this._cleanupResource(this.currentResource);
       this.currentResource = null;
       this.isQueueOnHold = false;
@@ -701,10 +797,14 @@ class MusicQueue {
     if (humanCount === 0 && this.mode247) {
       this.isQueueOnHold = true;
       this.prefetchedSong = null;
+      this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+      this._cleanupResource(this.currentResource);
+      this.currentResource = null;
       this.currentSong = null;
       if (this.player) this.player.stop();
-      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Chờ phát nhạc');
+      setVoiceChannelStatus(activeChannel, settingsManager.get(this.guild.id)?.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
       console.log(`[MusicQueue 24/7] Phòng trống (${this.guild.name}) - Đưa bot về chế độ 24/7 Sleep Mode (0% CPU)`);
       return;
     }
@@ -733,20 +833,29 @@ class MusicQueue {
       return;
     }
 
-    // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát
-    if (this.prefetchedSong && (this.prefetchedSong.url === lastSong?.url || this.prefetchedSong.title === lastSong?.title)) {
-      this.prefetchedSong = null;
+    // Tránh phát lại bài cũ nếu prefetched trùng với bài vừa phát hoặc khác seedUrl
+    if (this.prefetchedSong) {
+      if (
+        this.prefetchedSong.url === lastSong?.url ||
+        this.prefetchedSong.title === lastSong?.title ||
+        (this.prefetchedSong._seedUrl && lastSong?.url && this.prefetchedSong._seedUrl !== lastSong.url)
+      ) {
+        this.prefetchedSong = null;
+      }
     }
 
     // 0.1 Nếu đã có sẵn bài Autoplay tải trước ngầm trong RAM -> Nối bài ngay lập tức (0.001s instant transition)
     if (this.prefetchedSong && humanCount > 0 && guildSettings.autoplay !== false && !wasLofiTrack) {
-      if (historyManager.isRecentlyPlayed(this.guild.id, this.prefetchedSong, 25)) {
+      if (this.prefetchedSong._seedUrl && lastSong?.url && this.prefetchedSong._seedUrl !== lastSong.url) {
+        this.prefetchedSong = null;
+      } else if (historyManager.isRecentlyPlayed(this.guild.id, this.prefetchedSong, 25)) {
         this.prefetchedSong = null;
       } else {
         const nextTrack = this._sanitizeTrack(this.prefetchedSong);
         this.prefetchedSong = null;
         if (nextTrack) {
-          nextTrack.requestedBy = 'Tự động phát';
+          const isEnAutoplay = settingsManager.get(this.guild.id)?.language === 'en';
+          nextTrack.requestedBy = isEnAutoplay ? 'Autoplay' : 'Tự động phát';
           nextTrack.is247 = false;
           nextTrack.isUserRequest = false;
           this.songs.push(nextTrack);
@@ -760,10 +869,14 @@ class MusicQueue {
     if (this.autoplayPool && this.autoplayPool.length > 0 && humanCount > 0 && guildSettings.autoplay !== false && !wasLofiTrack) {
       while (this.autoplayPool.length > 0) {
         const candidate = this.autoplayPool.shift();
+        if (candidate._seedUrl && lastSong?.url && candidate._seedUrl !== lastSong.url) {
+          continue;
+        }
         if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== songToRelate?.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
           const sanitizedRel = this._sanitizeTrack(candidate);
           if (sanitizedRel) {
-            sanitizedRel.requestedBy = 'Tự động phát';
+            const isEnRel = settingsManager.get(this.guild.id)?.language === 'en';
+            sanitizedRel.requestedBy = isEnRel ? 'Autoplay' : 'Tự động phát';
             sanitizedRel.is247 = false;
             sanitizedRel.isUserRequest = false;
             this.songs.push(sanitizedRel);
@@ -790,7 +903,8 @@ class MusicQueue {
           if (pool && pool.length > 0) {
             relatedTrack = pool[0];
             this.autoplayPool = pool.slice(1).map(t => {
-              t.requestedBy = 'Tự động phát';
+              const isEnPool = settingsManager.get(this.guild.id)?.language === 'en';
+              t.requestedBy = isEnPool ? 'Autoplay' : 'Tự động phát';
               return t;
             });
             console.log(`[Autoplay Pool] Nạp bài "${relatedTrack.title}" và lưu ${this.autoplayPool.length} bài vào bộ đệm`);
@@ -828,17 +942,16 @@ class MusicQueue {
             } else {
               // Nhạc Việt:
               if (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất') && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} bài hát hay nhất tuyển chọn`);
                 fallbackQueries.push(`${artist} official audio`);
               }
               fallbackQueries.push(`${songName} official audio`);
-              fallbackQueries.push(`nhac tre hot vpop official audio`);
             }
 
             for (const fallbackQuery of fallbackQueries) {
               if (relatedTrack) break;
               console.log(`[Autoplay Fallback Query (${targetRegion})] Thử tìm bài thay thế: "${fallbackQuery}"`);
-              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, 'official');
+              const fallbackLocale = targetRegion === 'INTL' ? 'en' : (targetRegion === 'VI' ? 'vi' : 'en');
+              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, 'official', fallbackLocale);
               if (fallbackResults && fallbackResults.length > 0) {
                 relatedTrack = fallbackResults.find(t => 
                   t && t.url &&
@@ -848,16 +961,6 @@ class MusicQueue {
                   !historyManager.isRecentlyPlayed(this.guild.id, t, 25) &&
                   isCandidateMatchingRegion(t, targetRegion, seedMeta)
                 ) || null;
-
-                if (!relatedTrack) {
-                  relatedTrack = fallbackResults.find(t => 
-                    t && t.url &&
-                    t.url !== songToRelate.url && 
-                    t.url !== this.lastPlayErrorUrl && 
-                    t.title !== this.lastPlayErrorTitle &&
-                    !historyManager.isRecentlyPlayed(this.guild.id, t, 15)
-                  ) || null;
-                }
               }
             }
           } catch (fbErr) {
@@ -904,7 +1007,11 @@ class MusicQueue {
     // 2. KHI PHÒNG TRỐNG (humanCount === 0):
     if (this.mode247) {
       this.prefetchedSong = null;
+      this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+      this._cleanupResource(this.currentResource);
+      this.currentResource = null;
       setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
       await this._play247BackgroundLofi();
     } else {
@@ -1089,7 +1196,7 @@ class MusicQueue {
             content: 'Het nhac trong hang cho, bot da tu dong roi phong Voice.'
           });
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
+            embeds: [createEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? '👋 Disconnected' : '👋 Rời phòng', settingsManager.get(this.guild.id)?.language === 'en' ? 'Queue has ended, bot automatically left the Voice channel.' : 'Hết nhạc trong hàng chờ, bot đã tự động rời phòng Voice.')],
             flags: 4096
           }).catch(() => {});
         }
@@ -1115,14 +1222,18 @@ class MusicQueue {
           const humanCount = this.getHumanMemberCount();
           if (humanCount === 0) {
             console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, đưa bot về chế độ 24/7 Sleep Mode (0% CPU)...`);
-            this.songs = [];
+            this.songs = this.getUserSongs();
+            this.isQueueOnHold = true;
             this.prefetchedSong = null;
+            this._cleanupResource(this.preloadedResource);
             this.preloadedResource = null;
+            this.preloadedSongUrl = null;
             this.currentSong = null;
+            this._cleanupResource(this.currentResource);
             this.currentResource = null;
             this.loopMode = 'off';
             this.player.stop(true);
-            setVoiceChannelStatus(this.voiceChannel, '♾️ 24/7 Chờ phát nhạc');
+            setVoiceChannelStatus(this.voiceChannel, settingsManager.get(this.guild.id)?.language === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
             await sessionManager.saveSession(this.guild.id, {
               voiceChannelId: this.voiceChannel.id,
               textChannelId: this.textChannel?.id,
@@ -1148,7 +1259,7 @@ class MusicQueue {
             content: `Phong Voice khong con ai trong ${timeoutSeconds}s`
           });
           this.textChannel.send({
-            embeds: [createEmbed('👋 Rời phòng', `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
+            embeds: [createEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? '👋 Disconnected' : '👋 Rời phòng', settingsManager.get(this.guild.id)?.language === 'en' ? `No listeners in Voice channel for ${timeoutSeconds} seconds, bot automatically left.` : `Phòng Voice không còn ai trong ${timeoutSeconds} giây, bot đã tự động rời phòng.`)],
             flags: 4096
           }).catch(() => {});
         }
@@ -1242,6 +1353,7 @@ class MusicQueue {
   async addSong(song, requestUser) {
     this.clear247IdleTimer();
     this.autoplayPool = []; // Làm mới bộ đệm Autoplay khi người dùng chủ động order bài mới
+    this.prefetchedSong = null;
     song = this._sanitizeTrack(song);
     if (!song) return null;
     this._attachRequester(song, requestUser);
@@ -1311,10 +1423,7 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this._prefetchQueueLyrics();
-    if (!this.hasSyncedLyrics) {
-      this.refreshNowPlayingCard();
-    }
+    this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
     const position = userSongs.findIndex(s => s === song) + 1;
@@ -1324,10 +1433,18 @@ class MusicQueue {
   async addSongs(songArray, requestUser) {
     this.clear247IdleTimer();
     this.autoplayPool = []; // Làm mới bộ đệm Autoplay khi thêm danh sách bài mới
+    this.prefetchedSong = null;
+    const existingUrls = new Set((this.songs || []).map(s => s.url).filter(Boolean));
+    if (this.currentSong?.url) existingUrls.add(this.currentSong.url);
+
     const sanitized = [];
     for (let i = 0; i < songArray.length; i++) {
       const s = this._sanitizeTrack(songArray[i], i);
       if (s) {
+        if (s.url && existingUrls.has(s.url)) {
+          continue;
+        }
+        if (s.url) existingUrls.add(s.url);
         this._attachRequester(s, requestUser);
         s.is247 = false;
         s.isUserRequest = true;
@@ -1335,6 +1452,15 @@ class MusicQueue {
       }
     }
     if (sanitized.length === 0) return null;
+
+    // Giới hạn trần cứng tối đa 200 bài trong hàng chờ
+    const MAX_QUEUE_SIZE = 200;
+    const remainingSlots = Math.max(0, MAX_QUEUE_SIZE - this.songs.length);
+    if (remainingSlots <= 0) {
+      console.warn(`[Queue Overflow] Hàng chờ guild ${this.guild?.id} đã đạt giới hạn tối đa ${MAX_QUEUE_SIZE} bài.`);
+      return null;
+    }
+    const finalTracks = sanitized.slice(0, remainingSlots);
 
     const isCurrentLofi = this.isCurrentSongLofi() || this._is247Loading;
     this.isQueueOnHold = false;
@@ -1349,7 +1475,7 @@ class MusicQueue {
       this.preloadedSongUrl = null;
       this.prefetchedSong = null;
 
-      this.songs.unshift(...sanitized);
+      this.songs.unshift(...finalTracks);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
@@ -1360,7 +1486,7 @@ class MusicQueue {
       } else {
         this.player.stop(true);
       }
-      return { count: sanitized.length, firstPosition: 1, isPlayingNow: true };
+      return { count: finalTracks.length, firstPosition: 1, isPlayingNow: true };
     }
 
     // Nếu bot đang rảnh rỗi và chưa có bài đang phát: phát ngay bài đầu tiên
@@ -1370,13 +1496,13 @@ class MusicQueue {
         this.preloadedResource = null;
         this.preloadedSongUrl = null;
       }
-      this.songs.push(...sanitized);
+      this.songs.push(...finalTracks);
       this._saveSessionState();
       this.enrichMissingThumbnails().catch(() => {});
       this.clearDisconnectTimer();
       this.clearEmptyRoomTimer();
       await this.playNext();
-      return { count: sanitized.length, firstPosition: 1, isPlayingNow: true };
+      return { count: finalTracks.length, firstPosition: 1, isPlayingNow: true };
     }
 
     // Chuẩn FIFO: Chèn cụm playlist vào sau các bài user trước đó, nhưng đứng TRƯỚC các bài Auto Prefetch
@@ -1384,12 +1510,12 @@ class MusicQueue {
     const firstAutoIdx = this.songs.findIndex(s => !isUserTrack(s));
 
     if (firstAutoIdx !== -1) {
-      this.songs.splice(firstAutoIdx, 0, ...sanitized);
+      this.songs.splice(firstAutoIdx, 0, ...finalTracks);
     } else {
-      this.songs.push(...sanitized);
+      this.songs.push(...finalTracks);
     }
 
-    if (this.songs[0] === sanitized[0] && this.preloadedResource) {
+    if (this.songs[0] === finalTracks[0] && this.preloadedResource) {
       this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
       this.preloadedSongUrl = null;
@@ -1400,14 +1526,11 @@ class MusicQueue {
     this.clearDisconnectTimer();
     this.clearEmptyRoomTimer();
     this.schedulePreload();
-    this._prefetchQueueLyrics();
-    if (!this.hasSyncedLyrics) {
-      this.refreshNowPlayingCard();
-    }
+    this.scheduleRepostNowPlayingCard(1500);
 
     const userSongs = this.getUserSongs();
-    const firstPosition = userSongs.findIndex(s => s === sanitized[0]) + 1;
-    return { count: sanitized.length, firstPosition: firstPosition > 0 ? firstPosition : 1, isPlayingNow: false };
+    const firstPosition = userSongs.findIndex(s => s === finalTracks[0]) + 1;
+    return { count: finalTracks.length, firstPosition: firstPosition > 0 ? firstPosition : 1, isPlayingNow: false };
   }
 
 
@@ -1442,7 +1565,7 @@ class MusicQueue {
 
     const currentPlayedMs = (this.currentSong.seekPosition || 0) * 1000 + (this.currentResource?.playbackDuration || 0);
     const remainingMs = (totalSec * 1000) - currentPlayedMs;
-    const triggerAfterMs = Math.max(500, remainingMs - 18000);
+    const triggerAfterMs = Math.max(500, remainingMs - 22000);
 
     this.preloadTimer = setTimeout(async () => {
       this.preloadTimer = null;
@@ -1459,12 +1582,22 @@ class MusicQueue {
     if (!nextTrack) {
       const guildSettings = settingsManager.get(this.guild.id);
       if (guildSettings.autoplay !== false && this.getHumanMemberCount() > 0 && this.currentSong.requestedBy !== 'Auto (24/7)') {
+        // Đối chiếu bài prefetched hiện có với bài đang phát
+        if (this.prefetchedSong && this.currentSong?.url && this.prefetchedSong._seedUrl !== this.currentSong.url) {
+          this.prefetchedSong = null;
+        }
+
         // A. Kiểm tra Autoplay Pool trước (0ms)
         if (this.autoplayPool && this.autoplayPool.length > 0) {
           while (this.autoplayPool.length > 0) {
             const candidate = this.autoplayPool.shift();
+            if (candidate._seedUrl && this.currentSong?.url && candidate._seedUrl !== this.currentSong.url) {
+              continue;
+            }
             if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== this.currentSong.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
-              candidate.requestedBy = 'Tự động phát';
+              const isEnCandidate = settingsManager.get(this.guild.id)?.language === 'en';
+              candidate.requestedBy = isEnCandidate ? 'Autoplay' : 'Tự động phát';
+              candidate._seedUrl = this.currentSong?.url;
               this.prefetchedSong = candidate;
               nextTrack = candidate;
               console.log(`[Autoplay Preload Pool Hit (0ms)] Nạp sẵn bài từ bộ đệm: "${candidate.title}"`);
@@ -1478,6 +1611,10 @@ class MusicQueue {
           await this._prefetchAutoplayTrack();
           nextTrack = this.prefetchedSong;
         } else if (!nextTrack && this.prefetchedSong) {
+          if (this.currentSong?.url && this.prefetchedSong._seedUrl !== this.currentSong.url) {
+            this.prefetchedSong = null;
+            await this._prefetchAutoplayTrack();
+          }
           nextTrack = this.prefetchedSong;
         }
       }
@@ -1486,7 +1623,7 @@ class MusicQueue {
     if (!nextTrack) return;
 
     // 2. Kích hoạt Preload luồng âm thanh Audio Stream vào RAM (preloadedResource)
-    await this._triggerNextTrackPreload();
+    await this._prefetchNextTrack();
 
     // 3. Tải trước Lời bài hát vào RAM Cache (Lyrics Pre-fetch)
     try {
@@ -1501,6 +1638,9 @@ class MusicQueue {
   async playNext() {
     if (this._isPlayingNext) return;
     this._isPlayingNext = true;
+    this.skipVotes.clear();
+    this.prefetchedSong = null;
+    this.autoplayPool = [];
 
     try {
       if (this.songs.length === 0) return;
@@ -1530,6 +1670,10 @@ class MusicQueue {
           duration: nextSong?.duration || '3:30'
         };
       }
+      if (!this.currentSong?.is247 && this.currentSong?.requestedBy !== 'Auto (24/7)') {
+        this._skipRequested = false;
+        this._isPreemptingLofi = false;
+      }
       this.currentSong.seekPosition = initialSeekSeconds;
       if (this.currentResource) {
         this._cleanupResource(this.currentResource);
@@ -1543,23 +1687,63 @@ class MusicQueue {
       this.crossfadeDuration = typeof guildSettings.crossfadeDuration === 'number' ? guildSettings.crossfadeDuration : 0;
       const crossfade = this.crossfadeDuration;
 
-      // LAZY EVALUATION: Kiểm tra phân đoạn kịch MV YouTube qua SponsorBlock (ngay trước khi phát)
+      // LAZY EVALUATION: Kiểm tra phân đoạn kịch MV YouTube qua SponsorBlock hoặc SSD Cache (ngay trước khi phát)
       if (this.currentSong && !this.currentSong.trimStart && !this.currentSong._sbChecked && guildSettings.autoSkipOfftopic !== false && !this.currentSong.is247 && !this.currentSong.isLive) {
         this.currentSong._sbChecked = true;
         try {
-          const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
-          const trimInfo = await resolveSponsorBlockTrim(this.currentSong);
-          if (trimInfo) {
-            this.currentSong.trimStart = trimInfo.trimStart;
-            this.currentSong.trimEnd = trimInfo.trimEnd;
-            this.currentSong.realDurationSec = trimInfo.realDurationSec;
-            this.currentSong.rawDurationSec = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
-            this.currentSong.rawDuration = this.currentSong.rawDuration || this.currentSong.duration;
-            this.currentSong.duration = formatSecondsToDuration(trimInfo.realDurationSec);
-            this.currentSong.durationMs = trimInfo.realDurationSec * 1000;
-            this.currentSong.skippedIntroSec = trimInfo.skippedIntroSec;
-            this.currentSong.skippedOutroSec = trimInfo.skippedOutroSec;
-            console.log(`[SponsorBlock Auto-Trim] "${this.currentSong.title}": Tự động cắt ${trimInfo.skippedIntroSec}s mở đầu, ${trimInfo.skippedOutroSec}s kết thúc (Nhạc thực tế: ${this.currentSong.duration})`);
+          if ((typeof this.currentSong.url === 'string' && this.currentSong.url.includes('spotify.com')) || (!this.currentSong.ytDurationSec && !this.currentSong.rawDurationSec)) {
+            try {
+              const { searchTrack } = require('../utils/musicExtractor');
+              const searchTarget = this.currentSong.searchQuery || this.currentSong.title;
+              const expSec = this.currentSong.spotifyDurationSec || (this.currentSong.durationMs ? Math.round(this.currentSong.durationMs / 1000) : (this.currentSong.duration ? parseDurationToSeconds(this.currentSong.duration) : 0));
+              const ytRes = await searchTrack(searchTarget, expSec);
+              if (ytRes && ytRes.length > 0 && ytRes[0].url) {
+                this.currentSong.url = ytRes[0].url;
+                const sec = ytRes[0].ytDurationSec || ytRes[0].seconds;
+                if (sec > 0) {
+                  this.currentSong.ytDurationSec = sec;
+                  this.currentSong.rawDurationSec = sec;
+                  this.currentSong.duration = formatSecondsToDuration(sec);
+                  this.currentSong.durationMs = sec * 1000;
+                }
+              }
+            } catch (resolveErr) {}
+          }
+
+          const audioCacheManager = require('./AudioCacheManager');
+          const cachedEntry = audioCacheManager.findCachedEntry(this.currentSong);
+          if (cachedEntry) {
+            this.currentSong.trimStart = cachedEntry.trimStart;
+            this.currentSong.trimEnd = cachedEntry.trimEnd;
+            if (cachedEntry.trimStart > 0 || cachedEntry.trimEnd > 0) {
+              const rawDur = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
+              this.currentSong.skippedIntroSec = cachedEntry.trimStart || 0;
+              this.currentSong.skippedOutroSec = (rawDur > 0 && cachedEntry.trimEnd > 0 && rawDur > cachedEntry.trimEnd) ? (rawDur - cachedEntry.trimEnd) : 0;
+              if (rawDur > 0) {
+                const realSec = (cachedEntry.trimEnd > cachedEntry.trimStart)
+                  ? (cachedEntry.trimEnd - cachedEntry.trimStart)
+                  : Math.max(1, rawDur - cachedEntry.trimStart);
+                this.currentSong.realDurationSec = realSec;
+                this.currentSong.duration = formatSecondsToDuration(realSec);
+                this.currentSong.durationMs = realSec * 1000;
+              }
+            }
+            console.log(`[AudioCache SB-Hit] "${this.currentSong.title}": Tái sử dụng mốc cắt từ SSD Cache (${cachedEntry.trimStart}s - ${cachedEntry.trimEnd}s, bỏ qua mạng SponsorBlock)`);
+          } else {
+            const { resolveSponsorBlockTrim } = require('../utils/sponsorBlockHelper');
+            const trimInfo = await resolveSponsorBlockTrim(this.currentSong);
+            if (trimInfo) {
+              this.currentSong.trimStart = trimInfo.trimStart;
+              this.currentSong.trimEnd = trimInfo.trimEnd;
+              this.currentSong.realDurationSec = trimInfo.realDurationSec;
+              this.currentSong.rawDurationSec = this.currentSong.rawDurationSec || parseDurationToSeconds(this.currentSong.duration);
+              this.currentSong.rawDuration = this.currentSong.rawDuration || this.currentSong.duration;
+              this.currentSong.duration = formatSecondsToDuration(trimInfo.realDurationSec);
+              this.currentSong.durationMs = trimInfo.realDurationSec * 1000;
+              this.currentSong.skippedIntroSec = trimInfo.skippedIntroSec;
+              this.currentSong.skippedOutroSec = trimInfo.skippedOutroSec;
+              console.log(`[SponsorBlock Auto-Trim] "${this.currentSong.title}": Tự động cắt ${trimInfo.skippedIntroSec}s mở đầu, ${trimInfo.skippedOutroSec}s kết thúc (Nhạc thực tế: ${this.currentSong.duration})`);
+            }
           }
         } catch (sbErr) {}
       }
@@ -1567,11 +1751,21 @@ class MusicQueue {
       const targetKey = this.currentSong.url || this.currentSong.searchQuery;
       let resource = null;
 
-      // Sử dụng ngay tài nguyên âm thanh đã tải sẵn ngầm trong RAM (0.001s instant transition) nếu không tua vị trí cũ
-      if (!initialSeekSeconds && this.preloadedResource && this.preloadedSongUrl === targetKey) {
+      // Sử dụng ngay tài nguyên âm thanh đã tải sẵn ngầm trong RAM (0ms instant transition) nếu không tua vị trí cũ
+      const isPreloadMatch = Boolean(
+        this.preloadedResource && (
+          this.preloadedSongUrl === targetKey ||
+          this.preloadedSongUrl === this.currentSong.url ||
+          this.preloadedSongUrl === this.currentSong.searchQuery ||
+          (this.currentSong.originalUrl && this.preloadedSongUrl === this.currentSong.originalUrl)
+        )
+      );
+
+      if (!initialSeekSeconds && isPreloadMatch) {
         resource = this.preloadedResource;
         this.preloadedResource = null;
         this.preloadedSongUrl = null;
+        console.log(`[MusicQueue 0ms Hit] Nối bài tức thì từ luồng Preload (0ms): "${this.currentSong.title}"`);
       } else {
         if (this.preloadedResource) {
           this._cleanupResource(this.preloadedResource);
@@ -1579,6 +1773,14 @@ class MusicQueue {
           this.preloadedSongUrl = null;
         }
         resource = await createResource(this.currentSong, 0, initialSeekSeconds, { priority: 'high' });
+      }
+
+      // Xử lý Race Condition: Nếu trong lúc nạp Lofi 24/7 người dùng vừa order bài mới
+      if (this._isPreemptingLofi && (this.currentSong?.is247 || this.currentSong?.requestedBy === 'Auto (24/7)') && this.songs.length > 0) {
+        this._cleanupResource(resource);
+        this._isPreemptingLofi = false;
+        this._isPlayingNext = false;
+        return await this.playNext();
       }
 
       if (this.currentResource && this.currentResource !== resource) {
@@ -1712,6 +1914,7 @@ class MusicQueue {
       this._startSessionSaveInterval();
 
       // Gửi hoặc Cập nhật Card Now Playing bài đang phát (Công khai cho cả phòng xem và điều khiển)
+      this._pendingButtonAction = null;
       const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
       if (this.textChannel && guildSettings.announceSongs !== false && !is247Lofi) {
         try {
@@ -1798,7 +2001,7 @@ class MusicQueue {
       // Chỉ gửi thông báo lỗi ra textChannel nếu là bài do user yêu cầu (không spam bài 24/7 nền)
       if (this.textChannel && !is247Lofi) {
         this.textChannel.send({
-          embeds: [createErrorEmbed(`Không thể phát bài **${failedSong?.title || 'đã chọn'}**: ${error.message}`)],
+          embeds: [createErrorEmbed(settingsManager.get(this.guild.id)?.language === 'en' ? `Could not play **${failedSong?.title || 'selected'}**: ${error.message}` : `Không thể phát bài **${failedSong?.title || 'đã chọn'}**: ${error.message}`)],
           flags: 4096
         }).catch(() => {});
       }
@@ -1924,6 +2127,104 @@ class MusicQueue {
     }
   }
 
+
+  /**
+   * Kiểm tra điều kiện bỏ qua bài hát hoặc ghi nhận phiếu Vote Skip
+   * @param {Object} member
+   * @returns {{ status: string, reason?: string, title?: string, current?: number, required?: number, needed?: number, user?: string }}
+   */
+  checkOrCastSkipVote(member) {
+    if (!this.currentSong) {
+      return { status: 'no_song' };
+    }
+    if (this.isCurrentSongLofi()) {
+      return { status: 'is_247' };
+    }
+
+    const settings = settingsManager.get(this.guild.id);
+    const voteSkipEnabled = settings.voteSkipEnabled === true;
+    const requesterCanForceSkip = settings.requesterCanForceSkip !== false;
+
+    // 1. Quản trị viên (Admin) luôn được quyền force skip ngay lập tức
+    const isAdmin = isStrictAdmin(member) || member?.guild?.ownerId === member?.id;
+    if (isAdmin) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_admin', title };
+    }
+
+    // 2. Vai trò DJ được cấu hình riêng trong máy chủ
+    const isDJ = settings.djRoleId && member?.roles?.cache?.has(settings.djRoleId);
+    if (isDJ) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_dj', title };
+    }
+
+    // 3. Người đã order (Requester) bài hát này
+    const isRequester = this.currentSong.requestedById && member?.id && (this.currentSong.requestedById === member.id);
+    if (requesterCanForceSkip && isRequester) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_requester', title };
+    }
+
+    // 4. Nếu chế độ Vote Skip đang TẮT -> Bất kỳ ai trong phòng đều được skip trực tiếp
+    if (!voteSkipEnabled) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_single', title };
+    }
+
+    // 5. Nếu phòng Voice có <= 2 người nghe thực tế (không tính bot và người đang tắt loa/deaf) -> Skip luôn
+    const activeVoiceChannel = this.getVoiceChannel();
+    const voiceMembers = activeVoiceChannel?.members?.filter(m =>
+      !m.user?.bot && !m.voice?.selfDeaf && !m.voice?.serverDeaf
+    ) || new Map();
+    const listenerCount = voiceMembers.size;
+    if (listenerCount <= 2) {
+      const title = this.currentSong.title;
+      this.skip();
+      return { status: 'skipped', reason: 'force_single', title };
+    }
+
+    // 6. Tính số phiếu yêu cầu (50% người nghe trong phòng, làm tròn lên)
+    const requiredVotes = Math.ceil(listenerCount * 0.5);
+    const userName = member?.displayName || member?.user?.username || 'User';
+
+    if (this.skipVotes.has(member.id)) {
+      this.skipVotes.delete(member.id);
+      return {
+        status: 'vote_retracted',
+        user: userName,
+        current: this.skipVotes.size,
+        required: requiredVotes
+      };
+    }
+
+    this.skipVotes.add(member.id);
+    if (this.skipVotes.size >= requiredVotes) {
+      const title = this.currentSong.title;
+      const current = this.skipVotes.size;
+      this.skip();
+      return {
+        status: 'skipped',
+        reason: 'vote_passed',
+        title,
+        current,
+        required: requiredVotes
+      };
+    }
+
+    return {
+      status: 'vote_progress',
+      user: userName,
+      current: this.skipVotes.size,
+      required: requiredVotes,
+      needed: requiredVotes - this.skipVotes.size
+    };
+  }
+
   skip() {
     const now = Date.now();
     if (this._lastSkipTime && (now - this._lastSkipTime < 800)) {
@@ -1937,6 +2238,7 @@ class MusicQueue {
 
     this.isQueueOnHold = false;
     this._skipRequested = true;
+    this.skipVotes.clear();
     this.clearPreloadTimer();
     this._cleanupResource(this.preloadedResource);
     this.preloadedResource = null;
@@ -1995,12 +2297,12 @@ class MusicQueue {
       this.paused = false;
       try { this.player.unpause(); } catch (e) {}
       this.autoplayPool = [];
+      this.prefetchedSong = null;
       this.clearPreloadTimer();
       this.clearCrossfadeTimer();
       this._cleanupResource(this.preloadedResource);
       this.preloadedResource = null;
       this.preloadedSongUrl = null;
-      this.prefetchedSong = null;
       this.songs.unshift(targetTrack);
       this.skip();
       return true;
@@ -2022,6 +2324,7 @@ class MusicQueue {
   async playTrackNow(song, requestUser = null) {
     this.clear247IdleTimer();
     this.autoplayPool = [];
+    this.prefetchedSong = null;
     let sanitized = this._sanitizeTrack(song);
     if (!sanitized) return false;
     if (requestUser) {
@@ -2072,11 +2375,50 @@ class MusicQueue {
     return true;
   }
 
+  moveSong(fromIndex, toIndex) {
+    return this.moveTrack(fromIndex, toIndex);
+  }
+
+  removeSong(index) {
+    const idx = parseInt(index, 10);
+    if (isNaN(idx) || idx < 0 || idx >= this.songs.length) return null;
+    if (idx === 0 && this.preloadedResource) {
+      this._cleanupResource(this.preloadedResource);
+      this.preloadedResource = null;
+      this.preloadedSongUrl = null;
+    }
+    const [removed] = this.songs.splice(idx, 1);
+    this._saveSessionState();
+    this.refreshNowPlayingCard();
+    return removed || null;
+  }
+
+  clearQueue() {
+    this.clearPreloadTimer();
+    this._cleanupResource(this.preloadedResource);
+    this.preloadedResource = null;
+    this.preloadedSongUrl = null;
+    this.prefetchedSong = null;
+    this.autoplayPool = [];
+    this.songs = [];
+    if (this.loopMode === 'song' || this.loopMode === 'queue') {
+      this.loopMode = 'off';
+    }
+    // Nếu kết nối voice đã bị hủy hoặc ngắt hoàn toàn thì reset mốc session
+    if (!this.connection || this.connection.state?.status === VoiceConnectionStatus.Destroyed || this.connection.state?.status === VoiceConnectionStatus.Disconnected) {
+      this.voiceSessionStartTime = null;
+    }
+  }
+
   stop() {
     this.isStopped = true;
     this._pendingButtonAction = null;
     this._isProcessingAction = false;
     this.clearLiveLyrics();
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+      this._repostCardTimer = null;
+    }
     this.clearPlayCountTimer();
     this._clearCrossfadeTimer();
     this._clearSessionSaveInterval();
@@ -2126,6 +2468,13 @@ class MusicQueue {
     } else {
       this.clear247IdleTimer();
       sessionManager.clearSession(this.guild.id);
+      const humanCount = typeof this.getHumanMemberCount === 'function' ? this.getHumanMemberCount() : 1;
+      const guildSettings = settingsManager.get(this.guild.id);
+      if (humanCount === 0) {
+        this.startEmptyRoomTimer(guildSettings?.emptyChannelTimeout || 60);
+      } else if (!this.currentSong && (!this.songs || this.songs.length === 0)) {
+        this.startDisconnectTimer((guildSettings?.emptyChannelTimeout || 60) * 1000);
+      }
     }
   }
 
@@ -2319,6 +2668,10 @@ class MusicQueue {
       clearTimeout(this.liveLyricsTimer);
       this.liveLyricsTimer = null;
     }
+    if (this._prefetchLyricsTimer) {
+      clearTimeout(this._prefetchLyricsTimer);
+      this._prefetchLyricsTimer = null;
+    }
     this.currentLyricText = '';
     this.currentLyricIndex = -1;
     this.cachedSyncedLyrics = null;
@@ -2326,6 +2679,21 @@ class MusicQueue {
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
+  }
+
+  /**
+   * Trì hoãn và gộp nhiều yêu cầu prefetch lyrics thành 1 lần gọi (Debounce)
+   */
+  schedulePrefetchLyrics(delayMs = 2000) {
+    if (this._prefetchLyricsTimer) {
+      clearTimeout(this._prefetchLyricsTimer);
+    }
+    this._prefetchLyricsTimer = setTimeout(() => {
+      this._prefetchLyricsTimer = null;
+      this._prefetchQueueLyrics();
+    }, delayMs);
   }
 
   /**
@@ -2335,29 +2703,99 @@ class MusicQueue {
   _prefetchQueueLyrics() {
     if (this.isDestroyed || this.isStopped) return;
     try {
+      const { isCpuOverloaded } = require('../utils/systemMonitor');
+      if (isCpuOverloaded(0.8)) return;
+
       const { prefetchLyrics } = require('../utils/lyricsHelper');
       const settingsManager = require('./SettingsManager');
       const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
       const layers = guildSettings?.lyricsLayers;
 
-      const candidates = [];
-      if (this.currentSong && !this.isCurrentSongLofi()) {
-        candidates.push(this.currentSong);
-      }
       const userQueue = (this.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto (24/7)');
-      candidates.push(...userQueue.slice(0, 3));
-      if (this.prefetchedSong && !candidates.some(c => c.url === this.prefetchedSong.url)) {
-        candidates.push(this.prefetchedSong);
+      const nextTrack = userQueue[0] || this.prefetchedSong;
+      if (!nextTrack || nextTrack.is247) return;
+
+      const durMs = nextTrack.durationMs || (nextTrack.duration ? parseDurationToMs(nextTrack.duration) : 0);
+      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, layers);
+    } catch (e) {}
+  }
+
+  _applySyncedLyrics(song, lyricsData) {
+    if (!song || !lyricsData || !Array.isArray(lyricsData.syncedLyrics) || lyricsData.syncedLyrics.length < 3) {
+      return false;
+    }
+
+    let activeSyncedLyrics = lyricsData.syncedLyrics;
+    let activeAutoOffsetMs = lyricsData.autoOffsetMs || 0;
+
+    // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, chống Double-Offset Mutation)
+    if (song.trimStart > 0 || song.trimEnd > 0) {
+      const trimStartMs = (song.trimStart || 0) * 1000;
+      const realDurMs = song.durationMs || 0;
+      activeAutoOffsetMs = 0;
+
+      const lastLineMs = Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length > 0
+        ? (lyricsData.syncedLyrics[lyricsData.syncedLyrics.length - 1].time || 0)
+        : 0;
+      const lyricDurSec = Number(lyricsData.duration) || Math.round(lastLineMs / 1000);
+      const rawSec = song.rawDurationSec || 0;
+      const realSec = song.realDurationSec || Math.round(realDurMs / 1000);
+
+      let shouldShiftTimestamps = false;
+      if (lyricsData.source === 'youtube_cc') {
+        shouldShiftTimestamps = trimStartMs > 500;
+      } else if (rawSec > realSec && lyricDurSec > 0) {
+        const diffRaw = Math.abs(lyricDurSec - rawSec);
+        const diffReal = Math.abs(lyricDurSec - realSec);
+        shouldShiftTimestamps = diffRaw <= 3 && diffReal >= 8;
       }
 
-      candidates.forEach((track, idx) => {
-        setTimeout(() => {
-          if (this.isDestroyed || this.isStopped) return;
-          const durMs = track.durationMs || (track.duration ? parseDurationToMs(track.duration) : 0);
-          prefetchLyrics(track.title, track.artist, durMs, track.url, layers);
-        }, idx * 250);
-      });
-    } catch (e) {}
+      if (shouldShiftTimestamps && trimStartMs > 0 && Array.isArray(lyricsData.syncedLyrics)) {
+        activeSyncedLyrics = lyricsData.syncedLyrics
+          .map(line => ({
+            ...line,
+            time: line.time - trimStartMs,
+            time_ms: (line.time_ms ?? line.time) - trimStartMs
+          }))
+          .filter(line => line.time >= -500 && (realDurMs <= 0 || line.time <= realDurMs + 2000))
+          .map(line => ({
+            ...line,
+            time: Math.max(0, line.time),
+            time_ms: Math.max(0, line.time_ms)
+          }));
+      }
+    }
+
+    this.cachedSyncedLyrics = activeSyncedLyrics;
+    this.hasSyncedLyrics = true;
+    this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
+    this._lastLyricsEditTime = 0;
+    this._lastRenderedLyricIdx = -1;
+    this._lastRenderedChunkIdx = -1;
+    return true;
+  }
+
+  /**
+   * Cơ chế Nạp Nóng Lời Bài Hát (Hot-Attach / Late-Arriving Lyrics)
+   * Kích hoạt khi phụ đề YouTube CC hoặc nguồn ngoài hoàn tất sau khi card đã phát
+   */
+  async attachLateLyrics(song, lyricsData) {
+    if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;
+    if (this.hasSyncedLyrics) return;
+
+    const applied = this._applySyncedLyrics(song, lyricsData);
+    if (!applied) return;
+
+    console.log(`[Live Lyrics Hot-Attach] Đã nạp nóng thành công ${lyricsData.syncedLyrics?.length} câu lời (nguồn: ${lyricsData.source}) cho "${song.title}"`);
+    this.scheduleNextLyricUpdate(song);
+
+    if (this.nowPlayingMessage) {
+      try {
+        const { createNowPlayingCard } = require('../utils/embed');
+        const cardPayload = createNowPlayingCard(song, this);
+        await this.nowPlayingMessage.edit(cardPayload).catch(() => {});
+      } catch (e) {}
+    }
   }
 
   async startLiveLyrics() {
@@ -2376,45 +2814,13 @@ class MusicQueue {
       const { fetchLyrics } = require('../utils/lyricsHelper');
       const settingsManager = require('./SettingsManager');
       const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
-      const durationMs = song.durationMs || (song.duration ? parseDurationToMs(song.duration) : 0);
+      const durationMs = (song.rawDurationSec ? song.rawDurationSec * 1000 : (song.durationMs || (song.duration ? parseDurationToMs(song.duration) : 0)));
       const lyricsData = await fetchLyrics(song.title, song.artist, durationMs, song.url, guildSettings?.lyricsLayers);
 
       if (this.isDestroyed || this.isStopped || this.currentSong !== song) return;
 
       if (lyricsData && Array.isArray(lyricsData.syncedLyrics) && lyricsData.syncedLyrics.length >= 3) {
-        let activeSyncedLyrics = lyricsData.syncedLyrics;
-        let activeAutoOffsetMs = lyricsData.autoOffsetMs || 0;
-
-        // Chuẩn hóa hệ quy chiếu Lyrics khi bài hát có SponsorBlock Trim (Clone an toàn, chống Double-Offset Mutation)
-        if (song.trimStart > 0 || song.trimEnd > 0) {
-          const trimStartMs = (song.trimStart || 0) * 1000;
-          const realDurMs = song.durationMs || 0;
-
-          if (lyricsData.source === 'youtube_cc' && Array.isArray(lyricsData.syncedLyrics)) {
-            // 1. Với YouTube CC: Dịch lùi timestamp về mốc 0 của phần nhạc đã cắt
-            activeSyncedLyrics = lyricsData.syncedLyrics
-              .map(line => ({
-                ...line,
-                time: line.time - trimStartMs,
-                time_ms: (line.time_ms ?? line.time) - trimStartMs
-              }))
-              .filter(line => line.time >= -500 && (realDurMs <= 0 || line.time <= realDurMs + 2000))
-              .map(line => ({
-                ...line,
-                time: Math.max(0, line.time),
-                time_ms: Math.max(0, line.time_ms)
-              }));
-            activeAutoOffsetMs = 0;
-          } else {
-            // 2. Với Zing MP3 / LRCLIB / Musixmatch: Âm thanh đã cắt khớp sẵn với bản thu phòng thu
-            activeAutoOffsetMs = 0;
-          }
-        }
-
-        this.cachedSyncedLyrics = activeSyncedLyrics;
-        this.hasSyncedLyrics = true;
-        this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
-        this._lastLyricsEditTime = 0; // Đặt về 0 để câu đầu tiên xuất hiện tức thì không bị cooldown ban đầu
+        this._applySyncedLyrics(song, lyricsData);
         console.log(`[Live Lyrics] Hiển thị tức thì (${lyricsData.syncedLyrics.length} câu, offset: ${this.currentLyricOffsetMs}ms, nguồn: ${lyricsData.source}) cho "${song.title}"`);
         this.scheduleNextLyricUpdate(song);
       } else {
@@ -2454,6 +2860,9 @@ class MusicQueue {
     }
 
     // Nếu đang xử lý thao tác người dùng (bấm nút), hoãn lại để nhường băng thông REST API
+    if (this._pendingButtonAction && this._pendingButtonActionTime && (Date.now() - this._pendingButtonActionTime > 2500)) {
+      this._pendingButtonAction = null;
+    }
     if (this._isProcessingAction || this._pendingButtonAction) {
       this.liveLyricsTimer = setTimeout(() => this.scheduleProgressBarUpdate(song), 1500);
       return;
@@ -2464,8 +2873,8 @@ class MusicQueue {
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastProgressEditTime || 0);
 
-      // Đảm bảo khoảng cách giữa 2 lần edit tối thiểu 3500ms để không dính rate limit Discord
-      if (timeSinceLastEdit >= 3500) {
+      // Đảm bảo khoảng cách giữa 2 lần edit tối thiểu 4000ms để không dính rate limit Discord
+      if (timeSinceLastEdit >= 4000) {
         this._lastProgressEditTime = now;
         const cardPayload = createNowPlayingCard(this.currentSong, this);
         await this.nowPlayingMessage.edit(cardPayload).catch(editErr => {
@@ -2504,6 +2913,9 @@ class MusicQueue {
     }
 
     // Nếu đang xử lý thao tác người dùng (bấm nút), hoãn lại để nhường băng thông REST API
+    if (this._pendingButtonAction && this._pendingButtonActionTime && (Date.now() - this._pendingButtonActionTime > 2500)) {
+      this._pendingButtonAction = null;
+    }
     if (this._isProcessingAction || this._pendingButtonAction) {
       this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), 1500);
       return;
@@ -2513,17 +2925,22 @@ class MusicQueue {
       const { createNowPlayingCard, EMOJI_TAG } = require('../utils/embed');
       const seekMs = (song.seekPosition || 0) * 1000;
       const offsetMs = this.currentLyricOffsetMs || 0;
-      const playbackMs = seekMs + (this.currentResource?.playbackDuration || 0) + offsetMs + 400; // Bù trễ mạng +400ms và offset người dùng chỉnh
+      const rawCurrentMs = seekMs + (this.currentResource?.playbackDuration || 0);
+      const effectiveCurrentMs = rawCurrentMs + offsetMs;
+
+      // 1. Thuật toán Đón Đầu (LOOKAHEAD_MS = 1500) canh hiện Cụm 4 câu sớm trước 1.5 giây
+      const LOOKAHEAD_MS = 1500;
+      const embedEffectiveMs = effectiveCurrentMs + LOOKAHEAD_MS;
 
       const lyrics = this.cachedSyncedLyrics;
-      // Binary search tìm vị trí câu hát hiện tại
+      // Binary search tìm vị trí câu hát tương ứng với mốc embedEffectiveMs
       let low = 0;
       let high = lyrics.length - 1;
       let activeIdx = -1;
 
       while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        if (lyrics[mid].time <= playbackMs) {
+        if (lyrics[mid].time <= embedEffectiveMs) {
           activeIdx = mid;
           low = mid + 1;
         } else {
@@ -2531,40 +2948,46 @@ class MusicQueue {
         }
       }
 
-      // 1. Trường hợp bài hát chưa vào câu đầu tiên (phần Intro nhạc dạo)
+      // Trường hợp bài hát chưa vào câu đầu tiên (phần Intro nhạc dạo)
       if (activeIdx < 0) {
         const firstLineTime = lyrics[0]?.time || 5000;
-        const msUntilFirst = Math.max(1000, firstLineTime - playbackMs);
-        this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.min(msUntilFirst, 5000));
+        const msUntilFirst = Math.max(1000, (firstLineTime - LOOKAHEAD_MS) - effectiveCurrentMs);
+        this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.min(msUntilFirst, 4000));
         return;
       }
 
-      // 2. Định dạng cửa sổ 3 dòng (làm sạch markdown link, backtick, @everyone/@here)
-      const lyricIcon = EMOJI_TAG.lyricNext || '<:anna_lyric_next:1562334338593325147>';
+      // 2. Cơ chế phân trang theo CỤM 4 CÂU CỐ ĐỊNH (Paged 4-Line Blocks):
+      // - Cụm 0: các câu 0, 1, 2, 3 (câu 1 đến 4)
+      // - Cụm 1: các câu 4, 5, 6, 7 (câu 5 đến 8)
+      // - Cụm 2: các câu 8, 9, 10, 11 (câu 9 đến 12)...
+      const chunkIndex = Math.max(0, Math.floor(activeIdx / 4));
+      const startIdx = chunkIndex * 4;
+      const visibleLines = lyrics.slice(startIdx, startIdx + 4);
 
-      const lineCurrent = this._sanitizeDiscordLyricLine(lyrics[activeIdx]?.text || '');
-      const lineNext1 = this._sanitizeDiscordLyricLine(lyrics[activeIdx + 1]?.text || '');
-      const lineNext2 = this._sanitizeDiscordLyricLine(lyrics[activeIdx + 2]?.text || '');
-
+      // 3. Định dạng 4 dòng đồng nhất: Dùng 4 dấu chấm tròn "•", in nghiêng nhẹ nhàng, KHÔNG in đậm, KHÔNG mũi tên
       const lines = [];
-      if (lineCurrent) lines.push(`> ${lyricIcon} *${lineCurrent}*`);
-      if (lineNext1) lines.push(`> ${lyricIcon} *${lineNext1}*`);
-      if (lineNext2) lines.push(`> ${lyricIcon} *${lineNext2}*`);
-      const newLyricText = lines.join('\n');
+      for (const line of visibleLines) {
+        const text = this._sanitizeDiscordLyricLine(line?.text || '');
+        if (text) {
+          lines.push(`> • *${text}*`);
+        }
+      }
 
+      const newLyricText = lines.join('\n');
       const now = Date.now();
       const timeSinceLastEdit = now - (this._lastLyricsEditTime || 0);
 
-      // Nếu câu hát thay đổi hoặc chưa có lyric text
-      if (activeIdx !== this.currentLyricIndex || !this.currentLyricText) {
-        if (timeSinceLastEdit >= 3500) {
-          // Bỏ qua edit nếu nội dung text hoàn toàn không đổi so với lần trước
-          if (newLyricText !== this.currentLyricText) {
+      // 4. Chỉ sửa tin nhắn Discord khi CHUYỂN SANG CỤM 4 CÂU MỚI và câu hát thay đổi (Hết 4 câu mới đổi 1 lần!)
+      if (chunkIndex !== this._lastRenderedChunkIdx || !this.currentLyricText) {
+        if (timeSinceLastEdit >= 4000) {
+          if (newLyricText && newLyricText !== this.currentLyricText) {
             this.currentLyricText = newLyricText;
-            this.currentLyricIndex = activeIdx;
+            this.currentLyricIndex = startIdx;
+            this._lastRenderedLyricIdx = activeIdx;
+            this._lastRenderedChunkIdx = chunkIndex;
             this._lastLyricsEditTime = now;
 
-            // Re-render card: Tự động tính lại thanh tiến trình MM:SS và dòng footer Next: (+X in queue)
+            // Re-render card: Tự động lồng cụm 4 dòng vào Section sát dưới URL bài hát
             const cardPayload = createNowPlayingCard(this.currentSong, this);
             await this.nowPlayingMessage.edit(cardPayload).catch(editErr => {
               if (editErr?.code === 10008) {
@@ -2573,27 +2996,33 @@ class MusicQueue {
               }
             });
           } else {
-            this.currentLyricIndex = activeIdx;
+            this.currentLyricIndex = startIdx;
+            this._lastRenderedLyricIdx = activeIdx;
+            this._lastRenderedChunkIdx = chunkIndex;
           }
         } else {
-          // Nếu câu mới đến nhưng chưa hết cooldown, hẹn giờ cập nhật ngay khi hết cooldown (không bỏ qua câu)
-          const waitCooldown = 3500 - timeSinceLastEdit;
+          // Chưa đủ 4000ms cooldown, hẹn giờ cập nhật ngay khi hết cooldown
+          const waitCooldown = 4000 - timeSinceLastEdit;
           this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), Math.max(300, waitCooldown));
           return;
         }
       }
 
-      // Nếu đã đến câu hát cuối cùng của bài
-      if (activeIdx >= lyrics.length - 1) {
+      // 5. Tính toán thời điểm lật sang Cụm 4 câu tiếp theo:
+      // Cụm tiếp theo bắt đầu tại index: (chunkIndex + 1) * 4
+      const nextChunkIdx = (chunkIndex + 1) * 4;
+      if (nextChunkIdx >= lyrics.length) {
+        // Đã ở cụm 4 câu cuối cùng của bài hát -> Không cần hẹn giờ đổi cụm nữa
         return;
       }
 
-      // Tính thời gian chờ đến câu tiếp theo
-      const nextTime = lyrics[activeIdx + 1]?.time || (playbackMs + 3500);
-      let delay = Math.max(500, nextTime - playbackMs);
-      delay = Math.min(Math.max(delay, 500), 7000);
+      const nextChunkStartLine = lyrics[nextChunkIdx];
+      // Cụm tiếp theo sẽ được lật khi effectiveCurrentMs chạm mốc: (nextChunkStartLine.time - LOOKAHEAD_MS)
+      const msUntilNextChunk = Math.max(1000, (nextChunkStartLine.time - LOOKAHEAD_MS) - effectiveCurrentMs);
+      const minCooldownRemaining = Math.max(0, 4000 - (Date.now() - (this._lastLyricsEditTime || 0)));
+      const dynamicDelay = Math.max(msUntilNextChunk, minCooldownRemaining);
 
-      this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), delay);
+      this.liveLyricsTimer = setTimeout(() => this.scheduleNextLyricUpdate(song), dynamicDelay);
     } catch (schedErr) {
       // Bỏ qua lỗi ngầm
     }
@@ -2620,12 +3049,78 @@ class MusicQueue {
     }, 600);
   }
 
+  scheduleRepostNowPlayingCard(delayMs = 1200) {
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+    }
+    this._repostCardTimer = setTimeout(async () => {
+      this._repostCardTimer = null;
+      await this.repostNowPlayingCardToBottom();
+    }, delayMs);
+  }
+
+  async repostNowPlayingCardToBottom() {
+    if (this.isDestroyed || this.isStopped || !this.currentSong || !this.textChannel) return;
+    const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
+    if (is247Lofi) return;
+
+    try {
+      // 1. Kiểm tra xem nowPlayingMessage có phải là tin nhắn cuối cùng trong textChannel không
+      let isAlreadyLast = false;
+      try {
+        const lastMessages = await this.textChannel.messages.fetch({ limit: 1 }).catch(() => null);
+        const lastMsg = lastMessages?.first();
+        isAlreadyLast = Boolean(this.nowPlayingMessage && lastMsg && lastMsg.id === this.nowPlayingMessage.id);
+      } catch (fetchErr) {}
+
+      // Nếu thẻ đang phát ĐÃ là tin nhắn cuối cùng rồi thì không cần repost (tránh nhấp nháy / tốn request)
+      if (isAlreadyLast) return;
+
+      const { createNowPlayingCard } = require('../utils/embed');
+      const cardPayload = createNowPlayingCard(this.currentSong, this);
+
+      // 2. Xóa thẻ cũ (nếu có)
+      if (this.nowPlayingMessage) {
+        const oldMsg = this.nowPlayingMessage;
+        this.nowPlayingMessage = null; // Ngắt gắn kết ngay để Live Lyrics không edit vào tin cũ
+        await oldMsg.delete().catch(() => {});
+      }
+
+      // 3. Gửi thẻ mới xuống dưới cùng
+      const newMsg = await this.textChannel.send(cardPayload);
+      this.nowPlayingMessage = newMsg;
+
+      // 4. Reset mốc render để Live Lyrics lập tức vẽ câu tiếp theo trên thẻ mới
+      this._lastRenderedChunkIdx = -1;
+      this._lastLyricsEditTime = 0;
+
+      if (this.hasSyncedLyrics) {
+        this.scheduleNextLyricUpdate(this.currentSong);
+      } else {
+        this.scheduleProgressBarUpdate(this.currentSong);
+      }
+    } catch (err) {
+      console.warn('[RepostNowPlayingCard] Lỗi khi đưa thẻ Now Playing xuống đáy:', err.message);
+    }
+  }
+
   destroy() {
     this.isDestroyed = true;
     this.isStopped = true;
     this._pendingButtonAction = null;
     this._isProcessingAction = false;
+    if (this._onLyricsFound) {
+      try {
+        const { lyricsEvents } = require('../utils/lyricsHelper');
+        lyricsEvents.off('lyricsFound', this._onLyricsFound);
+      } catch (e) {}
+      this._onLyricsFound = null;
+    }
     this.clearLiveLyrics();
+    if (this._repostCardTimer) {
+      clearTimeout(this._repostCardTimer);
+      this._repostCardTimer = null;
+    }
     this._clearBufferingWatchdog();
     this.clearPlayCountTimer();
     this._clearCrossfadeTimer();
@@ -2641,6 +3136,7 @@ class MusicQueue {
     this.autoplayPool = [];
     this.songs = [];
     this.currentSong = null;
+    this.voiceSessionStartTime = null;
     this.isQueueOnHold = false;
     this._cleanupResource(this.currentResource);
     this.currentResource = null;
@@ -2671,6 +3167,7 @@ class MusicQueue {
           const candidate = this.autoplayPool.shift();
           if (candidate && candidate.url && !this.history.includes(candidate.url) && candidate.url !== this.currentSong.url && !historyManager.isRecentlyPlayed(this.guild.id, candidate, 25)) {
             candidate.requestedBy = 'Tự động phát';
+            candidate._seedUrl = this.currentSong?.url;
             this.prefetchedSong = candidate;
             console.log(`[Autoplay Pre-fetch Pool Hit (0ms)] Nạp sẵn từ bộ đệm: "${candidate.title}"`);
             this._prefetchQueueLyrics();
@@ -2688,13 +3185,15 @@ class MusicQueue {
         if (pool && pool.length > 0) {
           const nextTrack = pool[0];
           nextTrack.requestedBy = 'Tự động phát';
+          nextTrack._seedUrl = this.currentSong?.url;
           this.prefetchedSong = nextTrack;
           this.autoplayPool = pool.slice(1).map(t => {
             t.requestedBy = 'Tự động phát';
+            t._seedUrl = this.currentSong?.url;
             return t;
           });
           console.log(`[Autoplay Metadata Pre-fetch (${targetRegion})] Đã tìm sẵn bài kế tiếp: "${nextTrack.title}" (${nextTrack.artist || 'YouTube'}) và lưu ${this.autoplayPool.length} bài vào pool`);
-          this._prefetchQueueLyrics();
+          this.schedulePrefetchLyrics(2000);
         }
       } catch (err) {
         console.warn('[Autoplay Pre-fetch Error]:', err.message);
@@ -2705,42 +3204,56 @@ class MusicQueue {
   }
 
   async enrichMissingThumbnails() {
-    const missing = [];
-    if (this.currentSong && !this.currentSong.thumbnail) {
-      missing.push(this.currentSong);
-    }
-    for (const s of (this.songs || [])) {
-      if (s && !s.thumbnail) {
-        missing.push(s);
+    if (this._isEnrichingThumbs) return;
+    this._isEnrichingThumbs = true;
+    try {
+      const missing = [];
+      if (this.currentSong && !this.currentSong.thumbnail) {
+        missing.push(this.currentSong);
       }
-    }
-
-    if (missing.length === 0) return;
-
-    let changed = false;
-    const batchSize = 15;
-    for (let i = 0; i < missing.length; i += batchSize) {
-      const chunk = missing.slice(i, i + batchSize);
-      await Promise.allSettled(chunk.map(async item => {
-        if (item.uri && item.uri.startsWith('spotify:track:')) {
-          const trackId = item.uri.replace('spotify:track:', '').split('?')[0];
-          try {
-            const res = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
-            if (res.ok) {
-              const d = await res.json();
-              if (d.thumbnail_url) {
-                item.thumbnail = d.thumbnail_url;
-                changed = true;
-                return;
-              }
-            }
-          } catch (e) {}
+      for (const s of (this.songs || [])) {
+        if (s && !s.thumbnail) {
+          missing.push(s);
         }
-      }));
-    }
+      }
 
-    if (changed) {
-      this._saveSessionState();
+      if (missing.length === 0) return;
+
+      let changed = false;
+      const batchSize = 10;
+      for (let i = 0; i < missing.length; i += batchSize) {
+        const chunk = missing.slice(i, i + batchSize);
+        await Promise.allSettled(chunk.map(async item => {
+          if (!item.thumbnail && item.url) {
+            const ytM = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+            if (ytM && ytM[1]) {
+              item.thumbnail = `https://i.ytimg.com/vi/${ytM[1]}/hqdefault.jpg`;
+              changed = true;
+              return;
+            }
+          }
+          if (item.uri && item.uri.startsWith('spotify:track:')) {
+            const trackId = item.uri.replace('spotify:track:', '').split('?')[0];
+            try {
+              const res = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+              if (res.ok) {
+                const d = await res.json();
+                if (d.thumbnail_url) {
+                  item.thumbnail = d.thumbnail_url;
+                  changed = true;
+                  return;
+                }
+              }
+            } catch (e) {}
+          }
+        }));
+      }
+
+      if (changed) {
+        this._saveSessionState();
+      }
+    } finally {
+      this._isEnrichingThumbs = false;
     }
   }
 
@@ -2769,7 +3282,8 @@ class MusicQueue {
         status: (this.isPlaying && !isLofiCurrent) ? 'active' : 'idle_247',
         currentSong: (!isLofiCurrent && this.currentSong) ? this.currentSong : null,
         songs: userSongs,
-        position: position
+        position: position,
+        voiceSessionStartTime: this.voiceSessionStartTime
       });
     } catch (e) {
       return Promise.resolve();

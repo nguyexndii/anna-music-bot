@@ -61,22 +61,25 @@ class FavoriteManager {
   /**
    * Lấy danh sách bài hát yêu thích của người dùng (Có RAM Cache siêu tốc)
    */
-  async getFavorites(userId) {
+  async getFavorites(userId, forceFresh = false) {
     if (!userId) return [];
-    if (this.memoryCache.has(userId)) {
+    if (!forceFresh && this.memoryCache.has(userId)) {
       return this.memoryCache.get(userId);
     }
     try {
       const doc = await FavoriteSong.findOne({ userId });
       if (doc && doc.songs) {
-        this._setMemoryCache(userId, doc.songs);
-        return doc.songs;
+        const list = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
+        this._setMemoryCache(userId, list);
+        return list;
       }
     } catch (e) {
       // Fallback
     }
     const fallback = this.fallbackData.get(userId) || [];
-    this._setMemoryCache(userId, fallback);
+    if (fallback.length > 0) {
+      this._setMemoryCache(userId, fallback);
+    }
     return fallback;
   }
 
@@ -86,11 +89,15 @@ class FavoriteManager {
    */
   async toggleFavorite(userId, song) {
     if (!song || !song.title) {
-      throw new Error('Dữ liệu bài hát không hợp lệ');
+      const err = new Error('Dữ liệu bài hát không hợp lệ');
+      err.code = 'ERR_INVALID_SONG_DATA';
+      throw err;
     }
 
     if (song.is247 || song.requestedBy === 'Auto (24/7)' || song.requestedBy === 'Auto (24/7 Lofi)') {
-      throw new Error('Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích');
+      const err = new Error('Không thể thêm nhạc nền chế độ 24/7 Lofi vào danh sách yêu thích');
+      err.code = 'ERR_CANNOT_FAVORITE_247';
+      throw err;
     }
 
     const title = String(song.title).trim();
@@ -126,7 +133,7 @@ class FavoriteManager {
       }
 
       await doc.save();
-      songs = doc.songs;
+      songs = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
     } catch (e) {
       // JSON Fallback
       let list = this.fallbackData.get(userId) || [];
@@ -173,7 +180,7 @@ class FavoriteManager {
           if (idx !== -1) removedSong = doc.songs.splice(idx, 1)[0];
         }
         await doc.save();
-        songs = doc.songs;
+        songs = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
       }
     } catch (e) {
       const list = this.fallbackData.get(userId) || [];

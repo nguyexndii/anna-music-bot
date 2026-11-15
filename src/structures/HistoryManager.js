@@ -387,38 +387,55 @@ class HistoryManager {
 
   /**
    * Lấy bảng xếp hạng "Phổ biến trong máy chủ" (Top bài hát nghe nhiều nhất)
-   * - Ưu tiên các bài có playCount >= 2
-   * - Fallback hiển thị các bài có playCount >= 1 khi danh sách còn ít
+   * - Ưu tiên lọc các bài hát được nghe trong 7 ngày gần nhất (Top Tuần thực sự)
    * - Sắp xếp theo playCount giảm dần, sau đó theo lastPlayedAt mới nhất
+   * - Nếu danh sách 7 ngày chưa đủ limit, tự động bổ sung thêm các bài phổ biến ngoài 7 ngày phía sau
    */
   getTopTracks(guildId, limit = 16) {
     const data = this._getGuildData(guildId);
     const stats = data.trackStats || [];
     if (!Array.isArray(stats) || stats.length === 0) return [];
 
-    // Ưu tiên các bài hát có playCount >= 2 và không phải Lofi 24/7
-    let popular = stats.filter(t => t && t.title && (t.playCount || 0) >= 2 && !isLofiTrack(t));
+    const now = Date.now();
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-    // Nếu chưa có đủ ít nhất 4 bài >= 2 lượt, lấy thêm các bài có playCount >= 1
-    if (popular.length < 4) {
-      const singlePlays = stats.filter(t => t && t.title && (t.playCount || 0) === 1 && !isLofiTrack(t));
-      popular = [...popular, ...singlePlays];
+    // Loại bỏ các bài Lofi 24/7 và bài không hợp lệ
+    const validTracks = stats.filter(t => t && t.title && !isLofiTrack(t));
+    if (validTracks.length === 0) return [];
+
+    // Phân loại: Bài phát trong 7 ngày gần nhất vs Bài cũ ngoài 7 ngày
+    const recentWeekly = [];
+    const olderTracks = [];
+
+    for (const track of validTracks) {
+      const lastPlayedMs = new Date(track.lastPlayedAt || 0).getTime();
+      if (now - lastPlayedMs <= SEVEN_DAYS_MS) {
+        recentWeekly.push(track);
+      } else {
+        olderTracks.push(track);
+      }
     }
 
-    if (popular.length === 0) {
-      return [];
-    }
-
-    popular.sort((a, b) => {
+    const compareTracks = (a, b) => {
       const countA = a.playCount || 0;
       const countB = b.playCount || 0;
       if (countB !== countA) {
         return countB - countA;
       }
       return new Date(b.lastPlayedAt || 0).getTime() - new Date(a.lastPlayedAt || 0).getTime();
-    });
+    };
 
-    return popular.slice(0, limit).map(item => {
+    recentWeekly.sort(compareTracks);
+    olderTracks.sort(compareTracks);
+
+    // Ưu tiên bài 7 ngày gần nhất, nếu chưa đủ limit thì bù thêm bài ngoài 7 ngày
+    let combined = recentWeekly.slice(0, limit);
+    if (combined.length < limit && olderTracks.length > 0) {
+      const needed = limit - combined.length;
+      combined = combined.concat(olderTracks.slice(0, needed));
+    }
+
+    return combined.map(item => {
       let thumb = item.thumbnail;
       if (!thumb && item.url) {
         const vid = extractVideoId(item.url);

@@ -5,17 +5,45 @@ const fs = require('fs');
  * Đọc bộ nhớ khả dụng thực tế trên Linux từ /proc/meminfo (MemAvailable bao gồm cả buffers/cache sẵn sàng giải phóng)
  * Tránh đọc sai số liệu os.freemem() vốn chỉ tính MemFree thuần túy.
  */
+let _cachedAvailableMem = null;
+let _lastMemCheckTime = 0;
+
 function getSystemAvailableMemoryMb() {
+  const now = Date.now();
+  if (_cachedAvailableMem !== null && (now - _lastMemCheckTime < 5000)) {
+    return _cachedAvailableMem;
+  }
+  let result;
   if (process.platform === 'linux') {
     try {
       const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
       const m = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/i);
       if (m && m[1]) {
-        return Math.round(parseInt(m[1], 10) / 1024);
+        result = Math.round(parseInt(m[1], 10) / 1024);
       }
     } catch (e) {}
   }
-  return Math.round(os.freemem() / (1024 * 1024));
+  if (result === undefined) {
+    result = Math.round(os.freemem() / (1024 * 1024));
+  }
+  _cachedAvailableMem = result;
+  _lastMemCheckTime = now;
+  return result;
+}
+
+/**
+ * Kiểm tra xem CPU có đang bị quá tải dựa trên loadavg 1 phút trên Linux không.
+ * @param {number} threshold Ngưỡng tải CPU trung bình 1 phút (mặc định 1.15)
+ * @returns {boolean}
+ */
+function isCpuOverloaded(threshold = 1.15) {
+  if (process.platform === 'linux' && typeof os.loadavg === 'function') {
+    const loads = os.loadavg();
+    if (Array.isArray(loads) && loads.length > 0) {
+      return loads[0] > threshold;
+    }
+  }
+  return false;
 }
 
 /**
@@ -23,6 +51,11 @@ function getSystemAvailableMemoryMb() {
  * Ngưỡng an toàn mặc định là 300MB (có thể chỉnh qua biến môi trường PRELOAD_MIN_FREE_MB).
  */
 function hasEnoughMemoryToPreload() {
+  if (isCpuOverloaded(1.25)) {
+    console.warn('[CPU Guard] Tải trung bình CPU 1p quá cao, tạm hoãn preload để bảo vệ luồng âm thanh');
+    return false;
+  }
+
   const minFreeMb = parseInt(process.env.PRELOAD_MIN_FREE_MB, 10) || 300;
   const availableMb = getSystemAvailableMemoryMb();
 
@@ -32,14 +65,8 @@ function hasEnoughMemoryToPreload() {
   }
 
   const rssMb = process.memoryUsage().rss / (1024 * 1024);
-  if (rssMb >= 500) {
-    if (typeof global.gc === 'function') {
-      try { global.gc(); } catch (e) {}
-    }
-  }
-
-  if (rssMb >= 650) {
-    console.warn(`[RAM Guard] Tiến trình bot đang sử dụng ${rssMb.toFixed(0)}MB RAM (>= 650MB). Tạm hoãn preload để bảo vệ bộ nhớ.`);
+  if (rssMb >= 380) {
+    console.warn(`[RAM Guard] Tiến trình bot đang sử dụng ${rssMb.toFixed(0)}MB RAM (>= 380MB). Tạm hoãn preload để bảo vệ bộ nhớ.`);
     return false;
   }
   return true;
@@ -70,6 +97,7 @@ function logMemoryUsage(tag = 'RAM Monitor') {
 }
 
 module.exports = {
+  isCpuOverloaded,
   hasEnoughMemoryToPreload,
   getSystemAvailableMemoryMb,
   getMemoryStats,

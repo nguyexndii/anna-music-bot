@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { SlashCommandBuilder } = require('discord.js');
-const { generateWebToken, invalidateUserTokens } = require('../utils/tokenHelper');
+const { generateWebToken } = require('../utils/tokenHelper');
+const { registerWebSession } = require('../utils/webSessionManager');
 const { getActiveTunnelUrl } = require('../utils/statusNotifier');
 const { createErrorEmbed, CUSTOM_EMOJIS } = require('../utils/embed');
 const { isAllowedVoiceChannel } = require('../utils/permissionHelper');
@@ -8,14 +9,10 @@ const settingsManager = require('../structures/SettingsManager');
 const { createContext } = require('../utils/commandHelper');
 const config = require('../config');
 
-// Lưu trữ các phiên web đang active theo User ID để vô hiệu hóa và sửa tin nhắn cũ
-const userActiveWebMessages = new Map();
-
 function signTunnelUrl(url, secret) {
   if (!url || !secret) return '';
   return crypto.createHmac('sha256', secret).update(url.trim().replace(/\/$/, '')).digest('hex');
 }
-
 
 module.exports = {
   name: 'web',
@@ -33,64 +30,25 @@ module.exports = {
     const member = ctx.member;
     const author = ctx.user;
 
+    const guildSettings = settingsManager.get(guild.id);
+    const isEn = guildSettings?.language === 'en';
+
     // 1. Kiểm tra User có trong kênh Voice hay không
     const userVoice = member?.voice?.channel;
     if (!userVoice) {
       return ctx.sendTemp({
-        embeds: [createErrorEmbed('Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
+        embeds: [createErrorEmbed(isEn ? 'You must be in a Voice channel to use Web Player!' : 'Bạn cần tham gia vào một kênh Voice để sử dụng Web Player!')]
       }, 7000);
     }
 
     // 2. Kiểm tra kênh Voice bị khóa
-    const guildSettings = settingsManager.get(guild.id);
     if (guildSettings.lockedVoiceChannelId && !isAllowedVoiceChannel(member)) {
       return ctx.sendTemp({
-        embeds: [createErrorEmbed(`Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)]
+        embeds: [createErrorEmbed(isEn ? `Server voice channel is locked! Please join <#${guildSettings.lockedVoiceChannelId}> to use Web Player.` : `Máy chủ đã khóa kênh Voice! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để dùng Web Player.`)]
       }, 7000);
     }
 
-    // 0. Tách biệt phiên theo từng máy chủ: ${guild.id}_${author.id}
-    const sessionKey = `${guild.id}_${author.id}`;
-    const prevSession = userActiveWebMessages.get(sessionKey);
-    if (prevSession) {
-      if (prevSession.timer) {
-        clearTimeout(prevSession.timer);
-      }
-      if (global._tokenStore) {
-        if (prevSession.pin) global._tokenStore.delete(prevSession.pin);
-        if (prevSession.token) global._tokenStore.delete(prevSession.token);
-      }
-      try {
-        const supersededContainer = {
-          type: 17,
-          accent_color: 0x95a5a6,
-          components: [
-            {
-              type: 9,
-              components: [
-                {
-                  type: 10,
-                  content: '### ⚠️ Mã PIN Web Player Đã Hết Hiệu Lực\nMã PIN và liên kết đăng nhập này **đã hết hiệu lực** vì bạn vừa yêu cầu một mã mới qua lệnh `/web`.\n\nVui lòng sử dụng mã PIN và liên kết trong tin nhắn mới nhất!'
-                }
-              ],
-              accessory: {
-                type: 11,
-                media: { url: client.user.displayAvatarURL() }
-              }
-            }
-          ]
-        };
-
-        if (prevSession.interaction) {
-          prevSession.interaction.editReply({ components: [supersededContainer] }).catch(() => {});
-        } else if (prevSession.replyMsg && typeof prevSession.replyMsg.edit === 'function') {
-          prevSession.replyMsg.edit({ components: [supersededContainer] }).catch(() => {});
-        }
-      } catch (e) {}
-      userActiveWebMessages.delete(sessionKey);
-    }
-
-    // 3. Tạo User data và Magic Token (kèm PIN 6 số hiệu lực 3 phút, session 2 giờ)
+    // 3. Tạo User data và Magic Token (kèm PIN 6 số hiệu lực 2 phút, session 24 giờ)
     const isAdmin = member?.permissions?.has('Administrator') || member?.permissions?.has('ManageGuild') || guild.ownerId === author.id;
     const avatarUrl = author.displayAvatarURL({ dynamic: true, size: 256 });
     const userData = {
@@ -103,7 +61,7 @@ module.exports = {
       isAdmin: Boolean(isAdmin)
     };
 
-    const { token, pin } = generateWebToken(userData, 3, 24);
+    const { token, pin } = generateWebToken(userData, 2, 24);
     const tunnelUrl = getActiveTunnelUrl();
     const baseUrl = (config.webUrl || 'https://anna-music-bot-ui.pages.dev');
     const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
@@ -120,7 +78,7 @@ module.exports = {
           components: [
             {
               type: 10,
-              content: `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
+              content: isEn ? `### Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${guild.name}**.` : `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
             }
           ],
           accessory: {
@@ -130,7 +88,7 @@ module.exports = {
         },
         {
           type: 10,
-          content: `🔊 **Kênh Voice:** <#${userVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 3 phút)*`
+          content: isEn ? `🔊 **Voice Channel:** <#${userVoice.id}>\n🔑 **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `🔊 **Kênh Voice:** <#${userVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
         },
         {
           type: 1,
@@ -138,7 +96,7 @@ module.exports = {
             {
               type: 2,
               style: 5, // ButtonStyle.Link
-              label: 'Mở Trình Phát Web Player',
+              label: isEn ? 'Open Web Player' : 'Mở Trình Phát Web Player',
               url: webUrl,
               emoji: CUSTOM_EMOJIS.web || { name: '🌐' }
             }
@@ -146,7 +104,7 @@ module.exports = {
         },
         {
           type: 10,
-          content: '-# Mã PIN dùng 1 lần sẽ tự hủy sau khi mở • Hết hạn tự động sau 3 phút'
+          content: isEn ? '-# One-time PIN self-destructs after opening • Automatically expires in 2 minutes' : '-# Mã PIN dùng 1 lần sẽ tự hủy sau khi mở • Hết hạn tự động sau 2 phút'
         }
       ]
     };
@@ -155,52 +113,16 @@ module.exports = {
       const replyFlags = 32768 | (ctx.isInteraction ? 64 : 0);
       const replyMsg = await ctx.reply({ components: [webContainer], flags: replyFlags });
 
-      // Tự động vô hiệu hóa mã PIN sau 3 phút
-      const timer = setTimeout(async () => {
-        try {
-          const currentActive = userActiveWebMessages.get(sessionKey);
-          if (currentActive && currentActive.pin === pin) {
-            userActiveWebMessages.delete(sessionKey);
-            if (global._tokenStore) {
-              global._tokenStore.delete(pin);
-              global._tokenStore.delete(token);
-            }
-          }
-
-          const expiredContainer = {
-            type: 17,
-            accent_color: 0xef7864,
-            components: [
-              {
-                type: 9,
-                components: [
-                  {
-                    type: 10,
-                    content: '### ⚠️ Mã PIN Web Player Đã Hết Hạn\nMã PIN và liên kết đăng nhập đã tự hủy sau **3 phút** vì lý do bảo mật.\n\nNếu bạn muốn mở lại Web Player, vui lòng gõ lại lệnh `/web` để nhận mã mới nhé!'
-                  }
-                ],
-                accessory: {
-                  type: 11,
-                  media: { url: client.user.displayAvatarURL() }
-                }
-              }
-            ]
-          };
-
-          if (ctx.isInteraction && ctx.interaction) {
-            await ctx.interaction.editReply({ components: [expiredContainer] }).catch(() => {});
-          } else if (replyMsg && typeof replyMsg.edit === 'function') {
-            await replyMsg.edit({ components: [expiredContainer] }).catch(() => {});
-          }
-        } catch (e) {}
-      }, 180 * 1000);
-
-      userActiveWebMessages.set(sessionKey, {
+      // Đăng ký phiên vào webSessionManager
+      registerWebSession({
+        guildId: guild.id,
+        userId: author.id,
         interaction: ctx.isInteraction ? ctx.interaction : null,
         replyMsg,
-        timer,
         pin,
-        token
+        token,
+        isEn,
+        client
       });
     } catch (err) {
       console.error('[Web Command Error]:', err);

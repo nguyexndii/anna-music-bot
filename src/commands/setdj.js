@@ -2,6 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const settingsManager = require('../structures/SettingsManager');
 const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { isStrictAdmin } = require('../utils/permissionHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'setdj',
@@ -40,50 +42,52 @@ module.exports = {
   async execute(source, args) {
     const ctx = createContext(source, args);
     if (!ctx.guild) return;
+    const guildId = ctx.guild.id;
 
-    if (!ctx.member.permissions.has('ManageGuild') && !ctx.member.permissions.has('Administrator')) {
-      return ctx.reply({ embeds: [createErrorEmbed('Bạn cần có quyền `Quản Lý Máy Chủ` hoặc `Quản Trị Viên` để cài đặt vai trò DJ!')] });
+    if (!isStrictAdmin(ctx.member)) {
+      return ctx.reply({ embeds: [createErrorEmbed(t(guildId, 'common.no_permission'))] });
     }
 
     const roleOption = ctx.options.getRole('role');
     const modeOption = ctx.options.getString('mode');
 
-    if (!roleOption && !modeOption && (!args || args.length === 0)) {
-      const current = settingsManager.get(ctx.guild.id);
-      const roleText = current.djRoleId ? `<@&${current.djRoleId}>` : 'Chưa thiết lập';
-      const statusText = current.djOnly ? '🟢 Đang BẬT' : '🔴 Đang TẮT';
+    if (modeOption === 'reset' || (args && args[0]?.toLowerCase() === 'reset')) {
+      settingsManager.update(guildId, { djOnly: false, djRoleId: null });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setdj_disabled'))] });
+    }
+
+    if (roleOption) {
+      settingsManager.update(guildId, { djRoleId: roleOption.id, djOnly: true });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setdj_enabled', { roleId: roleOption.id }))] });
+    }
+
+    if (modeOption === 'on') {
+      const current = settingsManager.get(guildId);
+      if (!current.djRoleId) {
+        return ctx.reply({
+          embeds: [createErrorEmbed(t(guildId, 'commands.setdj_require_role'))],
+          flags: 64
+        });
+      }
+      settingsManager.update(guildId, { djOnly: true });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setdj_enabled', { roleId: current.djRoleId }))] });
+    }
+
+    if (modeOption === 'off') {
+      settingsManager.update(guildId, { djOnly: false });
+      return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, 'commands.setdj_disabled'))] });
+    }
+
+    const current = settingsManager.get(guildId);
+    const newDj = !current.djOnly;
+    if (newDj && !current.djRoleId) {
       return ctx.reply({
-        embeds: [createSuccessEmbed(`Trạng thái chế độ DJ:\n• Vai trò DJ: ${roleText}\n• Chế độ chỉ DJ: ${statusText}\n\n*Cách dùng:* \`/setdj role:@Role\` hoặc \`/setdj mode:On/Off\``)]
+        embeds: [createErrorEmbed(t(guildId, 'commands.setdj_require_role'))],
+        flags: 64
       });
     }
-
-    const firstArg = modeOption || args?.[0]?.toLowerCase();
-
-    if (firstArg === 'on' || firstArg === 'enable' || firstArg === 'bat') {
-      settingsManager.update(ctx.guild.id, { djOnly: true });
-      return ctx.reply({ embeds: [createSuccessEmbed('🟢 Đã BẬT chế độ chỉ người có vai trò DJ mới được dùng lệnh nhạc!')] });
-    }
-
-    if (firstArg === 'reset') {
-      settingsManager.update(ctx.guild.id, { djOnly: false, djRoleId: null });
-      return ctx.reply({ embeds: [createSuccessEmbed('🔄 Đã ĐẶT LẠI (Reset) toàn bộ cài đặt DJ! Đã xóa vai trò DJ và tắt chế độ DJ.')] });
-    }
-
-    if (firstArg === 'off' || firstArg === 'disable' || firstArg === 'tat') {
-      settingsManager.update(ctx.guild.id, { djOnly: false });
-      return ctx.reply({ embeds: [createSuccessEmbed('🔴 Đã TẮT chế độ DJ! Vai trò DJ vẫn được lưu giữ và bạn có thể bật lại bất cứ lúc nào.')] });
-    }
-
-    const role = roleOption
-      || (ctx.message?.mentions.roles.first() || ctx.guild.roles.cache.get(args[0]) || ctx.guild.roles.cache.find(r => r.name.toLowerCase().includes(args.join(' ').toLowerCase())));
-
-    if (!role) {
-      return ctx.reply({ embeds: [createErrorEmbed('Vui lòng chọn hoặc tag một vai trò hợp lệ (ví dụ: `/setdj role:@DJ`)!')] });
-    }
-
-    settingsManager.update(ctx.guild.id, { djRoleId: role.id, djOnly: true });
-    return ctx.reply({
-      embeds: [createSuccessEmbed(`Đã gán vai trò DJ thành công cho **${role.name}** (<@&${role.id}>) và tự động **BẬT** chế độ chỉ DJ mới được phát nhạc!`)]
-    });
+    settingsManager.update(guildId, { djOnly: newDj });
+    const msgKey = newDj ? 'commands.setdj_enabled' : 'commands.setdj_disabled';
+    return ctx.reply({ embeds: [createSuccessEmbed(t(guildId, msgKey, { roleId: current.djRoleId }))] });
   }
 };

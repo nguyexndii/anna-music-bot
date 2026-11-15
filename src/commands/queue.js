@@ -1,10 +1,12 @@
 const { SlashCommandBuilder, ComponentType } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
+const settingsManager = require('../structures/SettingsManager');
 const {
   createQueueContainer,
   createErrorEmbed
 } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'queue',
@@ -20,7 +22,7 @@ module.exports = {
     const ctx = createContext(source, args);
     const queue = musicManager.get(ctx.guild.id);
     if (!queue || (!queue.currentSong && queue.songs.length === 0)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Hàng chờ âm nhạc hiện đang trống!')], flags: 64 });
+      return ctx.reply({ embeds: [createErrorEmbed(t(ctx.guild.id, 'player.queue_empty'))], flags: 64 });
     }
 
     const userSongs = queue.getUserSongs ? queue.getUserSongs() : (queue.songs || []).filter(s => s && !s.is247 && s.requestedBy !== 'Auto' && s.requestedBy !== 'Auto (24/7)' && s.requestedBy !== 'Auto (24/7 Lofi)');
@@ -40,7 +42,8 @@ module.exports = {
 
       collector.on('collect', async (i) => {
         if (i.user.id !== ctx.user.id) {
-          return i.reply({ content: 'Chỉ người gõ lệnh mới có thể chuyển trang!', flags: 64 });
+          const isEn = settingsManager.get(ctx.guild.id)?.language === 'en';
+          return i.reply({ content: isEn ? 'Only the command requester can switch pages!' : 'Chỉ người gõ lệnh mới có thể chuyển trang!', flags: 64 });
         }
 
         if (i.customId.startsWith('queue_page_')) {

@@ -11,6 +11,7 @@ class PlaylistHistoryManager {
   constructor() {
     this.filePath = path.join(__dirname, '../../data/playlists.json');
     this.cache = new Map();
+    this._loadedGuilds = new Set();
     this._ensureFile();
     this._loadFromFile();
     this._loadFromMongo();
@@ -52,6 +53,7 @@ class PlaylistHistoryManager {
       const all = await GuildPlaylist.find({}).sort({ updatedAt: -1 }).lean();
       for (const item of all) {
         const gid = String(item.guildId);
+        this._loadedGuilds.add(gid);
         if (!this.cache.has(gid)) {
           this.cache.set(gid, []);
         }
@@ -97,6 +99,7 @@ class PlaylistHistoryManager {
 
   async addPlaylist(guildId, playlistData) {
     if (!guildId || !playlistData || !playlistData.url) return;
+    this._loadedGuilds.add(String(guildId));
 
     if (!this.cache.has(guildId)) {
       this.cache.set(guildId, []);
@@ -170,9 +173,11 @@ class PlaylistHistoryManager {
   }
 
   getPlaylists(guildId, limit = 50) {
-    // Tự động load ngầm từ Mongo nếu cache đang rỗng
-    if ((!this.cache.has(guildId) || this.cache.get(guildId).length === 0) && GuildPlaylist) {
-      GuildPlaylist.find({ guildId: String(guildId) })
+    const gid = String(guildId);
+    // Chỉ chạy truy vấn ngầm GuildPlaylist.find nếu guild chưa từng được nạp từ Mongo
+    if (!this._loadedGuilds.has(gid) && GuildPlaylist) {
+      this._loadedGuilds.add(gid);
+      GuildPlaylist.find({ guildId: gid })
         .sort({ updatedAt: -1 })
         .limit(100)
         .lean()
@@ -188,13 +193,15 @@ class PlaylistHistoryManager {
               addedAt: item.addedAt ? item.addedAt.toISOString() : new Date().toISOString(),
               tracks: Array.isArray(item.tracks) ? item.tracks : []
             }));
-            this.cache.set(String(guildId), formatted);
+            this.cache.set(gid, formatted);
+          } else if (!this.cache.has(gid)) {
+            this.cache.set(gid, []);
           }
         })
         .catch(() => {});
     }
 
-    const list = this.cache.get(guildId) || [];
+    const list = this.cache.get(guildId) || this.cache.get(gid) || [];
     return list.slice(0, limit);
   }
 

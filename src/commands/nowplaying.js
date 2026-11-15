@@ -1,7 +1,9 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
+const settingsManager = require('../structures/SettingsManager');
 const { createNowPlayingCard, createErrorEmbed } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
+const { t } = require('../utils/i18n');
 
 module.exports = {
   name: 'nowplaying',
@@ -18,7 +20,7 @@ module.exports = {
     const queue = musicManager.get(ctx.guild.id);
     const is247Active = Boolean(queue?.mode247 || (queue?.currentSong && (queue.currentSong.requestedBy === 'Auto (24/7)' || queue.currentSong.is247)));
     if (!queue || (!queue.currentSong && !is247Active)) {
-      return ctx.reply({ embeds: [createErrorEmbed('Hiện không có bài hát nào đang phát!')], flags: 64 });
+      return ctx.reply({ embeds: [createErrorEmbed(t(ctx.guild.id, 'common.no_song_playing'))], flags: 64 });
     }
 
     // Xóa tin nhắn cũ nếu có để tránh trôi và trùng lặp
@@ -27,7 +29,7 @@ module.exports = {
       queue.nowPlayingMessage = null;
     }
 
-    const songForEmbed = queue.currentSong || { requestedBy: 'Auto (24/7)', title: 'Nhạc nền Lofi 24/7', is247: true };
+    const songForEmbed = queue.currentSong || { requestedBy: 'Auto (24/7)', title: t(ctx.guild.id, 'player.radio_card_title'), is247: true };
     const payload = createNowPlayingCard(songForEmbed, queue);
 
     if (ctx.isInteraction) {

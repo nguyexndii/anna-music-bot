@@ -221,5 +221,6 @@ function clearSearchCache() {
 
 module.exports = {
   executeSearch,
+  getCachedResults,
   clearSearchCache
 };

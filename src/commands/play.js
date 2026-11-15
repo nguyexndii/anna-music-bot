@@ -6,7 +6,15 @@ const { createErrorEmbed, createEmbed, createQueueAddedEmbed, createSuccessEmbed
 const { hasMusicPermission, isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
 const playlistHistoryManager = require('../structures/PlaylistHistoryManager');
+const { t } = require('../utils/i18n');
 const config = require('../config');
+
+const activePlaylistLoads = new Set();
+
+function isLikelyPlaylistQuery(queryStr) {
+  if (!queryStr || typeof queryStr !== 'string') return false;
+  return /(?:list=|playlist|\/album\/|\/sets\/)/i.test(queryStr);
+}
 
 module.exports = {
   name: 'play',
@@ -30,29 +38,31 @@ module.exports = {
     ),
   async execute(source, args) {
     const ctx = createContext(source, args);
+    const guildId = ctx.guild.id;
+    const isEn = settingsManager.get(guildId)?.language === 'en';
 
     // 1. Kiểm tra quyền DJ
     if (!hasMusicPermission(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
+      const guildSettings = settingsManager.get(guildId);
       const roleText = guildSettings.djRoleId ? `<@&${guildSettings.djRoleId}>` : 'DJ';
-      return ctx.sendTemp(`Bạn cần có vai trò ${roleText} để phát nhạc.`, 7000);
+      return ctx.sendTemp(t(guildId, 'common.dj_only', { role: roleText }), 7000);
     }
 
     // 2. Kiểm tra kênh Voice
     const voiceChannel = ctx.member?.voice?.channel;
     if (!voiceChannel) {
-      return ctx.sendTemp('Bạn cần tham gia vào một kênh Voice trước!', 7000);
+      return ctx.sendTemp(t(guildId, 'common.no_voice'), 7000);
     }
 
     // 3. Kiểm tra kênh Voice bị khóa (Admin bypass)
     if (!isAllowedVoiceChannel(ctx.member)) {
-      const guildSettings = settingsManager.get(ctx.guild.id);
-      return ctx.sendTemp(`Máy chủ đã khóa kênh Voice cố định! Vui lòng vào kênh <#${guildSettings.lockedVoiceChannelId}> để nghe nhạc.`, 7000);
+      const guildSettings = settingsManager.get(guildId);
+      return ctx.sendTemp(t(guildId, 'common.voice_locked', { channelId: guildSettings.lockedVoiceChannelId }), 7000);
     }
 
     const permissions = voiceChannel.permissionsFor(ctx.client.user);
     if (!permissions.has('Connect') || !permissions.has('Speak')) {
-      return ctx.sendTemp('Bot không có quyền kết nối hoặc phát âm thanh trong kênh Voice của bạn!', 7000);
+      return ctx.sendTemp(t(guildId, 'common.command_error'), 7000);
     }
 
     // 4. Vào phòng Voice ngay lập tức
@@ -61,7 +71,7 @@ module.exports = {
       await queue.connect();
     } catch (connErr) {
       console.error('[Voice Connect Error]:', connErr);
-      return ctx.reply(`Không thể kết nối vào phòng Voice: ${connErr.message}`);
+      return ctx.reply(`${t(guildId, 'common.command_error')}: ${connErr.message}`);
     }
 
     let query = ctx.isInteraction ? (ctx.options.getString('song') || ctx.options.getString('query')) : args.join(' ');
@@ -78,24 +88,26 @@ module.exports = {
       const requester = `<@${ctx.user.id}>`;
       const voiceChannelText = `<#${voiceChannel.id}>`;
 
+      const readyTitle = isEn ? 'Ready to Receive Song Requests' : 'Sẵn sàng nhận yêu cầu bài hát';
+      const readyDesc = isEn
+        ? `${EMOJI_TAG.add} ${requester} • ${voiceChannelText}\n\nClick **\`Add Song\`** button below or type \`/play <song_name>\` to start playing music!`
+        : `${EMOJI_TAG.add} ${requester} • ${voiceChannelText}\n\nNhấn nút **\`Thêm bài\`** bên dưới hoặc gõ lệnh \`/play <tên_bài_hát>\` để phát nhạc ngay lập tức!`;
+
       const embed = new EmbedBuilder()
-        .setAuthor({ name: 'Trình Phát Âm Nhạc • Music Player', iconURL: ctx.client.user.displayAvatarURL() })
-        .setTitle(`${EMOJI_TAG.musicNotesDouble} Sẵn sàng nhận yêu cầu bài hát`)
+        .setAuthor({ name: isEn ? 'Anna Music Player' : 'Trình Phát Âm Nhạc', iconURL: ctx.client.user.displayAvatarURL() })
+        .setTitle(`${EMOJI_TAG.musicNotesDouble} ${readyTitle}`)
         .setColor('#2B2D31')
-        .setDescription(
-          `${EMOJI_TAG.add} ${requester} • ${voiceChannelText}\n\n` +
-          `Nhấn nút **\`Thêm bài hát\`** bên dưới hoặc gõ lệnh \`/play <tên_bài_hát>\` để phát nhạc ngay lập tức!`
-        );
+        .setDescription(readyDesc);
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('btn_add_song')
-          .setLabel('Thêm bài hát')
+          .setLabel(isEn ? 'Add Song' : 'Thêm bài')
           .setEmoji(CUSTOM_EMOJIS.add)
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId('btn_queue')
-          .setLabel('Hàng chờ')
+          .setLabel(isEn ? 'Queue' : 'Hàng chờ')
           .setEmoji(CUSTOM_EMOJIS.list)
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
@@ -113,33 +125,55 @@ module.exports = {
 
     await ctx.deferReply();
 
+    const isPlaylistCandidate = isLikelyPlaylistQuery(query);
+    if (isPlaylistCandidate && activePlaylistLoads.has(guildId)) {
+      return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
+    }
+    if (isPlaylistCandidate) {
+      activePlaylistLoads.add(guildId);
+    }
+
+    let isLockHeld = isPlaylistCandidate;
+
     try {
       const tracks = await searchTrack(query);
       if (!tracks || tracks.length === 0) {
-        return ctx.editReply('Không tìm thấy bài hát hoặc Playlist phù hợp!');
+        return ctx.editReply(t(guildId, 'common.track_not_found'));
       }
 
       if (tracks.length === 1) {
         const track = tracks[0];
         const result = await queue.addSong(track, ctx.member || ctx.user);
         const position = result?.position || 1;
-        return ctx.editReply({
+        const editRes = await ctx.editReply({
           content: null,
-          embeds: [createQueueAddedEmbed(track, position)]
+          embeds: [createQueueAddedEmbed(track, position, guildId)]
         });
+        if (!result?.isPlayingNow) {
+          queue.scheduleRepostNowPlayingCard(600);
+        }
+        return editRes;
       } else {
-        // Nhiều bài hát từ Playlist
+        // Nhiều bài hát từ Playlist (Nếu query ban đầu không khớp pattern nhưng kết quả trả về nhiều bài)
+        if (!isLockHeld) {
+          if (activePlaylistLoads.has(guildId)) {
+            return ctx.editReply('Máy chủ đang nạp một danh sách phát khác, vui lòng chờ trong giây lát!');
+          }
+          activePlaylistLoads.add(guildId);
+          isLockHeld = true;
+        }
+
         await queue.addSongs(tracks, ctx.member || ctx.user);
 
         // Lưu danh sách phát vào lịch sử server
         try {
           const userObj = ctx.member?.user || ctx.user;
-          const reqName = ctx.member?.displayName || userObj?.username || 'Người dùng';
+          const reqName = ctx.member?.displayName || userObj?.username || 'User';
           const reqAvatar = userObj?.displayAvatarURL ? userObj.displayAvatarURL({ extension: 'png', size: 64 }) : null;
 
-          playlistHistoryManager.addPlaylist(ctx.guild.id, {
+          playlistHistoryManager.addPlaylist(guildId, {
             url: query,
-            title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} bài)`,
+            title: tracks[0]?.playlistTitle || `Playlist (${tracks.length} tracks)`,
             trackCount: tracks.length,
             thumbnail: tracks[0]?.playlistThumbnail || tracks[0]?.thumbnail || null,
             addedBy: reqName,
@@ -150,11 +184,20 @@ module.exports = {
           console.error('Error saving playlist to history in play command:', plErr);
         }
 
-        return ctx.editReply(`Đã thêm thành công **${tracks.length} bài hát** từ Playlist vào hàng chờ!`);
+        const replyRes = await ctx.editReply(t(guildId, 'player.added_playlist', {
+          count: tracks.length,
+          title: tracks[0]?.playlistTitle || 'Playlist'
+        }));
+        queue.scheduleRepostNowPlayingCard(600);
+        return replyRes;
       }
     } catch (error) {
       console.error('Error executing play command:', error);
-      return ctx.editReply(`Đã xảy ra lỗi khi phát nhạc: ${error.message}`);
+      return ctx.editReply(`${t(guildId, 'common.command_error')}: ${error.message}`);
+    } finally {
+      if (isLockHeld) {
+        activePlaylistLoads.delete(guildId);
+      }
     }
   }
 };

@@ -12,7 +12,11 @@ async function connectDatabase() {
   }
 
   try {
-    await mongoose.connect(mongoUri);
+    mongoose.set('bufferCommands', false);
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 10000
+    });
     console.log('🍃 [MongoDB Atlas] Đã kết nối thành công tới Database!');
     return true;
   } catch (err) {

@@ -21,7 +21,9 @@ const GuildSettingsSchema = new mongoose.Schema({
   lyricsLayers: { type: [String], default: ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'] },
   autoSkipOfftopic: { type: Boolean, default: true },
   useAiAssistant: { type: Boolean, default: true },
-  language: { type: String, default: 'en' }
+  voteSkipEnabled: { type: Boolean, default: false },
+  requesterCanForceSkip: { type: Boolean, default: true },
+  language: { type: String, default: 'vi' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('GuildSettings', GuildSettingsSchema);

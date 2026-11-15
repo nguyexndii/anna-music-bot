@@ -26,6 +26,7 @@ function normalizeVi(str) {
  * Chuyển chuỗi định dạng MM:SS hoặc HH:MM:SS thành số giây
  */
 function parseDurationToSec(str) {
+  if (typeof str === 'number' && !isNaN(str)) return Math.max(0, Math.floor(str));
   if (!str || typeof str !== 'string' || str.toLowerCase().includes('live')) return 0;
   const parts = str.split(':').map(Number);
   if (parts.some(isNaN)) return 0;
@@ -54,9 +55,13 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
 
   const isQueryAskingKaraoke = /\b(karaoke|beat|instrumental|nhac song|tone nam|tone nu|tong nam|tong nu)\b/.test(normQuery);
   const isQueryAskingShort = /\b(short|shorts|tiktok)\b/.test(normQuery);
-  const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|list|nhac tre|nonstop|full|album)\b/.test(normQuery);
-  const isQueryAskingVariant = /\b(remix|cover|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
+  const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|nonstop|full album)\b/.test(normQuery);
+  const isQueryAskingVariant = /\b(remix|cover|hat lai|hát lại|covered by|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
   const isQueryAskingTvOrStage = /\b(the masked singer|ca si mat na|anh trai say hi|anh trai vuot ngan chong gai|chi dep dap gio|rap viet|giao lo thoi gian|xuan ha thu dong|may lang thang|in the moonlight|la ca hat ca|forest studio|vie channel|htv2|vtv3|yeah1|fancam|live stage)\b/i.test(normQuery);
+  const NON_MUSIC_REGEX = /\b(timer|countdown|study with me|pomodoro|stopwatch|flip clock|alarm sound|clock ticking|white noise|brown noise|pink noise|sound effect|fx sound|tieng dong ho|dong ho dem nguoc|dong ho bam gio|dong ho hen gio|ambient noise)\b/i;
+  const NON_MUSIC_BLACKLIST_REGEX = /\b(phân\s*tích|cốt\s*truyện|giải\s*thích|tóm\s*tắt|review|đánh\s*giá|hướng\s*dẫn|cách\s*chơi|build\s*nhân\s*vật|tiêu\s*điểm\s*tướng|gameplay|walkthrough|playthrough|let'?s\s*play|highlight|highlights|full\s*match|bình\s*luận|reaction|phản\s*ứng|podcast|talkshow|phỏng\s*vấn|interview|tin\s*tức|điểm\s*tin|tâm\s*sự|vlog|thử\s*thách|challenge|prank|thuyết\s*minh|lồng\s*tiếng|tập\s*\d+|ep\.?\s*\d+|episode\s*\d+|movie\s*recap|tier\s*list|lore|theory|giả\s*thuyết|analysis|explained|video\s*essay|documentary|tài\s*liệu|speedrun|stream\s*vod|livestream\s*archive|trailer\s*breakdown|easter\s*eggs)\b/i;
+  const isQueryAskingNonMusic = NON_MUSIC_REGEX.test(rawLowerQuery) || NON_MUSIC_REGEX.test(normQuery);
+  const isQueryAskingNonMusicBlacklist = NON_MUSIC_BLACKLIST_REGEX.test(rawLowerQuery) || NON_MUSIC_BLACKLIST_REGEX.test(normQuery);
 
   const scored = [];
 
@@ -67,6 +72,21 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
     const titleLower = (t.title || '').toLowerCase();
     const artistLower = (t.artist || '').toLowerCase();
     const sec = parseDurationToSec(t.duration);
+
+    // 0. Loại bỏ video rác không phải âm nhạc (timer, countdown, study with me, pomodoro, đồng hồ bấm giờ)
+    if (!isQueryAskingNonMusic && (NON_MUSIC_REGEX.test(titleLower) || NON_MUSIC_REGEX.test(normTitle))) {
+      continue;
+    }
+
+    // 0.05. Loại bỏ video phân tích game / cốt truyện / review / gameplay / podcast / recap
+    if (!isQueryAskingNonMusicBlacklist && (NON_MUSIC_BLACKLIST_REGEX.test(titleLower) || NON_MUSIC_BLACKLIST_REGEX.test(normTitle))) {
+      continue;
+    }
+
+    // 0.1. Loại bỏ video dài trên 30 phút (> 1800s) nếu người dùng không chủ động tìm mix/lofi/playlist/1 hour/album
+    if (sec > 1800 && !isQueryAskingLong) {
+      continue;
+    }
 
     // 1. Loại bỏ video quá ngắn (Shorts / cut dưới 45 giây) trừ khi người dùng chủ động tìm shorts/tiktok
     if (sec > 0 && sec < 45 && !isQueryAskingShort) {
@@ -145,13 +165,15 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
     }
 
     // 7. Xử lý Chế độ 'official' vs 'all'
-    const isVariantVideo = /\b(remix|cover|live|lofi|sped up|speed up|slowed|mashup|vinahouse|dance ver|parody)\b/.test(normTitle);
+    const isCoverOrHatLai = /\b(cover|hat lai|covered by)\b/.test(normTitle);
+    const isVariantVideo = /\b(remix|cover|hat lai|live|lofi|sped up|speed up|slowed|mashup|vinahouse|dance ver|parody)\b/.test(normTitle);
     if (mode === 'official') {
       if (isOfficialChannel && (!isTvShowOrStage || isQueryAskingTvOrStage)) {
         score += 30;
       }
       if (!isQueryAskingVariant && isVariantVideo) {
-        score -= 45;
+        // Nếu là cover/hát lại mà user không hỏi cover -> trừ mạnh 90 điểm để bản official luôn xếp trên
+        score -= (isCoverOrHatLai ? 90 : 45);
       }
     }
 
@@ -332,12 +354,44 @@ if (parentPort) {
       let rawTracks = getCachedRawTracks(rawCacheKey);
 
       if (!rawTracks || rawTracks.length === 0) {
+        const cleanQ = (query || '').trim();
+        const isShortOrTimeQuery = /^\d{1,2}\s*(?:h|hr|hrs|hour|hours|gio|tieng)$/i.test(cleanQ) || (cleanQ.length <= 3 && !/^\d+$/.test(cleanQ));
+
         try {
-          rawTracks = await searchWithInnerTube(query, locale);
+          if (isShortOrTimeQuery) {
+            // Khi từ khóa ngắn hoặc dạng mốc thời gian (vd: 2h), tìm song song query gốc và query bổ sung bài hát
+            const extraQuery = `${cleanQ} bài hát`;
+            const [baseList, extraList] = await Promise.all([
+              searchWithInnerTube(cleanQ, locale).catch(() => []),
+              searchWithInnerTube(extraQuery, locale).catch(() => [])
+            ]);
+            const map = new Map();
+            for (const item of [...baseList, ...extraList]) {
+              const k = item.videoId || item.url;
+              if (k && !map.has(k)) map.set(k, item);
+            }
+            rawTracks = Array.from(map.values());
+          } else {
+            rawTracks = await searchWithInnerTube(cleanQ, locale);
+          }
         } catch (innerTubeErr) {
           // Fallback sang yt-search
           try {
-            rawTracks = await searchWithYtSearch(query);
+            if (isShortOrTimeQuery) {
+              const extraQuery = `${cleanQ} bài hát`;
+              const [baseList, extraList] = await Promise.all([
+                searchWithYtSearch(cleanQ).catch(() => []),
+                searchWithYtSearch(extraQuery).catch(() => [])
+              ]);
+              const map = new Map();
+              for (const item of [...baseList, ...extraList]) {
+                const k = item.videoId || item.url;
+                if (k && !map.has(k)) map.set(k, item);
+              }
+              rawTracks = Array.from(map.values());
+            } else {
+              rawTracks = await searchWithYtSearch(cleanQ);
+            }
           } catch (ytsErr) {}
         }
 
