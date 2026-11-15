@@ -1663,6 +1663,10 @@ class MusicQueue {
           duration: nextSong?.duration || '3:30'
         };
       }
+      if (!this.currentSong?.is247 && this.currentSong?.requestedBy !== 'Auto (24/7)') {
+        this._skipRequested = false;
+        this._isPreemptingLofi = false;
+      }
       this.currentSong.seekPosition = initialSeekSeconds;
       if (this.currentResource) {
         this._cleanupResource(this.currentResource);

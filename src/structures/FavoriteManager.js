@@ -69,8 +69,9 @@ class FavoriteManager {
     try {
       const doc = await FavoriteSong.findOne({ userId });
       if (doc && doc.songs) {
-        this._setMemoryCache(userId, doc.songs);
-        return doc.songs;
+        const list = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
+        this._setMemoryCache(userId, list);
+        return list;
       }
     } catch (e) {
       // Fallback
@@ -130,7 +131,7 @@ class FavoriteManager {
       }
 
       await doc.save();
-      songs = doc.songs;
+      songs = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
     } catch (e) {
       // JSON Fallback
       let list = this.fallbackData.get(userId) || [];
@@ -177,7 +178,7 @@ class FavoriteManager {
           if (idx !== -1) removedSong = doc.songs.splice(idx, 1)[0];
         }
         await doc.save();
-        songs = doc.songs;
+        songs = doc.songs.map(s => (typeof s.toObject === 'function' ? s.toObject() : s));
       }
     } catch (e) {
       const list = this.fallbackData.get(userId) || [];
