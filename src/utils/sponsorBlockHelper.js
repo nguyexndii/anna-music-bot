@@ -20,7 +20,7 @@ async function resolveSponsorBlockTrim(song) {
   const videoId = extractYouTubeId(song.url);
   if (!videoId) return null;
 
-  const totalSec = song.rawDurationSec || (typeof song.duration === 'string' ? parseDurationToSec(song.duration) : Math.floor((song.durationMs || 0) / 1000));
+  const totalSec = song.ytDurationSec || song.rawDurationSec || (typeof song.duration === 'string' ? parseDurationToSec(song.duration) : Math.floor((song.durationMs || 0) / 1000));
   if (!totalSec || totalSec < 45 || totalSec > 1800) return null; // Chỉ áp dụng cho video từ 45s đến 30 phút
 
   // 1. Không cắt các bản Audio, Lyric Video, Visualizer, Topic, Cover, Remix, Live (vốn không có kịch bản MV)
@@ -109,7 +109,8 @@ async function resolveSponsorBlockTrim(song) {
   const last = merged[merged.length - 1];
 
   let trimStart = 0;
-  let trimEnd = totalSec;
+  let trimEnd = 0;
+  let hasOutroTrim = false;
 
   if (first && first.startTime <= 3 && (first.endTime - first.startTime) >= 2.5) {
     const candTrimStart = Math.floor(first.endTime);
@@ -125,13 +126,16 @@ async function resolveSponsorBlockTrim(song) {
 
   if (last && last.endTime >= totalSec - 4 && (last.endTime - last.startTime) >= 2.0) {
     const candidateEnd = Math.ceil(last.startTime);
-    if (candidateEnd > trimStart) {
+    if (candidateEnd > trimStart && candidateEnd < totalSec) {
       trimEnd = candidateEnd;
+      hasOutroTrim = true;
     }
   }
 
-  const realDurationSec = trimEnd - trimStart;
-  const totalTrimmed = trimStart + (totalSec - trimEnd);
+  const effectiveEnd = hasOutroTrim ? trimEnd : totalSec;
+  const realDurationSec = effectiveEnd - trimStart;
+  const skippedOutroSec = hasOutroTrim ? (totalSec - trimEnd) : 0;
+  const totalTrimmed = trimStart + skippedOutroSec;
 
   // 6. Ngưỡng bảo vệ an toàn: Không cắt nếu bài còn < 35s hoặc phần cắt chiếm > 50% thời lượng video
   if (totalTrimmed <= 0 || realDurationSec < 35 || totalTrimmed > totalSec * 0.5) {
@@ -140,14 +144,15 @@ async function resolveSponsorBlockTrim(song) {
 
   return {
     trimStart,
-    trimEnd,
+    trimEnd: hasOutroTrim ? trimEnd : 0,
     realDurationSec,
     skippedIntroSec: trimStart,
-    skippedOutroSec: totalSec - trimEnd
+    skippedOutroSec
   };
 }
 
 function parseDurationToSec(durationStr) {
+  if (typeof durationStr === 'number' && !isNaN(durationStr)) return Math.max(0, Math.floor(durationStr));
   if (!durationStr || typeof durationStr !== 'string') return 0;
   const parts = durationStr.split(':').map(Number);
   if (parts.some(isNaN)) return 0;

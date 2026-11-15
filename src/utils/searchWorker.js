@@ -26,6 +26,7 @@ function normalizeVi(str) {
  * Chuyển chuỗi định dạng MM:SS hoặc HH:MM:SS thành số giây
  */
 function parseDurationToSec(str) {
+  if (typeof str === 'number' && !isNaN(str)) return Math.max(0, Math.floor(str));
   if (!str || typeof str !== 'string' || str.toLowerCase().includes('live')) return 0;
   const parts = str.split(':').map(Number);
   if (parts.some(isNaN)) return 0;
@@ -54,7 +55,7 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
 
   const isQueryAskingKaraoke = /\b(karaoke|beat|instrumental|nhac song|tone nam|tone nu|tong nam|tong nu)\b/.test(normQuery);
   const isQueryAskingShort = /\b(short|shorts|tiktok)\b/.test(normQuery);
-  const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|list|nhac tre|nonstop|full|album)\b/.test(normQuery);
+  const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|nonstop|full album)\b/.test(normQuery);
   const isQueryAskingVariant = /\b(remix|cover|hat lai|hát lại|covered by|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
   const isQueryAskingTvOrStage = /\b(the masked singer|ca si mat na|anh trai say hi|anh trai vuot ngan chong gai|chi dep dap gio|rap viet|giao lo thoi gian|xuan ha thu dong|may lang thang|in the moonlight|la ca hat ca|forest studio|vie channel|htv2|vtv3|yeah1|fancam|live stage)\b/i.test(normQuery);
   const NON_MUSIC_REGEX = /\b(timer|countdown|study with me|pomodoro|stopwatch|flip clock|alarm sound|clock ticking|white noise|brown noise|pink noise|sound effect|fx sound|tieng dong ho|dong ho dem nguoc|dong ho bam gio|dong ho hen gio|ambient noise)\b/i;

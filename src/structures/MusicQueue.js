@@ -343,6 +343,25 @@ class MusicQueue {
     if (nextTrack && !nextTrack.trimStart && !nextTrack._sbChecked && guildSettings.autoSkipOfftopic !== false && !nextTrack.is247 && !nextTrack.isLive) {
       nextTrack._sbChecked = true;
       try {
+        if ((typeof nextTrack.url === 'string' && nextTrack.url.includes('spotify.com')) || (!nextTrack.ytDurationSec && !nextTrack.rawDurationSec)) {
+          try {
+            const { searchTrack } = require('../utils/musicExtractor');
+            const searchTarget = nextTrack.searchQuery || nextTrack.title;
+            const expSec = nextTrack.spotifyDurationSec || (nextTrack.durationMs ? Math.round(nextTrack.durationMs / 1000) : (nextTrack.duration ? parseDurationToSeconds(nextTrack.duration) : 0));
+            const ytRes = await searchTrack(searchTarget, expSec);
+            if (ytRes && ytRes.length > 0 && ytRes[0].url) {
+              nextTrack.url = ytRes[0].url;
+              const sec = ytRes[0].ytDurationSec || ytRes[0].seconds;
+              if (sec > 0) {
+                nextTrack.ytDurationSec = sec;
+                nextTrack.rawDurationSec = sec;
+                nextTrack.duration = formatSecondsToDuration(sec);
+                nextTrack.durationMs = sec * 1000;
+              }
+            }
+          } catch (resolveErr) {}
+        }
+
         if (cachedEntry) {
           nextTrack.trimStart = cachedEntry.trimStart;
           nextTrack.trimEnd = cachedEntry.trimEnd;
@@ -923,11 +942,9 @@ class MusicQueue {
             } else {
               // Nhạc Việt:
               if (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất') && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} bài hát hay nhất tuyển chọn`);
                 fallbackQueries.push(`${artist} official audio`);
               }
               fallbackQueries.push(`${songName} official audio`);
-              fallbackQueries.push(`nhac tre hot vpop official audio`);
             }
 
             for (const fallbackQuery of fallbackQueries) {
@@ -944,16 +961,6 @@ class MusicQueue {
                   !historyManager.isRecentlyPlayed(this.guild.id, t, 25) &&
                   isCandidateMatchingRegion(t, targetRegion, seedMeta)
                 ) || null;
-
-                if (!relatedTrack) {
-                  relatedTrack = fallbackResults.find(t => 
-                    t && t.url &&
-                    t.url !== songToRelate.url && 
-                    t.url !== this.lastPlayErrorUrl && 
-                    t.title !== this.lastPlayErrorTitle &&
-                    !historyManager.isRecentlyPlayed(this.guild.id, t, 15)
-                  ) || null;
-                }
               }
             }
           } catch (fbErr) {
@@ -1684,6 +1691,25 @@ class MusicQueue {
       if (this.currentSong && !this.currentSong.trimStart && !this.currentSong._sbChecked && guildSettings.autoSkipOfftopic !== false && !this.currentSong.is247 && !this.currentSong.isLive) {
         this.currentSong._sbChecked = true;
         try {
+          if ((typeof this.currentSong.url === 'string' && this.currentSong.url.includes('spotify.com')) || (!this.currentSong.ytDurationSec && !this.currentSong.rawDurationSec)) {
+            try {
+              const { searchTrack } = require('../utils/musicExtractor');
+              const searchTarget = this.currentSong.searchQuery || this.currentSong.title;
+              const expSec = this.currentSong.spotifyDurationSec || (this.currentSong.durationMs ? Math.round(this.currentSong.durationMs / 1000) : (this.currentSong.duration ? parseDurationToSeconds(this.currentSong.duration) : 0));
+              const ytRes = await searchTrack(searchTarget, expSec);
+              if (ytRes && ytRes.length > 0 && ytRes[0].url) {
+                this.currentSong.url = ytRes[0].url;
+                const sec = ytRes[0].ytDurationSec || ytRes[0].seconds;
+                if (sec > 0) {
+                  this.currentSong.ytDurationSec = sec;
+                  this.currentSong.rawDurationSec = sec;
+                  this.currentSong.duration = formatSecondsToDuration(sec);
+                  this.currentSong.durationMs = sec * 1000;
+                }
+              }
+            } catch (resolveErr) {}
+          }
+
           const audioCacheManager = require('./AudioCacheManager');
           const cachedEntry = audioCacheManager.findCachedEntry(this.currentSong);
           if (cachedEntry) {

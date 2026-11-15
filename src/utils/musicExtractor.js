@@ -92,12 +92,23 @@ function formatMs(ms) {
 }
 
 function parseDurationToSec(str) {
+  if (typeof str === 'number' && !isNaN(str)) return Math.max(0, Math.floor(str));
   if (!str || typeof str !== 'string' || str.toLowerCase().includes('live')) return 0;
   const parts = str.split(':').map(Number);
   if (parts.some(isNaN)) return 0;
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   return parts[0];
+}
+
+function stripYouTubeTranslatedLabels(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/\(\s*(?:mv|video|audio|bản\s*âm\s*thanh|lời\s*bài\s*hát|video\s*âm\s*nhạc|hình\s*ảnh)\s*chính\s*thức\s*\)/gi, ' ')
+    .replace(/\[\s*(?:mv|video|audio|bản\s*âm\s*thanh|lời\s*bài\s*hát|video\s*âm\s*nhạc)\s*chính\s*thức\s*\]/gi, ' ')
+    .replace(/\b(?:mv|video|bản\s*âm\s*thanh|video\s*âm\s*nhạc)\s+chính\s*thức\b/gi, ' ')
+    .replace(/\s+(?:và|của|với|cùng)\s+(?=[a-zA-Z0-9(\[])/gi, ' ')
+    .trim();
 }
 
 function parseViews(str) {
@@ -975,9 +986,11 @@ async function searchTrack(query, targetDurationSec = 0) {
           const safeArtist = cleanArtist || 'YouTube';
 
           let parsedDuration = '3:30';
+          let durationSec = 210;
           if (innerDetails?.lengthSeconds) {
             const sec = parseInt(innerDetails.lengthSeconds, 10);
             if (!isNaN(sec) && sec > 0) {
+              durationSec = sec;
               parsedDuration = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
             }
           }
@@ -987,6 +1000,9 @@ async function searchTrack(query, targetDurationSec = 0) {
             title: safeTitle,
             url: videoUrl,
             duration: parsedDuration,
+            seconds: durationSec,
+            ytDurationSec: durationSec,
+            rawDurationSec: durationSec,
             thumbnail: defaultThumb,
             artist: safeArtist,
             isLive: Boolean(innerDetails?.isLiveContent)
@@ -1151,48 +1167,42 @@ function detectTrackRegion(title = '', artist = '') {
   const combined = `${title} ${artist}`.trim();
   if (!combined) return 'INTL';
 
-  // 1. Kiểm tra ký tự tiếng Việt có dấu
-  if (VIETNAMESE_ACCENTED_REGEX.test(combined)) {
+  const cleanedCombined = stripYouTubeTranslatedLabels(combined);
+
+  // 1. Kiểm tra nghệ sĩ Việt Nam đã biết
+  if (VN_ARTISTS_REGEX.test(cleanedCombined)) {
     return 'VI';
   }
 
-  // 2. Kiểm tra tiếng Hàn (Hangul)
-  if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(combined) || /\b(k-pop|kpop|ost\s*part)\b/i.test(combined)) {
+  // 2. Kiểm tra tiếng Hàn (Hangul) & Nghệ sĩ K-Pop (kể cả K/DA, i-dle, Soyeon...)
+  const krKeywords = /\b(k\/da|kda|i-dle|\(g\)i-dle|gidle|g-idle|miyeon|soyeon|minnie|yuqi|shuhua|bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|big bang|seventeen|red velvet|itzy|nmixx|babymonster|illit|kiss of life|treasure|ateez|nct|riize|zerobaseone|psy|g-dragon|jennie|lisa|rose|jisoo|jungkook)\b/i;
+  if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(cleanedCombined) || /\b(k-pop|kpop|ost\s*part)\b/i.test(cleanedCombined) || krKeywords.test(cleanedCombined)) {
     return 'KR';
   }
 
-  // 3. Kiểm tra tiếng Nhật (Hiragana / Katakana)
-  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(combined) || /\b(j-pop|jpop|anime\s*ost)\b/i.test(combined)) {
+  // 3. Kiểm tra tiếng Nhật (Hiragana / Katakana) & Nghệ sĩ J-Pop
+  const jpKeywords = /\b(yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i;
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(cleanedCombined) || /\b(j-pop|jpop|anime\s*ost)\b/i.test(cleanedCombined) || jpKeywords.test(cleanedCombined)) {
     return 'JP';
   }
 
   // 4. Kiểm tra tiếng Trung (Hán tự)
-  if (/[\u4E00-\u9FFF]/.test(combined) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(combined)) {
+  if (/[\u4E00-\u9FFF]/.test(cleanedCombined) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(cleanedCombined)) {
     return 'CN';
   }
 
-  // 5. Danh sách từ khóa & nghệ sĩ V-Pop không dấu phổ biến
-  if (VN_ARTISTS_REGEX.test(combined)) {
+  // 5. Kiểm tra ký tự tiếng Việt có dấu (sau khi đã loại bỏ nhãn dịch tự động của YouTube)
+  if (VIETNAMESE_ACCENTED_REGEX.test(cleanedCombined)) {
     return 'VI';
   }
+
+  // 6. Danh sách từ khóa & nghệ sĩ V-Pop không dấu phổ biến
   const vnKeywords = /\b(v-pop|vpop|nhac tre|viet nam|vietnamese|nhac viet|bolero|nhac vang|hoang dung|suni ha linh|phuong ly|24k\.right|quang dung|tuan ngoc|le quyen|trung quan|bao anh|vinahouse|nhac song|lien khuc)\b/i;
-  if (vnKeywords.test(combined)) {
+  if (vnKeywords.test(cleanedCombined)) {
     return 'VI';
   }
 
-  // 6. Danh sách nghệ sĩ K-Pop phổ biến không dấu
-  const krKeywords = /\b(bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|big bang|seventeen|red velvet|itzy|nmixx|gidle|g-idle)\b/i;
-  if (krKeywords.test(combined)) {
-    return 'KR';
-  }
-
-  // 7. Danh sách nghệ sĩ J-Pop phổ biến
-  const jpKeywords = /\b(yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i;
-  if (jpKeywords.test(combined)) {
-    return 'JP';
-  }
-
-  // 8. Mặc định là Nhạc Quốc Tế / US-UK
+  // 7. Mặc định là Nhạc Quốc Tế / US-UK
   return 'INTL';
 }
 
@@ -1225,22 +1235,7 @@ function analyzeTrackOriginAndMeta(song) {
     realTitle = parsed.songName || rawTitle;
   }
 
-  let region = detectTrackRegion(`${realTitle} ${realArtist}`, realArtist);
-
-  // Khóa chuẩn vùng ngôn ngữ (INTL vs VI) & Chặn nghệ sĩ Việt không dấu lọt vào phiên US-UK
-  const combinedMeta = `${realTitle} ${realArtist}`.trim();
-  const hasViAccents = VIETNAMESE_ACCENTED_REGEX.test(combinedMeta);
-  const isVnArtist = VN_ARTISTS_REGEX.test(combinedMeta);
-
-  if (!hasViAccents && !isVnArtist) {
-    const isKr = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(combinedMeta) || /\b(k-pop|kpop|ost\s*part|bts|blackpink|newjeans|twice|stray kids|txt|enhypen|aespa|ive|le sserafim|iu|taeyeon|exo|bigbang|seventeen|red velvet|itzy|nmixx|gidle|g-idle)\b/i.test(combinedMeta);
-    const isJp = /[\u3040-\u309F\u30A0-\u30FF]/.test(combinedMeta) || /\b(j-pop|jpop|anime\s*ost|yoasobi|ado|kenshi yonezu|eve|fujii kaze|aimyon|radwimps)\b/i.test(combinedMeta);
-    const isCn = /[\u4E00-\u9FFF]/.test(combinedMeta) || /\b(c-pop|cpop|douyin|nhạc\s*hoa)\b/i.test(combinedMeta);
-
-    if (!isKr && !isJp && !isCn) {
-      region = 'INTL';
-    }
-  }
+  const region = detectTrackRegion(realTitle, realArtist);
 
   const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
   const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
@@ -1309,6 +1304,14 @@ function isCandidateMatchingRegion(candidate, targetRegion, seedMeta = null) {
   }
   if (isLiveStageVideo(candTitle)) {
     return false;
+  }
+
+  // 3.1. Chặn tuyệt đối nhạc Bolero, Nhạc vàng, Tuyển chọn, Liên khúc nếu bài gốc không phải thể loại này
+  const isVintageOrBolero = seedMeta && /\b(bolero|nhạc\s*vàng|nhac\s*vang|trữ\s*tình|tru\s*tinh|nhạc\s*xưa|nhac\s*xua)\b/i.test(`${seedMeta.realTitle} ${seedMeta.realArtist}`);
+  if (!isVintageOrBolero) {
+    if (/\b(bolero|nhạc\s*vàng|nhac\s*vang|trữ\s*tình|tru\s*tinh|liên\s*khúc|lien\s*khuc|tuyển\s*chọn|tuyen\s*chon|nhạc\s*xưa|nhac\s*xua|nhạc\s*sống|nhac\s*song)\b/i.test(candCombined)) {
+      return false;
+    }
   }
   // Nếu bài gốc KHÔNG PHẢI bài cover -> CHẶN TUYỆT ĐỐI các bài cover/hát lại để tránh Autoplay tự động nhảy sang bản cover
   if (seedMeta && !seedMeta.isCover) {
@@ -2308,11 +2311,14 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
         targetUrl = searchRes[0].url;
         if (typeof trackItem === 'object' && trackItem !== null) {
           trackItem.url = targetUrl;
-          if (searchRes[0].duration) {
+          const resolvedSec = searchRes[0].ytDurationSec || searchRes[0].seconds || parseDurationToSec(searchRes[0].duration);
+          if (resolvedSec > 0) {
+            trackItem.ytDurationSec = resolvedSec;
+            trackItem.rawDurationSec = resolvedSec;
+            trackItem.duration = searchRes[0].duration || `${Math.floor(resolvedSec / 60)}:${String(resolvedSec % 60).padStart(2, '0')}`;
+            trackItem.durationMs = resolvedSec * 1000;
+          } else if (searchRes[0].duration) {
             trackItem.duration = searchRes[0].duration;
-          }
-          if (searchRes[0].seconds) {
-            trackItem.durationMs = searchRes[0].seconds * 1000;
           }
           if (!trackItem.thumbnail && searchRes[0].thumbnail) {
             trackItem.thumbnail = searchRes[0].thumbnail;
