@@ -144,6 +144,12 @@ function isLyricLanguageConsistent(rawTitle, artist, lyricText) {
         return false;
       }
     }
+  } else {
+    // Nếu là bài hát quốc tế (tiếng Anh, Hàn, Nhật...) mà lời nhạc lại chứa nhiều dấu tiếng Việt -> Chắc chắn là bản dịch
+    const vnMatches = lyricText.match(/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/gi);
+    if (vnMatches && vnMatches.length >= 6) {
+      return false;
+    }
   }
   return true;
 }
@@ -737,16 +743,55 @@ const KNOWN_VN_KEYWORDS = [
   'richie', 'icy', 'vpop', 'v-pop', 'nhac viet', 'nhạc việt'
 ];
 
+function stripVietnameseBoilerplate(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/[\(\[\{][^\)\]\}]*(?:chính\s*thức|chinh\s*thuc|mv|official|âm\s*nhạc|bản\s*gốc|bản\s*chuẩn|bản\s*dịch|lời\s*việt|vietsub|phụ\s*đề|thuyết\s*minh|karaoke|remix|lyrics|audio|video)[^\)\]\}]*[\)\]\}]/gi, ' ')
+    .replace(/(?:^|\s+)(?:và|của|với|cùng|từ|hợp\s*tác\s*với|hợp\s*tác\s*cùng|ft\.?|feat\.?|featuring)(?:\s+|$)/gi, ' ')
+    .replace(/(?:^|\s+)(?:mv\s*chính\s*thức|video\s*chính\s*thức|bản\s*chính\s*thức|chính\s*thức|chinh\s*thuc|vietsub|lời\s*việt|bản\s*dịch|phụ\s*đề|thuyết\s*minh)(?:\s+|$)/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isVietnameseTrack(context = {}) {
   const { rawTitle = '', artist = '', videoTitle = '', uploader = '' } = context;
-  if (VIETNAMESE_REGEX.test(rawTitle) || VIETNAMESE_REGEX.test(artist) || VIETNAMESE_REGEX.test(videoTitle) || VIETNAMESE_REGEX.test(uploader)) {
+
+  // 1. Kiểm tra danh sách nghệ sĩ / kênh Việt Nam nổi tiếng đã biết
+  const checkArtistText = `${artist} ${uploader}`.toLowerCase();
+  const isKnownVn = KNOWN_VN_KEYWORDS.some(kw => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+    return regex.test(checkArtistText);
+  });
+  if (isKnownVn) return true;
+
+  // 2. Nếu uploader/artist thuộc các kênh/hãng âm nhạc quốc tế lớn -> Không phải bài Việt
+  const internationalChannels = [
+    'riot games', 'league of legends', 'vevo', 'warner music', 'universal music',
+    'sony music', 'atlantic records', 'smtown', 'hybe labels', 'jyp entertainment',
+    'yg entertainment', 'taylor swift', 'billie eilish', 'the weeknd', 'coldplay',
+    'charlie puth', 'alan walker', 'maroon 5', 'eminem', 'ed sheeran', 'bruno mars'
+  ];
+  const uploaderLow = `${uploader} ${artist}`.toLowerCase();
+  if (internationalChannels.some(ic => uploaderLow.includes(ic))) {
+    return false;
+  }
+
+  // 3. Lọc sạch boilerplate tiếng Việt địa phương hóa (MV chính thức, vietsub, và, của...)
+  const cleanedTitle = stripVietnameseBoilerplate(rawTitle || videoTitle || '');
+  const cleanedArtist = stripVietnameseBoilerplate(artist || '');
+
+  // 4. Nếu tiêu đề hoặc tên ca sĩ sau khi làm sạch vẫn chứa dấu tiếng Việt -> Đích thực là bài Việt
+  if (VIETNAMESE_REGEX.test(cleanedTitle) || VIETNAMESE_REGEX.test(cleanedArtist)) {
     return true;
   }
-  const textToCheck = `${rawTitle} ${artist} ${videoTitle} ${uploader}`.toLowerCase();
+
+  // 5. Kiểm tra toàn bộ text còn lại với danh sách từ khóa Việt Nam
+  const fullTextToCheck = `${cleanedTitle} ${cleanedArtist}`.toLowerCase();
   return KNOWN_VN_KEYWORDS.some(kw => {
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
-    return regex.test(textToCheck);
+    return regex.test(fullTextToCheck);
   });
 }
 
@@ -1106,10 +1151,10 @@ function getRankedSubtitleTracks(subsMap, context = {}) {
       else if (kLow.startsWith('en')) score += 40;
       else score -= 50;
     } else {
-      if (kLow === 'en' || kLow === 'en-orig' || kLow.startsWith('en-') || kLow.startsWith('en_')) score += 100;
-      else if (kLow.startsWith('und')) score += 60;
-      else if (kLow.startsWith('vi')) score += 40;
-      else if (['ja', 'ko', 'zh', 'ar', 'ru', 'th', 'hi'].some(l => kLow.startsWith(l))) score -= 50;
+      if (kLow === 'en' || kLow === 'en-orig' || kLow.startsWith('en-') || kLow.startsWith('en_')) score += 120;
+      else if (kLow.startsWith('und')) score += 50;
+      else if (kLow.startsWith('vi')) score -= 80;
+      else if (['ja', 'ko', 'zh', 'ar', 'ru', 'th', 'hi', 'fr', 'de', 'es'].some(l => kLow.startsWith(l))) score -= 50;
       else score += 10;
     }
 
@@ -1547,10 +1592,15 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
           if (!VIETNAMESE_REGEX.test(sampleText)) {
             continue;
           }
-        } else if (!isJP && !isKR && !isCN) {
+        } else {
           const sampleText = plainLines.slice(0, 20).join(' ');
-          if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+          if (VIETNAMESE_REGEX.test(sampleText)) {
             continue;
+          }
+          if (!isJP && !isKR && !isCN) {
+            if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+              continue;
+            }
           }
         }
 
@@ -1591,10 +1641,15 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
                 if (!VIETNAMESE_REGEX.test(sampleText)) {
                   continue;
                 }
-              } else if (!isJP && !isKR && !isCN) {
+              } else {
                 const sampleText = plainLines.slice(0, 20).join(' ');
-                if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+                if (VIETNAMESE_REGEX.test(sampleText)) {
                   continue;
+                }
+                if (!isJP && !isKR && !isCN) {
+                  if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+                    continue;
+                  }
                 }
               }
 

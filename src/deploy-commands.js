@@ -140,6 +140,13 @@ const SLASH_SHORTCUTS = [
       .setDescriptionLocalizations({ vi: 'Xem danh sách & hướng dẫn lệnh (Lệnh tắt của /help)' })
   },
   {
+    target: 'top',
+    builder: () => new SlashCommandBuilder()
+      .setName('bxh')
+      .setDescription('View server leaderboard (Shortcut for /top)')
+      .setDescriptionLocalizations({ vi: 'Xem bảng xếp hạng nghe nhiều nhất (Lệnh tắt của /top)' })
+  },
+  {
     target: 'move',
     builder: () => new SlashCommandBuilder()
       .setName('mv')

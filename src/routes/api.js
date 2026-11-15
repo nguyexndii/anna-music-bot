@@ -120,7 +120,7 @@ module.exports = function createApiRouter(client) {
     }));
     const data = {
       history: (historyManager.getRecent ? historyManager.getRecent(guildId, 50) : (historyManager.getHistory(guildId) || []).slice(0, 50)) || [],
-      topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 16) : []) || [],
+      topTracks: (historyManager.getTopTracks ? historyManager.getTopTracks(guildId, 50) : []) || [],
       recentPlaylists
     };
     guildStatsCache.set(guildId, { time: now, data });
