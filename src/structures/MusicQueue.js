@@ -14,7 +14,8 @@ const {
   searchTrack,
   searchMultipleTracks,
   analyzeTrackOriginAndMeta,
-  isCandidateMatchingRegion
+  isCandidateMatchingRegion,
+  buildAutoplayFallbackQueries
 } = require('../utils/musicExtractor');
 const lofiDiscovery = require('../utils/lofiDiscovery');
 const {
@@ -916,42 +917,13 @@ class MusicQueue {
         // Fallback tự động nếu không tìm được: Tìm bài cùng thể loại / cùng vùng theo seedMeta bằng searchMultipleTracks (10 ứng viên)
         if (!relatedTrack && songToRelate) {
           try {
-            const fallbackQueries = [];
-            const artist = seedMeta.realArtist;
-            const songName = seedMeta.realTitle;
-
-            if (targetRegion === 'INTL') {
-              if (artist && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} greatest hits official audio`);
-                fallbackQueries.push(`${artist} official music video`);
-              }
-              fallbackQueries.push(`${songName} official audio`);
-              fallbackQueries.push(`billboard hot hits official audio`);
-            } else if (targetRegion === 'KR') {
-              if (artist && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} official audio MV`);
-              }
-              fallbackQueries.push(`${songName} kpop official`);
-              fallbackQueries.push(`kpop hot hits official audio`);
-            } else if (targetRegion === 'JP') {
-              if (artist && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} official audio`);
-              }
-              fallbackQueries.push(`${songName} official audio`);
-              fallbackQueries.push(`jpop hot hits official audio`);
-            } else {
-              // Nhạc Việt:
-              if (artist && artist.length > 2 && !artist.includes('Bài Hát Hay Nhất') && artist !== 'YouTube') {
-                fallbackQueries.push(`${artist} official audio`);
-              }
-              fallbackQueries.push(`${songName} official audio`);
-            }
+            const fallbackQueries = buildAutoplayFallbackQueries(songToRelate, targetRegion);
+            const fallbackLocale = targetRegion === 'INTL' ? 'en' : (targetRegion === 'VI' ? 'vi' : 'en');
 
             for (const fallbackQuery of fallbackQueries) {
               if (relatedTrack) break;
               console.log(`[Autoplay Fallback Query (${targetRegion})] Thử tìm bài thay thế: "${fallbackQuery}"`);
-              const fallbackLocale = targetRegion === 'INTL' ? 'en' : (targetRegion === 'VI' ? 'vi' : 'en');
-              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, 'official', fallbackLocale);
+              const fallbackResults = await searchMultipleTracks(fallbackQuery, 10, seedMeta.isRemix ? 'all' : 'official', fallbackLocale);
               if (fallbackResults && fallbackResults.length > 0) {
                 relatedTrack = fallbackResults.find(t => 
                   t && t.url &&
