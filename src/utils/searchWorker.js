@@ -1,10 +1,32 @@
 const { parentPort } = require('worker_threads');
 const fetch = globalThis.fetch || require('node-fetch');
 let yts = null;
-
 try {
   yts = require('yt-search');
 } catch (e) {}
+
+// ─── PRE-COMPILED REGEX CONSTANTS (Tối ưu 0ms CPU trên VPS 1 Core) ───────────
+const INVISIBLE_CHARS_REGEX = /[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g;
+
+// Từ khóa nhạc cụ, bản biến tấu, cover, hát lại (trên chuỗi đã normalizeVi)
+const INSTRUMENT_OR_COVER_NORM_REGEX = /\b(piano|ver\s*piano|piano\s*ver|piano\s*version|guitar|ver\s*guitar|guitar\s*ver|guitar\s*solo|acoustic|ver\s*acoustic|orchestra|symphony|violin|cello|flute|sao\s*truc|saxophone|sax\s*ver|kalimba|ukulele|organ|harp|dan\s*tranh|dan\s*bau|dan\s*nguyet|instrumental|khong\s*loi|nhac\s*cu|beat\s*piano|solo\s*ver|bien\s*tau|cover|hat\s*lai|covered\s*by)\b/i;
+
+// Bắt thêm các ký hiệu viết tắt đặc thù trên tiêu đề gốc chưa bỏ dấu chấm/ngoặc
+const INSTRUMENT_OR_COVER_RAW_REGEX = /(?:ver\.?\s*piano|piano\s*ver\.?|ver\.?\s*guitar|guitar\s*ver\.?|ver\.?\s*acoustic|acoustic\s*ver\.?|biến\s*tấu|hát\s*lại|nhạc\s*không\s*lời|\bcover\b|\bacoustic\b|\bpiano\b|\bguitar\b|\borchestra\b|\bviolin\b|\binstrumental\b)/i;
+
+// Từ khóa biến thể nhịp độ / phối khí khác (Remix, Live, Sped up, Slowed, Lofi, Mashup...)
+const OTHER_VARIANT_NORM_REGEX = /\b(remix|vinahouse|vinahey|lofi|lo\s*fi|sped\s*up|speed\s*up|slowed|reverb|nightcore|daycore|mashup|megamix|nonstop|bootleg|flip|live|live\s*stage|live\s*session|live\s*performance|hat\s*live|fancam|dance\s*ver|dance\s*practice|performance\s*ver|parody|nhac\s*che|demo|8d|16d|bass\s*boosted)\b/i;
+
+const KARAOKE_NORM_REGEX = /\b(karaoke|beat\s*chuan|nhac\s*song|tong\s*nam|tong\s*nu|tone\s*nam|tone\s*nu|beat\s*goc|tach\s*nhac)\b/i;
+const SHORT_NORM_REGEX = /\b(short|shorts|tiktok|reel|reels|capcut)\b/i;
+const LONG_NORM_REGEX = /\b(lofi|mix|playlist|1\s*hour|1\s*tieng|2\s*hour|lien\s*khuc|nonstop|full\s*album|tuyen\s*tap)\b/i;
+const TV_STAGE_NORM_REGEX = /\b(the\s*masked\s*singer|ca\s*si\s*mat\s*na|anh\s*trai\s*say\s*hi|anh\s*trai\s*vuot\s*ngan\s*chong\s*gai|chi\s*dep\s*dap\s*gio|rap\s*viet|giao\s*lo\s*thoi\s*gian|xuan\s*ha\s*thu\s*dong|may\s*lang\s*thang|in\s*the\s*moonlight|la\s*ca\s*hat\s*ca|forest\s*studio|vie\s*channel|htv2|vtv3|yeah1|fancam|live\s*stage|tuyen\s*tap|nhac\s*tre|lofi\s*chill|audio\s*lyric)\b/i;
+
+const NON_MUSIC_REGEX = /\b(timer|countdown|study with me|pomodoro|stopwatch|flip clock|alarm sound|clock ticking|white noise|brown noise|pink noise|sound effect|fx sound|tieng dong ho|dong ho dem nguoc|dong ho bam gio|dong ho hen gio|ambient noise)\b/i;
+const NON_MUSIC_BLACKLIST_REGEX = /\b(phân\s*tích|cốt\s*truyện|giải\s*thích|tóm\s*tắt|review|đánh\s*giá|hướng\s*dẫn|cách\s*chơi|build\s*nhân\s*vật|tiêu\s*điểm\s*tướng|gameplay|walkthrough|playthrough|let'?s\s*play|highlight|highlights|full\s*match|bình\s*luận|reaction|phản\s*ứng|podcast|talkshow|phỏng\s*vấn|interview|tin\s*tức|điểm\s*tin|tâm\s*sự|vlog|thử\s*thách|challenge|prank|thuyết\s*minh|lồng\s*tiếng|tập\s*\d+|ep\.?\s*\d+|episode\s*\d+|movie\s*recap|tier\s*list|lore|theory|giả\s*thuyết|analysis|explained|video\s*essay|documentary|tài\s*liệu|speedrun|stream\s*vod|livestream\s*archive|trailer\s*breakdown|easter\s*eggs|behind\s*the\s*scenes|making\s*of|hau\s*truong|teaser|trailer)\b/i;
+
+const STUDIO_MASTER_REGEX = /\b(official\s*audio|official\s*music\s*video|official\s*mv|official\s*video|official\s*visualizer|official\s*lyric\s*video)\b/i;
+const MUSIC_VIDEO_REGEX = /\b(official\s*music\s*video|official\s*mv|official\s*video)\b/i;
 
 /**
  * Chuẩn hóa chuỗi tiếng Việt: Bỏ dấu, chữ thường để so khớp chính xác
@@ -45,50 +67,78 @@ function parseViews(str) {
 }
 
 /**
+ * Kiểm tra xem video có chứa từ khóa nhạc cụ / biến thể mà người dùng KHÔNG yêu cầu hay không
+ */
+function evaluateVariantPenalty(rawTitle, normTitle, normArtist, rawQuery, normQuery, mode = 'official') {
+  const combinedCandidateNorm = `${normTitle} ${normArtist}`;
+  const isQueryAskingInstrumentOrCover = INSTRUMENT_OR_COVER_NORM_REGEX.test(normQuery) || INSTRUMENT_OR_COVER_RAW_REGEX.test(rawQuery);
+  const isQueryAskingOtherVariant = OTHER_VARIANT_NORM_REGEX.test(normQuery);
+
+  const isCandidateInstrumentOrCover = INSTRUMENT_OR_COVER_NORM_REGEX.test(normTitle) || INSTRUMENT_OR_COVER_RAW_REGEX.test(rawTitle);
+  const isCandidateOtherVariant = OTHER_VARIANT_NORM_REGEX.test(combinedCandidateNorm);
+
+  let penalty = 0;
+  let isUnrequestedVariant = false;
+
+  // 1. Phạt cực nặng (-95 đến -100đ) nếu video là bản Piano / Guitar / Acoustic / Nhạc cụ / Cover mà user KHÔNG yêu cầu
+  if (isCandidateInstrumentOrCover && !isQueryAskingInstrumentOrCover) {
+    penalty += (mode === 'official' ? 100 : 85);
+    isUnrequestedVariant = true;
+  }
+
+  // 2. Phạt nếu video là bản Remix / Live / Sped up / Slowed / Parody mà user KHÔNG yêu cầu
+  if (isCandidateOtherVariant && !isQueryAskingOtherVariant) {
+    penalty += (mode === 'official' ? 65 : 35);
+    isUnrequestedVariant = true;
+  }
+
+  return {
+    penalty,
+    isUnrequestedVariant,
+    isCandidateInstrumentOrCover,
+    isCandidateOtherVariant
+  };
+}
+
+/**
  * Thuật toán chấm điểm và xếp hạng bài hát thông minh (Smart Vietnamese Music Ranking)
  */
 function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
   if (!Array.isArray(tracks) || tracks.length === 0) return [];
-  const normQuery = normalizeVi(rawQuery);
+  const safeRawQuery = String(rawQuery || '');
+  const normQuery = normalizeVi(safeRawQuery);
   const queryWords = normQuery.split(/\s+/).filter(w => w.length >= 1);
-  const rawLowerQuery = rawQuery.toLowerCase();
+  const rawLowerQuery = safeRawQuery.toLowerCase();
 
-  const isQueryAskingKaraoke = /\b(karaoke|beat|instrumental|nhac song|tone nam|tone nu|tong nam|tong nu)\b/.test(normQuery);
-  const isQueryAskingShort = /\b(short|shorts|tiktok)\b/.test(normQuery);
-  const isQueryAskingLong = /\b(lofi|mix|playlist|1 hour|1 tieng|lien khuc|nonstop|full album)\b/.test(normQuery);
-  const isQueryAskingVariant = /\b(remix|cover|hat lai|hát lại|covered by|live|lofi|sped up|speed up|slowed|mashup|acoustic|vinahouse)\b/.test(normQuery);
-  const isQueryAskingTvOrStage = /\b(the masked singer|ca si mat na|anh trai say hi|anh trai vuot ngan chong gai|chi dep dap gio|rap viet|giao lo thoi gian|xuan ha thu dong|may lang thang|in the moonlight|la ca hat ca|forest studio|vie channel|htv2|vtv3|yeah1|fancam|live stage)\b/i.test(normQuery);
-  const NON_MUSIC_REGEX = /\b(timer|countdown|study with me|pomodoro|stopwatch|flip clock|alarm sound|clock ticking|white noise|brown noise|pink noise|sound effect|fx sound|tieng dong ho|dong ho dem nguoc|dong ho bam gio|dong ho hen gio|ambient noise)\b/i;
-  const NON_MUSIC_BLACKLIST_REGEX = /\b(phân\s*tích|cốt\s*truyện|giải\s*thích|tóm\s*tắt|review|đánh\s*giá|hướng\s*dẫn|cách\s*chơi|build\s*nhân\s*vật|tiêu\s*điểm\s*tướng|gameplay|walkthrough|playthrough|let'?s\s*play|highlight|highlights|full\s*match|bình\s*luận|reaction|phản\s*ứng|podcast|talkshow|phỏng\s*vấn|interview|tin\s*tức|điểm\s*tin|tâm\s*sự|vlog|thử\s*thách|challenge|prank|thuyết\s*minh|lồng\s*tiếng|tập\s*\d+|ep\.?\s*\d+|episode\s*\d+|movie\s*recap|tier\s*list|lore|theory|giả\s*thuyết|analysis|explained|video\s*essay|documentary|tài\s*liệu|speedrun|stream\s*vod|livestream\s*archive|trailer\s*breakdown|easter\s*eggs)\b/i;
+  const isQueryAskingKaraoke = KARAOKE_NORM_REGEX.test(normQuery) || /\b(instrumental|beat)\b/.test(normQuery);
+  const isQueryAskingShort = SHORT_NORM_REGEX.test(normQuery);
+  const isQueryAskingLong = LONG_NORM_REGEX.test(normQuery);
+  const isQueryAskingTvOrStage = TV_STAGE_NORM_REGEX.test(normQuery);
   const isQueryAskingNonMusic = NON_MUSIC_REGEX.test(rawLowerQuery) || NON_MUSIC_REGEX.test(normQuery);
   const isQueryAskingNonMusicBlacklist = NON_MUSIC_BLACKLIST_REGEX.test(rawLowerQuery) || NON_MUSIC_BLACKLIST_REGEX.test(normQuery);
 
   const scored = [];
-
   for (const t of tracks) {
     let score = 100;
-    const normTitle = normalizeVi(t.title);
+    const rawTitle = String(t.title || '');
+    const normTitle = normalizeVi(rawTitle);
     const normArtist = normalizeVi(t.artist);
-    const titleLower = (t.title || '').toLowerCase();
+    const titleLower = rawTitle.toLowerCase();
     const artistLower = (t.artist || '').toLowerCase();
     const sec = parseDurationToSec(t.duration);
 
-    // 0. Loại bỏ video rác không phải âm nhạc (timer, countdown, study with me, pomodoro, đồng hồ bấm giờ)
+    // 0. Loại bỏ video rác không phải âm nhạc
     if (!isQueryAskingNonMusic && (NON_MUSIC_REGEX.test(titleLower) || NON_MUSIC_REGEX.test(normTitle))) {
       continue;
     }
-
-    // 0.05. Loại bỏ video phân tích game / cốt truyện / review / gameplay / podcast / recap
     if (!isQueryAskingNonMusicBlacklist && (NON_MUSIC_BLACKLIST_REGEX.test(titleLower) || NON_MUSIC_BLACKLIST_REGEX.test(normTitle))) {
       continue;
     }
-
-    // 0.1. Loại bỏ video dài trên 30 phút (> 1800s) nếu người dùng không chủ động tìm mix/lofi/playlist/1 hour/album
+    // 0.1. Loại bỏ video dài trên 30 phút (> 1800s) nếu không tìm mix/lofi/playlist
     if (sec > 1800 && !isQueryAskingLong) {
       continue;
     }
-
-    // 1. Loại bỏ video quá ngắn (Shorts / cut dưới 45 giây) trừ khi người dùng chủ động tìm shorts/tiktok
+    // 1. Loại bỏ video quá ngắn (Shorts / Teaser < 45 giây)
     if (sec > 0 && sec < 45 && !isQueryAskingShort) {
       continue;
     }
@@ -119,73 +169,73 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
       normTitle.startsWith(normQuery) ||
       cleanTitleNoBracket.startsWith(normQuery) ||
       cleanTitleNoBracket.endsWith(normQuery) ||
-      new RegExp(`^(?:[a-z0-9\\s]+\\s*-\\s*)?${normQuery}(?:\\s*-\\s*[a-z0-9\\s]+)?$`).test(cleanTitleNoBracket)
+      new RegExp(`^(?:[a-z0-9\\s]+\\s*-\\s*)?${normQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*-\\s*[a-z0-9\\s]+)?$`).test(cleanTitleNoBracket)
     ) {
       score += 30;
     }
 
-    // 3. Phân biệt rõ Kênh Nghệ Sĩ (isTopic / Artist) vs Kênh Tổng Hợp / Gameshow / TV Show
-    const combinedInfo = `${normTitle} ${normArtist}`;
-    const isTvShowOrStage = /\b(the masked singer|ca si mat na|anh trai say hi|anh trai vuot ngan chong gai|chi dep dap gio|rap viet|giao lo thoi gian|xuan ha thu dong|may lang thang|in the moonlight|la ca hat ca|forest studio|vie channel|htv2|vtv3|yeah1|fancam|live stage|tuyen tap|nhac tre|lofi chill|audio lyric)\b/i.test(combinedInfo);
+    // 3. Đánh giá biến thể Nhạc cụ / Piano / Guitar / Cover / Remix TRƯỚC khi cộng điểm Studio Master
+    const variantEval = evaluateVariantPenalty(rawTitle, normTitle, normArtist, safeRawQuery, normQuery, mode);
+    if (variantEval.penalty > 0) {
+      score -= variantEval.penalty;
+    }
 
-    const isTopic = artistLower.includes('- topic') || artistLower.includes('topic');
+    // 4. Phân biệt Kênh Nghệ Sĩ Chính Thức vs Kênh Gameshow / TV Show
+    const combinedInfo = `${normTitle} ${normArtist}`;
+    const isTvShowOrStage = TV_STAGE_NORM_REGEX.test(combinedInfo);
+    const isTopic = artistLower.includes('- topic') || /\btopic\b/.test(artistLower);
     const isOfficialChannel = isTopic || artistLower.includes('official') || artistLower.includes('vevo') || Boolean(t.isOfficial);
 
     if (isTvShowOrStage && !isQueryAskingTvOrStage) {
-      // Nếu video là gameshow/live stage nhưng user không chủ động tìm:
-      // KHÔNG cộng điểm isOfficialChannel và TRỪ NẶNG điểm
       score -= (mode === 'official' ? 75 : 45);
     } else if (isOfficialChannel) {
       score += 35;
     }
 
-    // 4. Sửa lại điểm isStudioMaster và isMusicVideo (BỎ cộng điểm cho từ khóa đơn lẻ audio / audio lyric)
-    const isStudioMaster = isTopic || /\b(official audio|official music video|official mv|official video|official visualizer|official lyric video)\b/i.test(titleLower);
-    const isMusicVideo = /\b(official music video|official mv|official video)\b/i.test(titleLower);
-
-    if (isStudioMaster) {
-      score += 50; // Chuẩn bản thu phòng thu / Topic / MV chính thức
-    } else if (isMusicVideo) {
-      score += 20;
+    // 5. Điểm Bản Gốc Phòng Thu (Studio Master / Official Audio / Official MV)
+    // QUAN TRỌNG: Nếu video là bản biến thể không được yêu cầu (ví dụ: "(ver.PIANO) | Official Video"),
+    // TUYỆT ĐỐI KHÔNG cộng điểm isStudioMaster (+50) hay isMusicVideo (+20)!
+    const isStudioMaster = isTopic || STUDIO_MASTER_REGEX.test(titleLower);
+    const isMusicVideo = MUSIC_VIDEO_REGEX.test(titleLower);
+    if (!variantEval.isUnrequestedVariant) {
+      if (isStudioMaster) {
+        score += 50;
+        // Ưu tiên nhẹ bản Official Audio / Topic / Visualizer chuẩn phòng thu hơn MV có kịch bản dài
+        if (isTopic || /\b(official\s*audio|official\s*visualizer)\b/i.test(titleLower)) {
+          score += 12;
+        }
+      } else if (isMusicVideo) {
+        score += 20;
+      }
     }
 
-    // 5. Điểm Thời Lượng Chuẩn Âm Nhạc (1p30s – 7p)
+    // 6. Điểm Thời Lượng Chuẩn Âm Nhạc (1p30s – 7p)
     if (sec >= 90 && sec <= 420) {
       score += 20;
     } else if (sec > 900 && !isQueryAskingLong) {
-      score -= 35; // Trừ điểm video quá dài (1 hour, liên khúc) nếu người dùng không yêu cầu
+      score -= 35;
     } else if (sec >= 900 && isQueryAskingLong) {
-      score += 35; // Ưu tiên bản mix dài khi người dùng/bot chủ động tìm lofi/1 hour/mix
+      score += 35;
     }
 
-    // 6. Xử lý Karaoke / Beat
-    const isKaraokeVideo = /\b(karaoke|beat chuan|nhac song|tong nam|tong nu|tone nam|tone nu|beat)\b/.test(normTitle);
+    // 7. Xử lý Karaoke / Beat
+    const isKaraokeVideo = KARAOKE_NORM_REGEX.test(normTitle);
     if (!isQueryAskingKaraoke && isKaraokeVideo) {
-      score -= 80;
+      score -= 90;
     }
 
-    // 7. Xử lý Chế độ 'official' vs 'all'
-    const isCoverOrHatLai = /\b(cover|hat lai|covered by)\b/.test(normTitle);
-    const isVariantVideo = /\b(remix|cover|hat lai|live|lofi|sped up|speed up|slowed|mashup|vinahouse|dance ver|parody)\b/.test(normTitle);
-    if (mode === 'official') {
-      if (isOfficialChannel && (!isTvShowOrStage || isQueryAskingTvOrStage)) {
-        score += 30;
-      }
-      if (!isQueryAskingVariant && isVariantVideo) {
-        // Nếu là cover/hát lại mà user không hỏi cover -> trừ mạnh 90 điểm để bản official luôn xếp trên
-        score -= (isCoverOrHatLai ? 90 : 45);
-      }
+    // 8. Thưởng thêm cho kênh chính thức ở mode 'official' nếu là bản gốc
+    if (mode === 'official' && isOfficialChannel && !variantEval.isUnrequestedVariant && (!isTvShowOrStage || isQueryAskingTvOrStage)) {
+      score += 30;
     }
 
-    // 8. Đưa Lượt Xem (views) vào Trọng Số Điểm (score)
+    // 9. Trọng số Lượt Xem (views)
     const views = parseViews(t.viewCountText);
     if (views > 1000 && sec >= 60 && sec <= 500) {
-      // 100k views -> +20đ, 1M views -> +30đ, 10M views -> +40đ
       const viewBonus = Math.min(45, Math.max(0, Math.round((Math.log10(views) - 3) * 10)));
       score += viewBonus;
     }
 
-    // Làm sạch tên nghệ sĩ (xóa bỏ hậu tố thừa)
     const cleanArtist = (t.artist || 'YouTube')
       .replace(/\s*-\s*Topic$/i, '')
       .replace(/\s*Official(?:\s*Channel)?$/i, '')
@@ -200,11 +250,10 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
       isLive: Boolean(t.isLive),
       isOfficial: isOfficialChannel,
       score,
-      views: parseViews(t.viewCountText)
+      views
     });
   }
 
-  // Sắp xếp theo score giảm dần, nếu điểm bằng nhau thì ưu tiên lượt views cao hơn
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return b.views - a.views;
@@ -237,7 +286,7 @@ function setCachedRawTracks(cacheKey, tracks) {
 }
 
 /**
- * Tầng 1: Tìm kiếm trực tiếp qua YouTube InnerTube Search API (Nhanh, nhẹ < 1MB RAM, không parse HTML)
+ * Tầng 1: Tìm kiếm trực tiếp qua YouTube InnerTube Search API
  */
 async function searchWithInnerTube(query, locale = 'vi') {
   const isEn = locale === 'en';
@@ -251,84 +300,74 @@ async function searchWithInnerTube(query, locale = 'vi') {
       }
     },
     query: query,
-    params: 'EgIQAQ%3D%3D' // Bộ lọc video
+    params: 'EgIQAQ%3D%3D'
   };
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4500);
-
-  const res = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-      'X-YouTube-Client-Name': '1',
-      'X-YouTube-Client-Version': '2.20240726.00.00'
-    },
-    body: JSON.stringify(payload),
-    signal: controller.signal
-  });
-  clearTimeout(timeoutId);
-
-  if (!res.ok) {
-    throw new Error(`InnerTube HTTP error: ${res.status}`);
-  }
-
-  const data = await res.json();
-  const tracks = [];
-  const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
-
-  for (const section of sections) {
-    const contents = section.itemSectionRenderer?.contents || [];
-    for (const item of contents) {
-      const vr = item.videoRenderer;
-      if (!vr || !vr.videoId) continue;
-      const title = vr.title?.runs?.map(r => r.text).join('') || vr.title?.simpleText || '';
-      const artist = vr.ownerText?.runs?.map(r => r.text).join('') || vr.shortBylineText?.runs?.map(r => r.text).join('') || 'YouTube';
-      const duration = vr.lengthText?.simpleText || (vr.thumbnailOverlays?.find(o => o.thumbnailOverlayTimeStatusRenderer)?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText) || '3:30';
-      const thumbnails = vr.thumbnail?.thumbnails || [];
-      const thumbnail = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url : `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`;
-      const isLive = Boolean(vr.badges?.some(b => b.metadataBadgeRenderer?.style?.includes('LIVE') || b.metadataBadgeRenderer?.label?.toLowerCase().includes('live')));
-      const isOfficial = Boolean(vr.ownerBadges?.some(b => b.metadataBadgeRenderer?.style?.includes('OFFICIAL') || b.metadataBadgeRenderer?.style?.includes('VERIFIED')));
-      const viewCountText = vr.viewCountText?.simpleText || vr.shortViewCountText?.simpleText || '';
-
-      const rawTitle = title || '';
-      const rawArtist = artist || 'YouTube';
-      const cleanTitle = rawTitle.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
-      const cleanArtist = rawArtist.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
-      const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (vr.videoId ? `Bài hát không tên (${vr.videoId})` : 'Bài hát không tên'));
-
-      tracks.push({
-        title: safeTitle,
-        url: `https://www.youtube.com/watch?v=${vr.videoId}`,
-        videoId: vr.videoId,
-        artist: cleanArtist || 'YouTube',
-        duration,
-        thumbnail,
-        isLive,
-        isOfficial,
-        viewCountText
-      });
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        'X-YouTube-Client-Name': '1',
+        'X-YouTube-Client-Version': '2.20240726.00.00'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      throw new Error(`InnerTube HTTP error: ${res.status}`);
     }
+    const data = await res.json();
+    const tracks = [];
+    const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+    for (const section of sections) {
+      const contents = section.itemSectionRenderer?.contents || [];
+      for (const item of contents) {
+        const vr = item.videoRenderer;
+        if (!vr || !vr.videoId) continue;
+        const title = vr.title?.runs?.map(r => r.text).join('') || vr.title?.simpleText || '';
+        const artist = vr.ownerText?.runs?.map(r => r.text).join('') || vr.shortBylineText?.runs?.map(r => r.text).join('') || 'YouTube';
+        const duration = vr.lengthText?.simpleText || (vr.thumbnailOverlays?.find(o => o.thumbnailOverlayTimeStatusRenderer)?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText) || '3:30';
+        const thumbnails = vr.thumbnail?.thumbnails || [];
+        const thumbnail = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url : `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`;
+        const isLive = Boolean(vr.badges?.some(b => b.metadataBadgeRenderer?.style?.includes('LIVE') || b.metadataBadgeRenderer?.label?.toLowerCase().includes('live')));
+        const isOfficial = Boolean(vr.ownerBadges?.some(b => b.metadataBadgeRenderer?.style?.includes('OFFICIAL') || b.metadataBadgeRenderer?.style?.includes('VERIFIED')));
+        const viewCountText = vr.viewCountText?.simpleText || vr.shortViewCountText?.simpleText || '';
+        const cleanTitle = (title || '').replace(INVISIBLE_CHARS_REGEX, '').trim();
+        const cleanArtist = (artist || 'YouTube').replace(INVISIBLE_CHARS_REGEX, '').trim();
+        const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (vr.videoId ? `Bài hát không tên (${vr.videoId})` : 'Bài hát không tên'));
+        tracks.push({
+          title: safeTitle,
+          url: `https://www.youtube.com/watch?v=${vr.videoId}`,
+          videoId: vr.videoId,
+          artist: cleanArtist || 'YouTube',
+          duration,
+          thumbnail,
+          isLive,
+          isOfficial,
+          viewCountText
+        });
+      }
+    }
+    return tracks;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return tracks;
 }
 
 /**
- * Tầng 2: Fallback qua yt-search (chạy hoàn toàn trong Worker thread, an toàn cho Main thread)
+ * Tầng 2: Fallback qua yt-search
  */
 async function searchWithYtSearch(query) {
   if (!yts) return [];
   const r = await yts(query);
   if (!r || !r.videos || r.videos.length === 0) return [];
   return r.videos.map(v => {
-    const rawTitle = v.title || '';
-    const rawArtist = v.author?.name || 'YouTube';
-    const cleanTitle = rawTitle.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
-    const cleanArtist = rawArtist.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u2800\u00AD\u034F\u17B4\u17B5\u180E\u2000-\u200A\u202F\u205F\u3000]/g, '').trim();
+    const cleanTitle = (v.title || '').replace(INVISIBLE_CHARS_REGEX, '').trim();
+    const cleanArtist = (v.author?.name || 'YouTube').replace(INVISIBLE_CHARS_REGEX, '').trim();
     const safeTitle = cleanTitle || (cleanArtist && cleanArtist !== 'YouTube' ? `${cleanArtist} - Audio` : (v.videoId ? `Bài hát không tên (${v.videoId})` : 'Bài hát không tên'));
-
     return {
       title: safeTitle,
       url: v.url,
@@ -343,23 +382,17 @@ async function searchWithYtSearch(query) {
   });
 }
 
-/**
- * Lắng nghe lệnh tìm kiếm từ Main Thread
- */
 if (parentPort) {
   parentPort.on('message', async (task) => {
     const { id, query, limit = 20, mode = 'official', locale = 'vi' } = task;
     try {
       const rawCacheKey = `${(query || '').toLowerCase().trim()}|${locale}`;
       let rawTracks = getCachedRawTracks(rawCacheKey);
-
       if (!rawTracks || rawTracks.length === 0) {
         const cleanQ = (query || '').trim();
         const isShortOrTimeQuery = /^\d{1,2}\s*(?:h|hr|hrs|hour|hours|gio|tieng)$/i.test(cleanQ) || (cleanQ.length <= 3 && !/^\d+$/.test(cleanQ));
-
         try {
           if (isShortOrTimeQuery) {
-            // Khi từ khóa ngắn hoặc dạng mốc thời gian (vd: 2h), tìm song song query gốc và query bổ sung bài hát
             const extraQuery = `${cleanQ} bài hát`;
             const [baseList, extraList] = await Promise.all([
               searchWithInnerTube(cleanQ, locale).catch(() => []),
@@ -375,7 +408,6 @@ if (parentPort) {
             rawTracks = await searchWithInnerTube(cleanQ, locale);
           }
         } catch (innerTubeErr) {
-          // Fallback sang yt-search
           try {
             if (isShortOrTimeQuery) {
               const extraQuery = `${cleanQ} bài hát`;
@@ -394,26 +426,20 @@ if (parentPort) {
             }
           } catch (ytsErr) {}
         }
-
         if (Array.isArray(rawTracks) && rawTracks.length > 0) {
           setCachedRawTracks(rawCacheKey, rawTracks);
         }
       }
-
       if (!rawTracks || rawTracks.length === 0) {
         parentPort.postMessage({ id, results: [], alternateResults: [], alternateMode: mode === 'official' ? 'all' : 'official' });
         return;
       }
-
-      // Tính sẵn kết quả cho cả 2 chế độ official và all từ rawTracks
       const rankedOfficial = rankAndFilterTracks(rawTracks, query, 'official').slice(0, Math.min(limit, 30));
       const rankedAll = rankAndFilterTracks(rawTracks, query, 'all').slice(0, Math.min(limit, 30));
-
       const isOfficial = mode === 'official';
       const results = isOfficial ? rankedOfficial : rankedAll;
       const alternateResults = isOfficial ? rankedAll : rankedOfficial;
       const alternateMode = isOfficial ? 'all' : 'official';
-
       parentPort.postMessage({
         id,
         results,
@@ -431,6 +457,7 @@ if (parentPort) {
 
 module.exports = {
   rankAndFilterTracks,
+  evaluateVariantPenalty,
   normalizeVi,
   searchWithInnerTube,
   searchWithYtSearch

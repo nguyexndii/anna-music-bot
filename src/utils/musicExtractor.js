@@ -269,6 +269,10 @@ function isLiveStageVideo(title) {
   return /(?:\[\s*live|\(\s*live|[\-|–—|]\s*live(?:\s+(?:at|in|on|version|ver|stage|performance)|$|\s*[)\]|])|\blive\s*(?:ver|version|performance|stage|session|at\b|in\b|listening)|liveshow|concert|fancam|listening\s*party|hát\s*live|sân\s*khấu|\bon\s*stage\b|\bstage\s*(?:ver|version)?\b|\bdemo\b)/i.test(title);
 }
 
+const EXTRACTOR_INSTRUMENT_NORM_REGEX = /\b(piano|ver\s*piano|piano\s*ver|piano\s*version|guitar|ver\s*guitar|guitar\s*ver|guitar\s*solo|acoustic|ver\s*acoustic|orchestra|symphony|violin|cello|flute|sao\s*truc|saxophone|sax\s*ver|kalimba|ukulele|organ|harp|dan\s*tranh|dan\s*bau|instrumental|khong\s*loi|nhac\s*cu|beat\s*piano|solo\s*ver|bien\s*tau|cover|hat\s*lai|covered\s*by)\b/i;
+const EXTRACTOR_INSTRUMENT_RAW_REGEX = /(?:ver\.?\s*piano|piano\s*ver\.?|ver\.?\s*guitar|guitar\s*ver\.?|ver\.?\s*acoustic|acoustic\s*ver\.?|biến\s*tấu|hát\s*lại|nhạc\s*không\s*lời|\bcover\b|\bacoustic\b|\bpiano\b|\bguitar\b|\borchestra\b|\bviolin\b|\binstrumental\b)/i;
+const EXTRACTOR_OTHER_VARIANT_NORM_REGEX = /\b(remix|vinahouse|vinahey|lofi|lo\s*fi|sped\s*up|speed\s*up|slowed|reverb|nightcore|daycore|mashup|megamix|nonstop|bootleg|flip|live|live\s*stage|live\s*session|hat\s*live|fancam|dance\s*ver|dance\s*practice|performance\s*ver|parody|nhac\s*che|demo|8d|16d|bass\s*boosted)\b/i;
+
 /**
  * Đánh giá độ khớp toàn diện giữa từ khóa tìm kiếm và ứng viên video YouTube.
  * Bắt buộc ưu tiên tên bài hát và ca sĩ chính xác lên hàng đầu, ngăn tuyệt đối việc
@@ -276,11 +280,16 @@ function isLiveStageVideo(title) {
  */
 function scoreCandidateVideo(v, query, targetDurationSec = 0) {
   if (!v) return -999;
-  const vTitleNorm = normalizeSearchText(v.title);
-  const vAuthorNorm = normalizeSearchText(v.author?.name || v.uploader || v.channel || '');
+  const rawTitle = String(v.title || '');
+  const rawAuthor = String(v.author?.name || v.uploader || v.channel || '');
+  const titleLower = rawTitle.toLowerCase();
+  const authorLower = rawAuthor.toLowerCase();
+  const vTitleNorm = normalizeSearchText(rawTitle);
+  const vAuthorNorm = normalizeSearchText(rawAuthor);
   const vCombined = `${vTitleNorm} ${vAuthorNorm}`;
 
   const cleanQ = query.replace(/\b(audio|official|mv|video|lyric|lyrics)\b/gi, '').trim();
+  const normQuery = normalizeSearchText(cleanQ);
   const parts = cleanQ.split(/\s+[-–—|]\s+/).map(p => p.trim()).filter(Boolean);
 
   let titlePart = parts[0] || cleanQ;
@@ -293,6 +302,23 @@ function scoreCandidateVideo(v, query, targetDurationSec = 0) {
   const artistWords = normArtist ? normArtist.split(' ').filter(w => w.length >= 2) : [];
 
   let score = 0;
+
+  // 0. Đánh giá biến thể Nhạc cụ / Piano / Cover / Remix không được yêu cầu
+  const isAskingInstrument = EXTRACTOR_INSTRUMENT_NORM_REGEX.test(normQuery) || EXTRACTOR_INSTRUMENT_RAW_REGEX.test(query);
+  const isAskingOtherVariant = EXTRACTOR_OTHER_VARIANT_NORM_REGEX.test(normQuery);
+
+  const isCandidateInstrument = EXTRACTOR_INSTRUMENT_NORM_REGEX.test(vTitleNorm) || EXTRACTOR_INSTRUMENT_RAW_REGEX.test(rawTitle);
+  const isCandidateOtherVariant = EXTRACTOR_OTHER_VARIANT_NORM_REGEX.test(vCombined);
+
+  let isUnrequestedVariant = false;
+  if (isCandidateInstrument && !isAskingInstrument) {
+    score -= 100; // Phạt nặng -100đ đối với bản Piano / Guitar / Acoustic / Cover không yêu cầu
+    isUnrequestedVariant = true;
+  }
+  if (isCandidateOtherVariant && !isAskingOtherVariant) {
+    score -= 65; // Phạt bản Remix / Live / Sped up / Slowed không yêu cầu
+    isUnrequestedVariant = true;
+  }
 
   // 1. So khớp tên bài hát (tiêu chí quan trọng nhất)
   if (normTitle && vTitleNorm.includes(normTitle)) {
@@ -330,10 +356,10 @@ function scoreCandidateVideo(v, query, targetDurationSec = 0) {
     score -= 100; // Phạt nặng để ưu tiên bản phòng thu chính thức (Official Studio Audio/MV)
   }
 
-  // 4. Ưu tiên topic / official studio audio / official mv
+  // 4. Ưu tiên topic / official studio audio / official mv (CHỈ cộng nếu KHÔNG phải biến thể trái ý)
   const isTopic = vAuthorNorm.includes('topic') || vTitleNorm.includes('topic');
   if (isTopic) score += 40;
-  if (/\b(official audio|official music video|official mv|official video|official visualizer|official lyric video)\b/i.test(vTitleNorm)) {
+  if (!isUnrequestedVariant && /\b(official audio|official music video|official mv|official video|official visualizer|official lyric video)\b/i.test(vTitleNorm)) {
     score += 35;
   }
 

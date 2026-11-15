@@ -728,6 +728,18 @@ function setCachedLyrics(key, data) {
 }
 
 const VIETNAMESE_REGEX = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+const CJK_SCRIPT_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/;
+
+// Danh sách nghệ sĩ / nhóm nhạc / hãng game quốc tế phổ biến
+const KNOWN_INTL_ARTISTS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|valorant|arcane|pentakill|true\s*damage|heartsteel|miyeon|soyeon|g\s*i\s*dle|gidle|\(g\)i-dle|sophie\s*powers|mimi\s*webb|madison\s*beer|jaira\s*burns|seraphine|lexie\s*liu|taylor\s*swift|the\s*weeknd|alan\s*walker|ed\s*sheeran|bruno\s*mars|ariana\s*grande|billie\s*eilish|justin\s*bieber|post\s*malone|dua\s*lipa|charlie\s*puth|shawn\s*mendes|camila\s*cabello|olivia\s*rodrigo|sabrina\s*carpenter|lana\s*del\s*rey|adele|rihanna|katy\s*perry|lady\s*gaga|maroon\s*5|imagine\s*dragons|coldplay|onerepublic|chainsmokers|linkin\s*park|eminem|drake|kendrick\s*lamar|travis\s*scott|sza|doja\s*cat|nicki\s*minaj|cardi\s*b|blackpink|bts|newjeans|aespa|ive|le\s*sserafim|twice|itzy|nmixx|babymonster|illit|kiss\s*of\s*life|stray\s*kids|seventeen|txt|enhypen|exo|bigbang|g\s*dragon|taeyang|iu|taeyeon|jungkook|jimin|v\s*bts|lisa|jennie|rose|jisoo|psy|yoasobi|ado|kenshi\s*yonezu|fujii\s*kaze|radwimps|lisa\s*japan|aimer|eve\s*japan|official\s*hige\s*dandism|king\s*gnu|vaundy|imase|jay\s*chou|jj\s*lin|g\.?e\.?m\.?|eric\s*chou|mayday|vevo)\b/i;
+
+// Danh sách nghệ sĩ V-Pop / V-Rap / V-Indie (Chuẩn hóa không dấu)
+const KNOWN_VN_ARTISTS_NORM_REGEX = /\b(quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|lam\s*chan\s*khang|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|vu|vũ)\b/i;
+
+// Từ vựng & Âm tiết đặc trưng của bài hát Tiếng Việt khi viết KHÔNG DẤU (ví dụ: "Thuy Trieu", "Tinh Minh La Ki")
+const VN_ACCENTLESS_SYLLABLES_REGEX = /^(thuy|trieu|tinh|minh|la|ki|ky|anh|em|chung|ta|cua|tuong|lai|hien|tai|qua|khu|nguoi|yeu|thuong|nho|buon|vui|khoc|cuoi|trai|tim|giac|mo|mua|nang|gio|may|troi|bien|song|co|don|lang|quen|chia|tay|gap|nhau|nuoc|mat|doi|cho|vong|tay|ngot|ngao|am|ap|lanh|lung|duong|pho|chieu|thu|dong|xuan|ha|hoang|hon|binh|minh|bong|toi|ngan|van|kiep|duyen|phan|loi|hua|cau|the|chap|nhan|buong|bo|quay|ve|ra|di|o|lai|bao|gio|con|mai|chang|khong|chua|tung|da|dang|se|vua|moi|rat|lam|nhieu|mot|hai|ba|bon|nam|sau|bay|tam|chin|muoi|tram|nghin|ngon|lua|bo|vai|doi|moi|nu|cuoi|tieng|hat|loi|ca|nhip|dieu|phut|giay|dem|khuya|som|thien|duong|tran|gian|cuoc|doi|thanh|xuan|tuoi|tre|ngay|thang|dai|kho|ngoc|nghech|dam|me|mong|uoc|hy|vong|binh|yen|nhat|nhoa|phai|tan|vo|nat|bien|mat|nguyen|tran|le|pham|hoang|huynh|phan|vu|vo|dang|bui|do|ho|ngo|duong|quang|hung|duc|tuan|hieu|khanh|linh|trang|thao|huong|phuong|ngoc|vy|nhi)$/i;
+const VN_PHONETIC_CLUSTER_REGEX = /^(?:ng|nh|kh|gh|ph|tr|ch|gi|qu|th|dh)[aeiouy]{1,3}(?:ng|nh|ch|m|n|p|t|c)?$|^[bcdghklmnpqrstvx]{1,2}(?:uy|ieu|uoi|uoc|uong|oai|oan|oang|ang|anh|ach|inh|ich|ung|uc|oc|ong|ep|op|ap)$/i;
+const COMMON_ENGLISH_WORDS_REGEX = /\b(the|and|you|that|was|for|are|with|his|they|this|have|from|one|had|word|but|not|what|all|were|when|your|can|said|there|use|each|which|she|how|their|will|other|about|out|many|then|them|these|some|her|would|make|like|him|into|time|has|look|two|more|write|go|see|number|no|way|could|people|my|than|first|water|been|call|who|oil|its|now|find|long|down|day|did|get|come|made|may|part|give|got|still|love|baby|know|feel|wanna|gonna|dont|cant|im|youre|ill|we|us|me|firestarter|fire|starter|night|heart|dream|dreams|world|life|light|dark|sky|stars|sun|moon|rain|wind|flame|stay|leave|gone|back|home|alone|lonely|broken|forever|never|always|again|tonight|today|kiss|touch|hold|cry|smile|dance|sing|song|music|beat|rhythm|soul|mind|eyes|lips|hands|arms|wings|fly|fall|falling|run|running|wait|stop|start|end|begin|lose|win|fight|die|live|living|dead|heaven|hell|angel|devil|boy|girl|man|woman|friends|lover|shadow|magic|power|villain|hero)\b/i;
 
 const KNOWN_VN_KEYWORDS = [
   'masew', 'xesi', 'nhatnguyen', 'sơn tùng', 'son tung', 'm-tp', 'mtp', 'jack', 'j97', 'k-icm',
@@ -740,58 +752,116 @@ const KNOWN_VN_KEYWORDS = [
   'phan manh quynh', 'justatee', 'rhymastic', 'karik', 'wowy', 'suboi', 'trúc nhân', 'truc nhan',
   'văn mai hương', 'van mai huong', 'mee media', 'acv music', '1989s', 'phương ly', 'phuong ly',
   'trịnh thăng bình', 'trinh thang binh', 'khắc việt', 'khac viet', 'khởi my', 'khoi my',
-  'richie', 'icy', 'vpop', 'v-pop', 'nhac viet', 'nhạc việt'
+  'quang hùng masterd', 'quang hung masterd', 'lil z poet', 'hurrykng', 'negav', 'gerdnang',
+  'rhyder', 'dương domic', 'duong domic', 'pháp kiều', 'phap kieu', 'wean', 'vpop', 'v-pop', 'nhac viet', 'nhạc việt'
 ];
+
+/**
+ * Kiểm tra xem một chuỗi không dấu có cấu trúc âm tiết Tiếng Việt đặc trưng hay không (ví dụ: "Thuy Trieu")
+ */
+function hasVietnameseSyllablePattern(cleanStr) {
+  if (!cleanStr) return false;
+  const norm = normalizeStr(cleanStr);
+  const tokens = norm.split(/\s+/).filter(w => w.length >= 2);
+  if (tokens.length === 0) return false;
+
+  let vnTokenCount = 0;
+  let enTokenCount = 0;
+
+  for (const token of tokens) {
+    if (COMMON_ENGLISH_WORDS_REGEX.test(token)) {
+      enTokenCount++;
+      continue;
+    }
+    if (VN_ACCENTLESS_SYLLABLES_REGEX.test(token) || VN_PHONETIC_CLUSTER_REGEX.test(token)) {
+      vnTokenCount++;
+    }
+  }
+
+  if (enTokenCount > vnTokenCount) return false;
+  if (tokens.length <= 2) {
+    return vnTokenCount >= Math.max(1, tokens.length) && enTokenCount === 0;
+  }
+  return vnTokenCount >= 2 && (vnTokenCount / tokens.length) >= 0.5;
+}
 
 function stripVietnameseBoilerplate(str) {
   if (!str || typeof str !== 'string') return '';
   return str
-    .replace(/[\(\[\{][^\)\]\}]*(?:chính\s*thức|chinh\s*thuc|mv|official|âm\s*nhạc|bản\s*gốc|bản\s*chuẩn|bản\s*dịch|lời\s*việt|vietsub|phụ\s*đề|thuyết\s*minh|karaoke|remix|lyrics|audio|video)[^\)\]\}]*[\)\]\}]/gi, ' ')
+    .replace(/[\(\[\{][^\)\]\}]*(?:chính\s*thức|chinh\s*thuc|mv|official|âm\s*nhạc|bản\s*gốc|bản\s*chuẩn|bản\s*dịch|lời\s*việt|vietsub|phụ\s*đề|thuyết\s*minh|karaoke|remix|lyrics|audio|video|visualizer)[^\)\]\}]*[\)\]\}]/gi, ' ')
+    .replace(/(?:^|\s+)(?:mv\s*chính\s*thức|video\s*chính\s*thức|video\s*âm\s*nhạc\s*chính\s*thức|bản\s*chính\s*thức|chính\s*thức|chinh\s*thuc|vietsub|viet\s*sub|lời\s*việt|bản\s*dịch|phụ\s*đề|thuyết\s*minh)(?:\s+|$)/gi, ' ')
     .replace(/(?:^|\s+)(?:và|của|với|cùng|từ|hợp\s*tác\s*với|hợp\s*tác\s*cùng|ft\.?|feat\.?|featuring)(?:\s+|$)/gi, ' ')
-    .replace(/(?:^|\s+)(?:mv\s*chính\s*thức|video\s*chính\s*thức|bản\s*chính\s*thức|chính\s*thức|chinh\s*thuc|vietsub|lời\s*việt|bản\s*dịch|phụ\s*đề|thuyết\s*minh)(?:\s+|$)/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function isVietnameseTrack(context = {}) {
-  const { rawTitle = '', artist = '', videoTitle = '', uploader = '' } = context;
+function isVietnameseTrack(contextOrTitle = {}, maybeArtist = '') {
+  let rawTitle = '';
+  let artist = '';
+  let videoTitle = '';
+  let uploader = '';
 
-  // 1. Kiểm tra danh sách nghệ sĩ / kênh Việt Nam nổi tiếng đã biết
-  const checkArtistText = `${artist} ${uploader}`.toLowerCase();
-  const isKnownVn = KNOWN_VN_KEYWORDS.some(kw => {
-    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
-    return regex.test(checkArtistText);
-  });
-  if (isKnownVn) return true;
+  if (typeof contextOrTitle === 'string') {
+    rawTitle = contextOrTitle;
+    artist = typeof maybeArtist === 'string' ? maybeArtist : '';
+  } else if (contextOrTitle && typeof contextOrTitle === 'object') {
+    rawTitle = contextOrTitle.rawTitle || '';
+    artist = contextOrTitle.artist || '';
+    videoTitle = contextOrTitle.videoTitle || '';
+    uploader = contextOrTitle.uploader || '';
+  }
 
-  // 2. Nếu uploader/artist thuộc các kênh/hãng âm nhạc quốc tế lớn -> Không phải bài Việt
-  const internationalChannels = [
-    'riot games', 'league of legends', 'vevo', 'warner music', 'universal music',
-    'sony music', 'atlantic records', 'smtown', 'hybe labels', 'jyp entertainment',
-    'yg entertainment', 'taylor swift', 'billie eilish', 'the weeknd', 'coldplay',
-    'charlie puth', 'alan walker', 'maroon 5', 'eminem', 'ed sheeran', 'bruno mars'
-  ];
-  const uploaderLow = `${uploader} ${artist}`.toLowerCase();
-  if (internationalChannels.some(ic => uploaderLow.includes(ic))) {
+  const rawCombined = `${rawTitle} ${videoTitle} ${artist} ${uploader}`.trim();
+  if (!rawCombined) return false;
+  const normCombined = normalizeStr(rawCombined);
+  const normArtist = normalizeStr(`${artist} ${uploader}`);
+
+  // 1. Nếu có chữ Hàn (Hangul), Nhật (Kana), Trung (Hanzi) và không có dấu tiếng Việt -> Nhạc ngoại
+  if (CJK_SCRIPT_REGEX.test(rawCombined) && !VIETNAMESE_REGEX.test(rawCombined)) {
     return false;
   }
 
-  // 3. Lọc sạch boilerplate tiếng Việt địa phương hóa (MV chính thức, vietsub, và, của...)
-  const cleanedTitle = stripVietnameseBoilerplate(rawTitle || videoTitle || '');
-  const cleanedArtist = stripVietnameseBoilerplate(artist || '');
-
-  // 4. Nếu tiêu đề hoặc tên ca sĩ sau khi làm sạch vẫn chứa dấu tiếng Việt -> Đích thực là bài Việt
-  if (VIETNAMESE_REGEX.test(cleanedTitle) || VIETNAMESE_REGEX.test(cleanedArtist)) {
+  // 2. Nhận diện Nghệ sĩ V-Pop / V-Rap / V-Indie chuẩn hóa không dấu (Quang Hùng MasterD, Lil Z Poet...)
+  if (KNOWN_VN_ARTISTS_NORM_REGEX.test(normCombined) || KNOWN_VN_ARTISTS_NORM_REGEX.test(normArtist)) {
     return true;
   }
 
-  // 5. Kiểm tra toàn bộ text còn lại với danh sách từ khóa Việt Nam
-  const fullTextToCheck = `${cleanedTitle} ${cleanedArtist}`.toLowerCase();
+  // 3. Nhận diện Nghệ sĩ / Nhóm nhạc / Hãng game Quốc tế (K/DA, Riot Games, MIYEON, SOYEON, Taylor Swift...)
+  if (KNOWN_INTL_ARTISTS_REGEX.test(rawCombined) || KNOWN_INTL_ARTISTS_REGEX.test(normCombined)) {
+    return false;
+  }
+
+  // 4. Lọc sạch boilerplate tiếng Việt địa phương hóa của YouTube ("MV Chính Thức", "của", "và"...)
+  const cleanedTitle = stripVietnameseBoilerplate(rawTitle || videoTitle || '');
+  const cleanedArtist = stripVietnameseBoilerplate(artist || uploader || '');
+  const cleanedCombined = `${cleanedTitle} ${cleanedArtist}`.trim();
+
+  // 5. Nếu sau khi làm sạch tiêu đề/ca sĩ vẫn còn chứa dấu tiếng Việt
+  if (VIETNAMESE_REGEX.test(cleanedTitle) || VIETNAMESE_REGEX.test(cleanedArtist)) {
+    const words = cleanedCombined.split(/[\s\-–—|(),.!?'"/]+/).filter(Boolean);
+    const vnWords = words.filter(w => VIETNAMESE_REGEX.test(w));
+    const enWords = words.filter(w => !VIETNAMESE_REGEX.test(w) && COMMON_ENGLISH_WORDS_REGEX.test(w));
+    if (vnWords.length >= 1 && enWords.length <= vnWords.length * 2) {
+      return true;
+    }
+  }
+
+  // 6. Phân tích cấu trúc âm tiết Tiếng Việt không dấu (ví dụ: "'Thuy Trieu'", "Tinh Minh La Ki")
+  const coreTitleOnly = cleanedTitle
+    .replace(/\[.*?\]|\(.*?\)/g, ' ')
+    .replace(/(?:feat\.?|ft\.?|prod\.?).*$/i, ' ')
+    .replace(/['"`]/g, ' ')
+    .trim();
+
+  if (hasVietnameseSyllablePattern(coreTitleOnly) || hasVietnameseSyllablePattern(cleanedArtist)) {
+    return true;
+  }
+
+  // 7. Kiểm tra với danh sách từ khóa Việt Nam
   return KNOWN_VN_KEYWORDS.some(kw => {
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
-    return regex.test(fullTextToCheck);
+    return regex.test(normCombined);
   });
 }
 
@@ -1121,41 +1191,60 @@ function getRankedSubtitleTracks(subsMap, context = {}) {
 
     if (isVN) {
       const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet/i.test(nameLow);
+      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
 
       if (isViLang && !isAsr) {
-        score += 120; // Phụ đề tiếng Việt chính thức (do người tải lên)
+        score += 150; // Phụ đề tiếng Việt chính thức (do người tải lên)
       } else if (isViLang) {
         score += 100; // Phụ đề tiếng Việt tự động ASR
       } else if (isViName && !isAsr) {
-        score += 95;
+        score += 120;
       } else if (isViName) {
         score += 85;
       } else if (kLow.startsWith('und')) {
-        score += 60;
-      } else if (kLow.startsWith('en')) {
-        score += 30; // Nhiều MV Việt tải lời tiếng Việt vào slot 'en' mặc định
+        score += 40;
+      } else if (kLow.startsWith('en') || langCode.startsWith('en')) {
+        // CẤM / PHẠT NẶNG track tiếng Anh trên bài nhạc Việt để không nhận nhầm lời dịch tiếng Anh (như bài Thủy Triều)
+        score -= 150;
       } else {
-        score -= 50;
+        score -= 80;
       }
     } else if (isKR) {
-      if (kLow.startsWith('ko')) score += 100;
-      else if (kLow.startsWith('en')) score += 40;
+      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+      if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho K-Pop
+      else if (kLow.startsWith('ko') || langCode.startsWith('ko')) score += 150;
+      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
       else score -= 50;
     } else if (isJP) {
-      if (kLow.startsWith('ja')) score += 100;
-      else if (kLow.startsWith('en')) score += 40;
+      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+      if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho J-Pop
+      else if (kLow.startsWith('ja') || langCode.startsWith('ja')) score += 150;
+      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
       else score -= 50;
     } else if (isCN) {
-      if (kLow.startsWith('zh')) score += 100;
-      else if (kLow.startsWith('en')) score += 40;
+      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+      if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho C-Pop
+      else if (kLow.startsWith('zh') || langCode.startsWith('zh')) score += 150;
+      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
       else score -= 50;
     } else {
-      if (kLow === 'en' || kLow === 'en-orig' || kLow.startsWith('en-') || kLow.startsWith('en_')) score += 120;
-      else if (kLow.startsWith('und')) score += 50;
-      else if (kLow.startsWith('vi')) score -= 80;
-      else if (['ja', 'ko', 'zh', 'ar', 'ru', 'th', 'hi', 'fr', 'de', 'es'].some(l => kLow.startsWith(l))) score -= 50;
-      else score += 10;
+      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+      // BÀI HÁT QUỐC TẾ: Cấm tuyệt đối track phụ đề tiếng Việt (bản dịch Vietsub)
+      if (isViLang || isViName) {
+        score -= 999;
+      } else if (kLow === 'en' || kLow === 'en-orig' || kLow.startsWith('en-') || kLow.startsWith('en_') || langCode.startsWith('en')) {
+        score += 150;
+      } else if (kLow.startsWith('und')) {
+        score += 30;
+      } else if (['ja', 'ko', 'zh', 'ar', 'ru', 'th', 'hi', 'fr', 'de', 'es'].some(l => kLow.startsWith(l))) {
+        score -= 50;
+      } else {
+        score += 10;
+      }
     }
 
     return { key, trackArr, score };
@@ -2696,5 +2785,7 @@ module.exports = {
   saveLyricOffset,
   getSavedLyricOffset,
   cacheYoutubeSubtitlesMeta,
-  isGarbageLyrics
+  isGarbageLyrics,
+  isVietnameseTrack,
+  getRankedSubtitleTracks
 };
