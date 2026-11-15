@@ -79,7 +79,7 @@ function getCookiesFile() {
 }
 
 // Cấu hình player client bypass kiểm tra bot của YouTube trên Datacenter IP
-const YTDLP_EXTRACTOR_ARGS = 'youtube:player_client=android,mweb';
+const YTDLP_EXTRACTOR_ARGS = 'youtube:player_client=ios,android,mweb';
 /**
  * Định dạng mili-giây sang MM:SS
  */
@@ -796,7 +796,9 @@ async function searchTrack(query, targetDurationSec = 0) {
           flatPlaylist: true,
           playlistEnd: 100,
           yesPlaylist: true,
-          noWarnings: true
+          noWarnings: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K'
         };
         const cFile = getCookiesFile();
         if (cFile) plOpts.cookies = cFile;
@@ -1009,7 +1011,9 @@ async function searchTrack(query, targetDurationSec = 0) {
           noWarnings: true,
           callHome: false,
           preferFreeFormats: true,
-          youtubeSkipDashManifest: true
+          youtubeSkipDashManifest: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K'
         };
         const cFile = getCookiesFile();
         if (cFile) infoOpts.cookies = cFile;
@@ -1352,7 +1356,9 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = [], targetRe
       flatPlaylist: true,
       noWarnings: true,
       playlistEnd: 25,
-      extractorArgs: isIntl ? `${YTDLP_EXTRACTOR_ARGS};youtube:lang=en` : YTDLP_EXTRACTOR_ARGS
+      extractorArgs: isIntl ? `${YTDLP_EXTRACTOR_ARGS};youtube:lang=en` : YTDLP_EXTRACTOR_ARGS,
+      httpChunkSize: '10M',
+      bufferSize: '64K'
     };
     if (isIntl) {
       mixOpts.geoBypassCountry = 'US';
@@ -1740,8 +1746,6 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
   const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
-      '-fflags', '+nobuffer',
-      '-flags', 'low_delay',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
@@ -1754,7 +1758,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     // Cấu hình FFmpeg xuất luồng âm thanh nguyên bản (Bit-perfect Pure Stream) chuẩn Discord Voice:
     // TUYỆT ĐỐI KHÔNG dùng filter động (-af dynaudnorm, loudnorm, acompressor, alc...) để tránh phập phù âm lượng (Audio Pumping)
     ffmpegArgs.push(
-      '-thread_queue_size', '4096',
+      '-thread_queue_size', '512',
       '-i', streamUrl,
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1787,7 +1791,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -1839,15 +1843,13 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
   const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
     const ffmpegArgs = [
-      '-loglevel', 'error',
-      '-fflags', '+nobuffer',
-      '-flags', 'low_delay'
+      '-loglevel', 'error'
     ];
     if (seekSeconds && Number(seekSeconds) > 0) {
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
     }
     ffmpegArgs.push(
-      '-thread_queue_size', '4096',
+      '-thread_queue_size', '512',
       '-i', filePath,
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -1880,7 +1882,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
     });
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream File Error]:', err.message);
@@ -1967,7 +1969,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       noProgress: true,
       socketTimeout: 10,
       retries: 2,
-      bufferSize: '16K',
+      bufferSize: '64K',
       httpChunkSize: '10M',
       concurrentFragments: 1,
       noCheckCertificates: true,
@@ -1976,7 +1978,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     if (!isSoundCloud) {
       ytdlpOptions.preferFreeFormats = true;
-      ytdlpOptions.extractorArgs = bypassCookie ? 'youtube:player_client=android,ios' : YTDLP_EXTRACTOR_ARGS;
+      ytdlpOptions.extractorArgs = bypassCookie ? 'youtube:player_client=ios,android' : YTDLP_EXTRACTOR_ARGS;
       const cookiesFile = bypassCookie ? null : getCookiesFile();
       if (cookiesFile) {
         ytdlpOptions.cookies = cookiesFile;
@@ -2001,10 +2003,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       try { os.setPriority(ytdlpStreamProcess.pid, isLowPriority ? 19 : 5); } catch (e) {}
     }
 
-    const ffmpegArgs = [
-      '-fflags', '+nobuffer',
-      '-flags', 'low_delay'
-    ];
+    const ffmpegArgs = [];
     if (seekSeconds && Number(seekSeconds) > 0) {
       ffmpegArgs.push('-ss', String(Math.floor(Number(seekSeconds))));
     }
@@ -2014,7 +2013,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ffmpegArgs.push(
       '-analyzeduration', '0',
       '-probesize', '64k',
-      '-thread_queue_size', '4096',
+      '-thread_queue_size', '512',
       '-i', 'pipe:0',
       '-vn',
       '-c:a', 'pcm_s16le',
@@ -2101,7 +2100,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     ytdlpStreamProcess.stdout.pipe(ffmpegProcess.stdin);
 
     let firstChunkReceived = false;
-    const passThroughStream = new PassThrough({ highWaterMark: 1024 * 1024 * 4 });
+    const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
@@ -2184,6 +2183,8 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
       dumpSingleJson: true,
       flatPlaylist: true,
       noWarnings: true,
+      httpChunkSize: '10M',
+      bufferSize: '64K',
       '--': [`scsearch10:${scSearchQuery}`]
     });
 
@@ -2195,6 +2196,8 @@ async function createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle,
           dumpSingleJson: true,
           flatPlaylist: true,
           noWarnings: true,
+          httpChunkSize: '10M',
+          bufferSize: '64K',
           '--': [`scsearch10:${compactScQuery}`]
         });
       } catch (e) {}

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Anna Music - Lyrics Fallback Service", version="1.0.0")
 
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 # Chỉ mở CORS nội bộ cho Node.js server trên cùng VPS
 app.add_middleware(
@@ -66,7 +66,7 @@ def health_check():
 # Bỏ "Lrclib" vì Node.js đã gọi trực tiếp API LRCLIB cực nhanh (<150ms)
 FAST_PROVIDERS = ["Musixmatch", "NetEase"]
 # Tái sử dụng ThreadPool tĩnh toàn cục để tránh chi phí khởi tạo / hủy thread liên tục trên VPS 2GB
-_provider_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+_provider_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 def _search_single_provider(query: str, provider: str, synced_only: bool) -> Optional[str]:
     import syncedlyrics

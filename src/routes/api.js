@@ -2,7 +2,9 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { verifyWebToken, createSessionToken, getPinAttemptStatus, recordPinFailure, clearPinFailures } = require('../utils/tokenHelper');
-const { searchMultipleTracks, searchTrack, validateAndSanitizeMusicUrl } = require('../utils/musicExtractor');
+const { searchTrack, validateAndSanitizeMusicUrl } = require('../utils/musicExtractor');
+const searchService = require('../utils/searchService');
+const searchMultipleTracks = searchService.searchMultipleTracks || searchService.executeSearch;
 const { hasMusicPermission, hasManagerPermission, isAllowedVoiceChannel, isStrictAdmin } = require('../utils/permissionHelper');
 const { getLyrics } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
@@ -93,20 +95,7 @@ module.exports = function createApiRouter(client) {
     return null;
   }
 
-  // Search in-memory cache & In-flight request deduplication (TTL 10 phút, LRU eviction max 200)
-  const searchCache = new Map();
-  const inFlightSearches = new Map();
   const activePlaylistLoads = new Set();
-  const SEARCH_CACHE_TTL = 10 * 60 * 1000;
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, value] of searchCache.entries()) {
-      if (!value || now >= value.expiresAt) {
-        searchCache.delete(key);
-      }
-    }
-    if (searchCache.size > 200) searchCache.clear();
-  }, 5 * 60 * 1000);
 
   // Cache RAM 2.5s cho dữ liệu thống kê máy chủ (Top bài hát, lịch sử, playlist gần đây)
   const guildStatsCache = new Map();
@@ -463,7 +452,7 @@ module.exports = function createApiRouter(client) {
     });
   });
 
-  // 2. Live Search YouTube / Spotify (Siêu tốc độ với RAM Cache & Chống chồng lặp, Rate-limited 30 req/phút, yêu cầu xác thực)
+  // 2. Live Search YouTube / Spotify (Rate-limited 30 req/phút, ủy quyền trực tiếp cho searchService điều phối worker & cache)
   router.get('/search', requireAuth, searchLimiter, async (req, res) => {
     let query = (req.query.q || '').slice(0, 150).trim();
     const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 20, 50));
@@ -474,45 +463,9 @@ module.exports = function createApiRouter(client) {
       return res.json({ success: true, results: [] });
     }
 
-    const cacheKey = `${query.toLowerCase()}_${limit}_${mode}`;
-    const cached = searchCache.get(cacheKey);
-    if (cached) {
-      if (Date.now() < cached.expiresAt) {
-        return res.json({ success: true, results: cached.results });
-      }
-      searchCache.delete(cacheKey);
-    }
-
-    if (inFlightSearches.has(cacheKey)) {
-      try {
-        const results = await inFlightSearches.get(cacheKey);
-        return res.json({ success: true, results });
-      } catch (e) {
-        return res.json({ success: true, results: [] });
-      }
-    }
-
-    const searchPromise = (async () => {
-      try {
-        const results = await searchMultipleTracks(query, limit, mode);
-        if (results && results.length > 0) {
-          if (searchCache.size >= 200) {
-            const oldestKey = searchCache.keys().next().value;
-            if (oldestKey) searchCache.delete(oldestKey);
-          }
-          searchCache.set(cacheKey, { results, expiresAt: Date.now() + SEARCH_CACHE_TTL });
-        }
-        return results || [];
-      } finally {
-        inFlightSearches.delete(cacheKey);
-      }
-    })();
-
-    inFlightSearches.set(cacheKey, searchPromise);
-
     try {
-      const results = await searchPromise;
-      return res.json({ success: true, results });
+      const results = await searchMultipleTracks(query, limit, mode);
+      return res.json({ success: true, results: results || [] });
     } catch (err) {
       console.error('[API Search Error]:', err);
       return res.status(500).json({ success: false, error: 'Lỗi tìm kiếm bài hát' });
@@ -738,7 +691,18 @@ module.exports = function createApiRouter(client) {
               return (!['Unknown', 'YouTube', 'YouTube Music'].includes(currentTrack.artist) ? currentTrack.artist : '') || 'YouTube Music';
             })(),
             url: currentTrack.url || (currentTrack.searchQuery ? `https://www.youtube.com/results?search_query=${encodeURIComponent(currentTrack.searchQuery)}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(safeTitle)}`),
-            thumbnail: currentTrack.thumbnail || 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg',
+            thumbnail: (() => {
+              if (currentTrack.thumbnail && !currentTrack.thumbnail.includes('default-playlist')) {
+                return currentTrack.thumbnail;
+              }
+              if (currentTrack.url) {
+                const ytM = currentTrack.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+                if (ytM && ytM[1]) {
+                  return `https://i.ytimg.com/vi/${ytM[1]}/hqdefault.jpg`;
+                }
+              }
+              return currentTrack.thumbnail || null;
+            })(),
             duration: currentTrack.duration,
             playbackDurationMs: (() => {
               let val = 0;

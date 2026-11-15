@@ -119,8 +119,12 @@ function cleanTitle(str) {
   s = s.replace(/(?:^|\s)(?:feat\.?|ft\.?)\s+[^-–—|()\[\]]+/gi, ' ');
   s = s.replace(/\s*\([^)a-zA-Z0-9]*\)/g, ' ');
   s = s.replace(/\s*\[[^\]a-zA-Z0-9]*\]/g, ' ');
+  s = s.replace(/^\s*\b(?:m\/v|mv)\b\s*/gi, ' ');
+  s = s.replace(/\s*\b(?:m\/v|mv)\b\s*$/gi, ' ');
   s = s.replace(/\s*[-|:/\\–—]\s*$/g, '').trim();
   s = s.replace(/^\s*[-|:/\\–—]\s*/g, '').trim();
+  s = s.replace(/^\s*\b(?:m\/v|mv)\b\s*/gi, ' ');
+  s = s.replace(/\s*\b(?:m\/v|mv)\b\s*$/gi, ' ');
   s = s.replace(/[*~]/g, ' '); // Xóa dấu sao hoặc tilde lẻ loi
   s = s.replace(/\s+/g, ' ').trim();
   return s;
@@ -282,6 +286,45 @@ function generateSearchVariants(rawTitle, rawArtist = '') {
   if (deepClean && deepClean !== primaryClean) {
     titlesToProcess.unshift(deepClean);
   }
+
+  // Nhận diện tiêu đề chứa cặp nháy đơn hoặc nháy kép (K-Pop / J-Pop / Quốc tế, ví dụ: IVE 아이브 'BANG BANG' MV)
+  const quotedMatch = rawTitle.match(/(?:["“]([^"“”]+)["”]|(?:^|[\s(\[])['‘](.+?)['’](?=[\s)\]\-–—]|$))/);
+  const topVariants = [];
+  if (quotedMatch) {
+    const rawQuoted = (quotedMatch[1] || quotedMatch[2] || '').trim();
+    const quotedTrack = cleanTitle(rawQuoted);
+    const quoteIndex = rawTitle.indexOf(rawQuoted);
+    const textBefore = (quoteIndex > 0 ? rawTitle.slice(0, quoteIndex) : '').replace(/['"‘“]/g, '').trim();
+    // Bóc tách chữ Latin trong phần text phía trước nháy (bỏ ký tự Hangul/CJK và ký tự kỹ thuật)
+    const latinBefore = textBefore
+      .replace(/[\uAC00-\uD7AF\u1100-\u11FF\u3040-\u30FF\u4E00-\u9FFF]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    let latinArtist = cleanArtistName(cleanTitle(stripParentheses(latinBefore)));
+
+    // Fallback nếu phía trước không có chữ Latin nào (chỉ có chữ tượng hình)
+    if (!latinArtist && cleanArt) {
+      const artLatinOnly = cleanArt
+        .replace(/[\uAC00-\uD7AF\u1100-\u11FF\u3040-\u30FF\u4E00-\u9FFF]/g, ' ')
+        .trim();
+      latinArtist = cleanArtistName(cleanTitle(stripParentheses(artLatinOnly || cleanArt)));
+    }
+
+    if (quotedTrack) {
+      if (latinArtist) {
+        topVariants.push({ track: quotedTrack, artist: latinArtist, expectedTrack: quotedTrack, expectedArtist: latinArtist });
+        topVariants.push({ q: `${quotedTrack} ${latinArtist}`, expectedTrack: quotedTrack, expectedArtist: latinArtist });
+        topVariants.push({ q: `${latinArtist} ${quotedTrack}`, expectedTrack: quotedTrack, expectedArtist: latinArtist });
+      }
+      topVariants.push({ track: quotedTrack, q: quotedTrack, expectedTrack: quotedTrack, expectedArtist: latinArtist || undefined });
+
+      if (!titlesToProcess.includes(quotedTrack)) {
+        titlesToProcess.unshift(quotedTrack);
+      }
+    }
+  }
+
+  queries.push(...topVariants);
 
   // Trích xuất các tên bài hát trong ngoặc không phải metadata kỹ thuật (ví dụ: (THẰNG ĐIÊN))
   const parenTitles = extractParentheticalTitles(rawTitle);
@@ -1090,16 +1133,27 @@ function decodeHtmlEntities(str) {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-function buildCaptionFormatUrl(rawUrl, fmt = 'json3') {
+function buildCaptionFormatUrl(rawUrl, fmt = 'json3', stripExp = false) {
   if (!rawUrl) return '';
   try {
     const u = new URL(rawUrl);
-    u.searchParams.delete('exp'); // Loại bỏ cờ thử nghiệm exp=xpe gây ra phản hồi 0 byte rỗng từ YouTube
+    const sparams = (u.searchParams.get('sparams') || '').split(',').map(s => s.trim().toLowerCase());
+    const isExpInSparams = sparams.includes('exp');
+
+    // Chỉ xóa 'exp' nếu được yêu cầu tường minh (stripExp === true) hoặc 'exp' không nằm trong sparams
+    // Nếu 'exp' nằm trong sparams thì giữ nguyên để bảo toàn chữ ký HMAC signature của YouTube
+    if (stripExp || !isExpInSparams) {
+      u.searchParams.delete('exp');
+    }
     u.searchParams.set('fmt', fmt);
     return u.toString();
   } catch (e) {
-    const clean = rawUrl
-      .replace(/([?&])exp=[^&]+/g, '$1')
+    const hasExpInSparams = /[?&]sparams=[^&]*\bexp\b/i.test(rawUrl);
+    let clean = rawUrl;
+    if (stripExp || !hasExpInSparams) {
+      clean = clean.replace(/([?&])exp=[^&]+/g, '$1');
+    }
+    clean = clean
       .replace(/([?&])fmt=[^&]+/g, '$1')
       .replace(/[?&]&+/g, '?')
       .replace(/\?$/, '');
@@ -1115,30 +1169,58 @@ async function downloadAndParseCaptionEvents(subTarget) {
   const rawUrl = subTarget.rawUrl || subTarget.url;
   const json3Url = buildCaptionFormatUrl(rawUrl, 'json3');
 
-  // Thử trực tiếp URL định dạng JSON3 (ưu tiên subTarget.url nếu đã có fmt=json3 chuẩn từ yt-dlp)
+  // Gửi headers chuẩn trình duyệt kèm Cookie để vượt qua kiểm tra của YouTube
+  const browserHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Origin': 'https://www.youtube.com',
+    'Referer': 'https://www.youtube.com/',
+    'Cookie': getYouTubeCookieHeader()
+  };
+
+  // Helper tải phụ đề: Thử URL giữ nguyên exp trước; chỉ fallback thử bản xóa exp khi phản hồi rỗng (0-byte)
+  const fetchCaptionTextWithExpFallback = async (targetUrl, fmt = 'json3') => {
+    try {
+      let res = await fetch(targetUrl, {
+        headers: browserHeaders,
+        signal: AbortSignal.timeout(3500)
+      });
+      let text = res.ok ? await res.text() : '';
+
+      // Nếu phản hồi rỗng (0-byte), thử fallback sang bản URL đã xóa exp
+      if (res.ok && (!text || text.trim().length === 0)) {
+        const strippedUrl = buildCaptionFormatUrl(targetUrl, fmt, true);
+        if (strippedUrl && strippedUrl !== targetUrl) {
+          const fallbackRes = await fetch(strippedUrl, {
+            headers: browserHeaders,
+            signal: AbortSignal.timeout(3500)
+          });
+          if (fallbackRes.ok) {
+            text = await fallbackRes.text();
+          }
+        }
+      }
+      return text;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // 1. Thử trực tiếp URL định dạng JSON3 (ưu tiên subTarget.url nếu đã có fmt=json3 chuẩn từ yt-dlp)
   const candidateUrls = [
     subTarget.url,
     json3Url
   ].filter((u, idx, arr) => u && arr.indexOf(u) === idx);
 
   for (const targetUrl of candidateUrls) {
-    try {
-      const res = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(3500)
-      });
-      if (res.ok) {
-        const text = await res.text();
-        if (text && text.trim().startsWith('{')) {
-          const data = JSON.parse(text);
-          if (Array.isArray(data.events) && data.events.length > 0) {
-            return data.events;
-          }
+    const text = await fetchCaptionTextWithExpFallback(targetUrl, 'json3');
+    if (text && text.trim().startsWith('{')) {
+      try {
+        const data = JSON.parse(text);
+        if (Array.isArray(data.events) && data.events.length > 0) {
+          return data.events;
         }
-      }
-    } catch (e) {}
+      } catch (parseErr) {}
+    }
   }
 
   // 2. Fallback sang định dạng XML (fmt=srv3 hoặc raw) (<text start="12.34" dur="3.2"> hoặc <p t="12340" d="3200">)
@@ -1148,23 +1230,32 @@ async function downloadAndParseCaptionEvents(subTarget) {
   ];
 
   for (const xmlUrl of xmlFallbackUrls) {
-    try {
-      const res = await fetch(xmlUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(3000)
-      });
-      if (res.ok) {
-        const xml = await res.text();
-        const events = [];
+    const xml = await fetchCaptionTextWithExpFallback(xmlUrl, 'srv3');
+    if (xml) {
+      const events = [];
 
-        // Định dạng 1: <text start="12.34" dur="3.21">...</text>
-        const textRegex = /<text\s+[^>]*start="([\d.]+)"[^>]*?(?:dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
-        let m;
-        while ((m = textRegex.exec(xml)) !== null) {
-          const startMs = Math.round(parseFloat(m[1]) * 1000);
-          const durMs = m[2] ? Math.round(parseFloat(m[2]) * 1000) : 3000;
+      // Định dạng 1: <text start="12.34" dur="3.21">...</text>
+      const textRegex = /<text\s+[^>]*start="([\d.]+)"[^>]*?(?:dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
+      let m;
+      while ((m = textRegex.exec(xml)) !== null) {
+        const startMs = Math.round(parseFloat(m[1]) * 1000);
+        const durMs = m[2] ? Math.round(parseFloat(m[2]) * 1000) : 3000;
+        const content = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, '')).trim();
+        if (content) {
+          events.push({
+            tStartMs: startMs,
+            dDurationMs: durMs,
+            segs: [{ utf8: content, tOffsetMs: 0 }]
+          });
+        }
+      }
+
+      // Định dạng 2: <p t="12340" d="3210">...</p>
+      if (events.length === 0) {
+        const pRegex = /<p\s+[^>]*t="(\d+)"[^>]*?(?:d="(\d+)")?[^>]*>([\s\S]*?)<\/p>/gi;
+        while ((m = pRegex.exec(xml)) !== null) {
+          const startMs = parseInt(m[1], 10);
+          const durMs = m[2] ? parseInt(m[2], 10) : 3000;
           const content = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, '')).trim();
           if (content) {
             events.push({
@@ -1174,29 +1265,12 @@ async function downloadAndParseCaptionEvents(subTarget) {
             });
           }
         }
-
-        // Định dạng 2: <p t="12340" d="3210">...</p>
-        if (events.length === 0) {
-          const pRegex = /<p\s+[^>]*t="(\d+)"[^>]*?(?:d="(\d+)")?[^>]*>([\s\S]*?)<\/p>/gi;
-          while ((m = pRegex.exec(xml)) !== null) {
-            const startMs = parseInt(m[1], 10);
-            const durMs = m[2] ? parseInt(m[2], 10) : 3000;
-            const content = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, '')).trim();
-            if (content) {
-              events.push({
-                tStartMs: startMs,
-                dDurationMs: durMs,
-                segs: [{ utf8: content, tOffsetMs: 0 }]
-              });
-            }
-          }
-        }
-
-        if (events.length > 0) {
-          return events;
-        }
       }
-    } catch (e) {}
+
+      if (events.length > 0) {
+        return events;
+      }
+    }
   }
 
   return [];
@@ -1379,7 +1453,7 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
 
   try {
     const { isCpuOverloaded } = require('./systemMonitor');
-    if (typeof isCpuOverloaded === 'function' && isCpuOverloaded(0.7)) {
+    if (typeof isCpuOverloaded === 'function' && isCpuOverloaded(1.35)) {
       return null;
     }
   } catch (e) {}
@@ -1396,7 +1470,7 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
       };
       const info = await Promise.race([
         ytdlp(url, infoOpts),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle dump timeout')), 7000))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle dump timeout')), 14000))
       ]).catch(() => null);
 
       if (!info) return null;

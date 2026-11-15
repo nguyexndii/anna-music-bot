@@ -1,3 +1,4 @@
+const os = require('os');
 const {
   joinVoiceChannel,
   createAudioPlayer,
@@ -82,7 +83,7 @@ class MusicQueue {
     this.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play,
-        maxMissedFrames: 200
+        maxMissedFrames: 15
       }
     });
 
@@ -320,6 +321,10 @@ class MusicQueue {
   }
 
   async _triggerNextTrackPreload() {
+    return this._prefetchNextTrack();
+  }
+
+  async _prefetchNextTrack() {
     if (this._isPreloading || this.preloadedResource || this.isDestroyed || this.isStopped) return;
     if (!hasEnoughMemoryToPreload()) {
       console.log('[MusicQueue Preload] RAM > 85%, hủy preload ngầm để tiết kiệm tài nguyên');
@@ -371,6 +376,28 @@ class MusicQueue {
           }
         }
       } catch (sbErr) {}
+    }
+
+    // Cơ chế Single-Core Safe Preload:
+    // Trên VPS 1 core (os.cpus().length <= 1), chỉ thực hiện preload audio resource nếu bài tiếp theo đã có trong SSD Cache.
+    // Nếu chưa có trong cache SSD, không spawn yt-dlp/deno khi bài hiện tại đang phát;
+    // chỉ resolve metadata/URL nhẹ và chờ bài hiện tại kết thúc mới bắt đầu stream bài mới.
+    const isSingleCore = Array.isArray(os.cpus()) && os.cpus().length <= 1;
+    if (isSingleCore && !cachedEntry) {
+      console.log(`[Single-Core Safe Preload] 1 vCPU phát hiện: "${nextTrack.title}" chưa có trong SSD Cache, bỏ qua audio preload ngầm để chống giật lag.`);
+      const isSpotify = typeof nextTrack.url === 'string' && nextTrack.url.includes('spotify.com');
+      if (!nextTrack.url || isSpotify || (!nextTrack.url.startsWith('http') && nextTrack.searchQuery)) {
+        try {
+          const searchTarget = nextTrack.searchQuery || nextTrack.title;
+          const searchRes = await searchTrack(searchTarget);
+          if (searchRes && searchRes.length > 0 && searchRes[0].url) {
+            nextTrack.url = searchRes[0].url;
+            if (searchRes[0].duration && !nextTrack.duration) nextTrack.duration = searchRes[0].duration;
+            if (searchRes[0].thumbnail && !nextTrack.thumbnail) nextTrack.thumbnail = searchRes[0].thumbnail;
+          }
+        } catch (e) {}
+      }
+      return;
     }
 
     this._isPreloading = true;
@@ -1589,7 +1616,7 @@ class MusicQueue {
     if (!nextTrack) return;
 
     // 2. Kích hoạt Preload luồng âm thanh Audio Stream vào RAM (preloadedResource)
-    await this._triggerNextTrackPreload();
+    await this._prefetchNextTrack();
 
     // 3. Tải trước Lời bài hát vào RAM Cache (Lyrics Pre-fetch)
     try {
@@ -3159,6 +3186,14 @@ class MusicQueue {
       for (let i = 0; i < missing.length; i += batchSize) {
         const chunk = missing.slice(i, i + batchSize);
         await Promise.allSettled(chunk.map(async item => {
+          if (!item.thumbnail && item.url) {
+            const ytM = item.url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+            if (ytM && ytM[1]) {
+              item.thumbnail = `https://i.ytimg.com/vi/${ytM[1]}/hqdefault.jpg`;
+              changed = true;
+              return;
+            }
+          }
           if (item.uri && item.uri.startsWith('spotify:track:')) {
             const trackId = item.uri.replace('spotify:track:', '').split('?')[0];
             try {
