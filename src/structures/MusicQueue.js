@@ -1745,6 +1745,14 @@ class MusicQueue {
         resource = await createResource(this.currentSong, 0, initialSeekSeconds, { priority: 'high' });
       }
 
+      // Xử lý Race Condition: Nếu trong lúc nạp Lofi 24/7 người dùng vừa order bài mới
+      if (this._isPreemptingLofi && (this.currentSong?.is247 || this.currentSong?.requestedBy === 'Auto (24/7)') && this.songs.length > 0) {
+        this._cleanupResource(resource);
+        this._isPreemptingLofi = false;
+        this._isPlayingNext = false;
+        return await this.playNext();
+      }
+
       if (this.currentResource && this.currentResource !== resource) {
         this._cleanupResource(this.currentResource);
       }

@@ -7,8 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Anna Music - Lyrics Fallback Service", version="1.0.0")
 
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
 # Chỉ mở CORS nội bộ cho Node.js server trên cùng VPS
 app.add_middleware(
     CORSMiddleware,
@@ -133,8 +131,7 @@ def get_lyrics(
     search_query = f"{clean_title} {clean_artist}".strip()
 
     try:
-        future = _executor.submit(_cached_search_lyrics, search_query)
-        lrc_content = future.result(timeout=6.0)
+        lrc_content = _cached_search_lyrics(search_query)
         if not lrc_content:
             return {
                 "success": False,

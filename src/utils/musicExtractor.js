@@ -674,15 +674,17 @@ async function searchTrack(query, targetDurationSec = 0) {
   try {
     if (!query || typeof query !== 'string') return null;
 
-    let cleanQuery = query.trim();
+    let cleanQuery = query.trim().slice(0, 150).trim();
     // Chống Argument Injection: chặn chuỗi bắt đầu bằng dấu trừ
     if (cleanQuery.startsWith('-')) return null;
 
-    // Giới hạn độ dài từ khóa tìm kiếm tối đa 150 ký tự
-    cleanQuery = cleanQuery.slice(0, 150).trim();
+    // Tự động chuẩn hóa link Spotify nếu thiếu protocol trước khi kiểm tra an toàn URL
+    if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !/^https?:\/\//i.test(cleanQuery)) {
+      cleanQuery = 'https://' + cleanQuery;
+    }
 
     // Kiểm tra an toàn bảo mật SSRF cho đường dẫn URL ngoại vi
-    if (cleanQuery.startsWith('http://') || cleanQuery.startsWith('https://')) {
+    if (/^https?:\/\//i.test(cleanQuery)) {
       const sanitizedUrl = validateAndSanitizeMusicUrl(cleanQuery);
       if (!sanitizedUrl) {
         console.warn(`[Security Alert: SSRF / Invalid Hostname Blocked] URL không an toàn bị từ chối: ${cleanQuery}`);
@@ -691,10 +693,8 @@ async function searchTrack(query, targetDurationSec = 0) {
       cleanQuery = sanitizedUrl;
     }
 
-    // Tự động chuẩn hóa link Spotify nếu thiếu protocol
-    if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !cleanQuery.startsWith('http://') && !cleanQuery.startsWith('https://')) {
-      cleanQuery = 'https://' + cleanQuery;
-    }
+    // Đồng bộ biến query cho tất cả các nhánh xử lý bên dưới
+    query = cleanQuery;
 
     // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 100 bài)
     if (cleanQuery.includes('spotify.com/playlist/') || cleanQuery.includes('spotify.com/album/')) {
@@ -1734,10 +1734,8 @@ function cleanupAllProcesses() {
   }
 }
 
-// Tự động dọn dẹp tiến trình con khi Node.js process thoát
+// Tự động dọn dẹp tiến trình con khi Node.js process thoát (Ủy quyền SIGINT/SIGTERM cho index.js gracefulShutdown)
 process.on('exit', cleanupAllProcesses);
-process.on('SIGINT', () => { cleanupAllProcesses(); process.exit(); });
-process.on('SIGTERM', () => { cleanupAllProcesses(); process.exit(); });
 
 /**
  * Phát trực tiếp từ stream URL đã được lưu trong bộ nhớ đệm mà không cần gọi yt-dlp
@@ -2540,6 +2538,7 @@ async function searchMultipleTracks(query, limit = 20, mode = 'official', locale
 }
 
 module.exports = {
+  cleanupAllProcesses,
   validateAndSanitizeMusicUrl,
   searchTrack,
   searchMultipleTracks,

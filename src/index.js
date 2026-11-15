@@ -623,7 +623,7 @@ client.on('interactionCreate', async (interaction) => {
 
   // -1. Xử lý Autocomplete cho Slash Commands (Gợi ý bài hát siêu tốc độ qua Worker Thread)
   if (interaction.isAutocomplete()) {
-    if (interaction.commandName === 'play') {
+    if (interaction.commandName === 'play' || interaction.commandName === 'p') {
       const focusedOption = interaction.options.getFocused(true);
       if (focusedOption.name === 'song') {
         const query = focusedOption.value?.trim();
@@ -1991,6 +1991,10 @@ async function gracefulShutdown(signal) {
   try {
     const { notifyBotShutdown } = require('./utils/statusNotifier');
     await notifyBotShutdown(client, null, signal);
+  } catch (e) {}
+  try {
+    const { cleanupAllProcesses } = require('./utils/musicExtractor');
+    cleanupAllProcesses();
   } catch (e) {}
   process.exit(0);
 }

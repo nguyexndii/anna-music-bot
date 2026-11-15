@@ -50,13 +50,13 @@ module.exports = function createApiRouter(client) {
     next();
   });
 
-  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy cf-connecting-ip khi request đến từ IP Loopback nội bộ do Cloudflare Tunnel chuyển tiếp)
+  // Helper bảo mật: Lấy IP client thực tế (chỉ tin cậy proxy headers khi request đến từ IP Loopback nội bộ do Cloudflare Tunnel chuyển tiếp)
   function getClientIp(req) {
     const remote = (req.socket?.remoteAddress || '').replace(/^.*:/, '');
     const isLocal = remote === '127.0.0.1' || remote === 'localhost' || remote === '1';
 
-    if (isLocal && req.headers['cf-connecting-ip']) {
-      return String(req.headers['cf-connecting-ip']).trim();
+    if (isLocal) {
+      return String(req.headers['x-real-client-ip'] || req.headers['cf-connecting-ip'] || req.ip || 'unknown-ip').split(',')[0].trim();
     }
     return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
   }
@@ -2090,6 +2090,12 @@ module.exports = function createApiRouter(client) {
         }
       }
 
+      // Nếu queue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
+      if (queue && queue.currentSong === currentTrack && queue.hasSyncedLyrics && Array.isArray(queue.cachedSyncedLyrics)) {
+        activeSyncedLyrics = queue.cachedSyncedLyrics;
+        activeAutoOffsetMs = (queue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
+      }
+
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
       return res.json({
         success: hasLyrics,
@@ -2172,6 +2178,12 @@ module.exports = function createApiRouter(client) {
               time_ms: Math.max(0, line.time_ms)
             }));
         }
+      }
+
+      // Nếu queue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
+      if (queue && queue.currentSong === currentTrack && queue.hasSyncedLyrics && Array.isArray(queue.cachedSyncedLyrics)) {
+        activeSyncedLyrics = queue.cachedSyncedLyrics;
+        activeAutoOffsetMs = (queue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
       }
 
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);

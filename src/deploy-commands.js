@@ -17,6 +17,7 @@ const SLASH_SHORTCUTS = [
           .setDescription('Song title, artist name, or URL')
           .setDescriptionLocalizations({ vi: 'Tên bài hát, ca sĩ hoặc link YouTube/Spotify' })
           .setRequired(true)
+          .setAutocomplete(true)
       )
   },
   {
