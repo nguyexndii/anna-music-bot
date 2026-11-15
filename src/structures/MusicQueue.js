@@ -14,6 +14,7 @@ const {
   searchTrack,
   searchMultipleTracks,
   analyzeTrackOriginAndMeta,
+  resolveTrackOriginAndMetaAsync,
   isCandidateMatchingRegion,
   buildAutoplayFallbackQueries
 } = require('../utils/musicExtractor');
@@ -894,7 +895,7 @@ class MusicQueue {
       // A. Nếu bài vừa phát là bài do User order hoặc Autoplay gợi ý -> Tiếp tục dùng Autoplay gợi ý bài tương tự!
       if (guildSettings.autoplay !== false && songToRelate && !wasLofiTrack) {
         const useAi = guildSettings.useAiAssistant !== false;
-        const seedMeta = analyzeTrackOriginAndMeta(songToRelate);
+        const seedMeta = await resolveTrackOriginAndMetaAsync(songToRelate);
         const targetRegion = seedMeta.region;
 
         let relatedTrack = null;
@@ -917,7 +918,7 @@ class MusicQueue {
         // Fallback tự động nếu không tìm được: Tìm bài cùng thể loại / cùng vùng theo seedMeta bằng searchMultipleTracks (10 ứng viên)
         if (!relatedTrack && songToRelate) {
           try {
-            const fallbackQueries = buildAutoplayFallbackQueries(songToRelate, targetRegion);
+            const fallbackQueries = await buildAutoplayFallbackQueries(songToRelate, targetRegion, seedMeta);
             const fallbackLocale = targetRegion === 'INTL' ? 'en' : (targetRegion === 'VI' ? 'vi' : 'en');
 
             for (const fallbackQuery of fallbackQueries) {

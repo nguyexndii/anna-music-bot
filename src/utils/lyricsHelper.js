@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const fetch = globalThis.fetch || require('node-fetch');
+const { resolveAppleMusicMetadata } = require('./appleMusicHelper');
 
 // Hệ thống Event Bus thông báo Lời bài hát về muộn (Hot-Attach Pub/Sub)
 const lyricsEvents = new EventEmitter();
@@ -273,10 +274,25 @@ function stripFeatFromTrack(str) {
             .trim();
 }
 
-function generateSearchVariants(rawTitle, rawArtist = '') {
+function generateSearchVariants(rawTitle, rawArtist = '', appleMeta = null) {
   if (!rawTitle) return [];
 
   const queries = [];
+
+  // 0. Ưu tiên số 1: Tên bài và ca sĩ chuẩn có dấu từ Apple Music Metadata
+  if (appleMeta && appleMeta.canonicalTitle) {
+    const cTrack = appleMeta.canonicalTitle.trim();
+    const cArtist = (appleMeta.canonicalArtist || '').trim();
+    if (cTrack) {
+      if (cArtist) {
+        queries.push({ track: cTrack, artist: cArtist, expectedTrack: cTrack, expectedArtist: cArtist });
+        queries.push({ q: `${cTrack} ${cArtist}`, expectedTrack: cTrack, expectedArtist: cArtist });
+      } else {
+        queries.push({ track: cTrack, q: cTrack, expectedTrack: cTrack });
+      }
+    }
+  }
+
   const primaryClean = cleanTitle(rawTitle);
   const deepClean = stripParentheses(primaryClean);
   let cleanArt = cleanArtistName(rawArtist);
@@ -1627,7 +1643,7 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
 /**
  * TẦNG 1: Trích xuất phụ đề CC chính thức từ YouTube Video (Duyệt qua mọi candidate track để không bỏ sót)
  */
-async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey = null, userSavedOffsetMs = 0) {
+async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
   if (!isSafeYouTubeUrl(url)) return null;
   const videoId = extractVideoId(url);
 
@@ -1658,7 +1674,7 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       uploader: info?.uploader || info?.channel || ''
     };
 
-    const isVN = isVietnameseTrack(context);
+    const isVN = appleMeta ? (appleMeta.region === 'VI') : isVietnameseTrack(context);
     const fullContextStr = `${rawTitle || ''} ${context.videoTitle || ''} ${artist || ''} ${context.uploader || ''}`;
     const isKR = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(fullContextStr);
     const isJP = /[\u3040-\u309F\u30A0-\u30FF]/.test(fullContextStr);
@@ -2014,14 +2030,14 @@ function findBestZingSong(songs, targetTitle, targetArtist, expectedArtists = []
   return songs[0];
 }
 
-async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, trackKey = null, userSavedOffsetMs = 0) {
+async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
   try {
     const cleanT = cleanTitle(rawTitle);
     const cleanA = cleanArtistName(artist);
-    if (!cleanT) return null;
+    if (!cleanT && !appleMeta?.canonicalTitle) return null;
 
-    // Tận dụng toàn bộ các biến thể tìm kiếm thông minh từ generateSearchVariants
-    const variants = generateSearchVariants(rawTitle, artist);
+    // Tận dụng toàn bộ các biến thể tìm kiếm thông minh từ generateSearchVariants (kèm Apple Music)
+    const variants = generateSearchVariants(rawTitle, artist, appleMeta);
     const titleVariants = [];
     const queries = [];
     const expectedArtists = [];
@@ -2188,8 +2204,8 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
   }
 }
 
-async function fetchLrclibLyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, cacheKey = null, trackKey = null, userSavedOffsetMs = 0) {
-  const variants = generateSearchVariants(rawTitle, artist).slice(0, 6);
+async function fetchLrclibLyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, cacheKey = null, trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
+  const variants = generateSearchVariants(rawTitle, artist, appleMeta).slice(0, 6);
   let plainFallback = null;
   let fallbackRecord = null;
 
@@ -2459,12 +2475,15 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   let fallbackRecord = null;
   let fallbackResult = null;
 
+  // Tra cứu metadata chuẩn từ Apple Music (chạy 1 lần, có RAM Cache 24h & deduplication)
+  const appleMeta = await resolveAppleMusicMetadata(rawTitle, artist).catch(() => null);
+
   // ── ƯU TIÊN CHẤT LƯỢNG TUYỆT ĐỐI: ĐỢI YOUTUBE CC SUBTITLES TRƯỚC ──
   // Đối với video YouTube, luôn ưu tiên lấy phụ đề chính thức của video gốc để giữ nguyên ngôn ngữ gốc (Hangul/K-Pop/J-Pop),
   // chỉ khi video không có phụ đề CC mới fallback sang Zing MP3 / LRCLIB / khác.
   if (activeLayers.includes('youtube_cc') && isYouTube && normalizedUrl) {
     try {
-      const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
+      const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs, appleMeta);
       if (ytSubResult?.syncedLyrics && ytSubResult.syncedLyrics.length >= 3) {
         setCachedLyrics(cacheKey, ytSubResult);
         lyricsEvents.emit('lyricsFound', {
@@ -2521,7 +2540,7 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   if (activeLayers.includes('zingmp3')) {
     racePromises.push((async () => {
       try {
-        const zingResult = await fetchZingMp3Lyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, trackKey, userSavedOffsetMs);
+        const zingResult = await fetchZingMp3Lyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, trackKey, userSavedOffsetMs, appleMeta);
         if (zingResult?.syncedLyrics) {
           recordCandidate('zingmp3', zingResult);
         } else if (zingResult?.lyrics && !plainFallback) {
@@ -2535,7 +2554,7 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   if (activeLayers.includes('lrclib')) {
     racePromises.push((async () => {
       try {
-        const lrclibRes = await fetchLrclibLyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, cacheKey, trackKey, userSavedOffsetMs);
+        const lrclibRes = await fetchLrclibLyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, cacheKey, trackKey, userSavedOffsetMs, appleMeta);
         if (lrclibRes?.exactSynced?.syncedLyrics) {
           recordCandidate('lrclib', lrclibRes.exactSynced);
         }
@@ -2774,6 +2793,7 @@ function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null,
 
 module.exports = {
   lyricsEvents,
+  generateSearchVariants,
   cleanSearchVariants: generateSearchVariants,
   generateVietnameseNumberVariants,
   fetchZingMp3Lyrics,

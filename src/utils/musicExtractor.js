@@ -1137,6 +1137,11 @@ async function searchTrack(query, targetDurationSec = 0) {
 
 const historyManager = require('../structures/HistoryManager');
 const settingsManager = require('../structures/SettingsManager');
+const {
+  resolveAppleMusicMetadata,
+  getAppleArtistTopTracks,
+  appleMetaCache
+} = require('./appleMusicHelper');
 
 /**
  * Kiểm tra xem một bài hát có nằm trong lịch sử phát gần nhất không (Hỗ trợ cả Video ID, URL và Tiêu đề)
@@ -1365,6 +1370,31 @@ function analyzeTrackOriginAndMeta(song) {
   const rawTitle = typeof song === 'object' ? (song.title || song.searchQuery || '') : String(song || '');
   const rawArtist = typeof song === 'object' ? (song.artist || song.uploader || '') : '';
 
+  const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
+  const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
+  const isCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(rawTitle);
+
+  // 0. Kiểm tra RAM Cache của Apple Music (0ms CPU, không tốn network)
+  const cacheKey = `${rawTitle.trim().toLowerCase()}|||${String(rawArtist || '').trim().toLowerCase()}`;
+  const cachedApple = appleMetaCache?.get(cacheKey)?.data;
+  if (cachedApple) {
+    return {
+      realTitle: cachedApple.canonicalTitle || rawTitle,
+      realArtist: cachedApple.canonicalArtist || rawArtist || 'YouTube',
+      cleanTrackTitle: cachedApple.canonicalTitle || rawTitle,
+      cleanArtist: cachedApple.canonicalArtist || rawArtist,
+      region: cachedApple.region || 'VI',
+      appleArtistId: cachedApple.appleArtistId || null,
+      primaryGenre: cachedApple.primaryGenre || null,
+      appleMeta: cachedApple,
+      isRemix,
+      isAcoustic,
+      isCover,
+      rawTitle,
+      rawArtist
+    };
+  }
+
   const isReupChannel = /(7clouds|syrebralvibes|taj tracks|unique vibes|lofi girl|cassiopeia|tiktok music|vibes only|superblyrics|chill tracks|sensual musique|dynmk|chillwithtaiki)/i.test(rawArtist);
   const isLyricTitle = /\((?:lyrics?|lyric video|vietsub)\)|\[(?:lyrics?|lyric video|vietsub)\]/i.test(rawTitle);
 
@@ -1386,10 +1416,6 @@ function analyzeTrackOriginAndMeta(song) {
 
   const region = detectTrackRegion(realTitle, realArtist);
 
-  const isRemix = /\b(remix|vinahouse|vinahey|dance|edm|quẩy|nonstop|dj\b|mashup)\b/i.test(rawTitle);
-  const isAcoustic = /\b(acoustic|chill|lofi|ballad|buồn|guitar|piano)\b/i.test(rawTitle);
-  const isCover = /\b(cover|hát lại|hat lai|covered\s*by)\b/i.test(rawTitle);
-
   return {
     realTitle: realTitle || rawTitle,
     realArtist: realArtist || rawArtist || 'YouTube',
@@ -1402,6 +1428,32 @@ function analyzeTrackOriginAndMeta(song) {
     rawTitle,
     rawArtist
   };
+}
+
+/**
+ * Phân tích metadata bài hát nâng cao bất đồng bộ: Tra cứu Apple Music để lấy Canonical Data
+ */
+async function resolveTrackOriginAndMetaAsync(song) {
+  const syncMeta = analyzeTrackOriginAndMeta(song);
+  if (syncMeta.appleMeta) return syncMeta;
+
+  try {
+    const appleMeta = await resolveAppleMusicMetadata(syncMeta.rawTitle, syncMeta.rawArtist);
+    if (appleMeta) {
+      return {
+        ...syncMeta,
+        realTitle: appleMeta.canonicalTitle || syncMeta.realTitle,
+        realArtist: appleMeta.canonicalArtist || syncMeta.realArtist,
+        cleanTrackTitle: appleMeta.canonicalTitle || syncMeta.cleanTrackTitle,
+        cleanArtist: appleMeta.canonicalArtist || syncMeta.cleanArtist,
+        region: appleMeta.region || syncMeta.region,
+        appleArtistId: appleMeta.appleArtistId || null,
+        primaryGenre: appleMeta.primaryGenre || null,
+        appleMeta
+      };
+    }
+  } catch (err) {}
+  return syncMeta;
 }
 
 /**
@@ -1499,14 +1551,30 @@ function isCandidateMatchingRegion(candidate, targetRegion = 'VI', seedMeta = nu
 
 /**
  * 5. Xây dựng danh sách từ khóa Fallback thông minh cho Autoplay
- *    TUYỆT ĐỐI KHÔNG tìm lại chính tên bài hát vừa phát (để tránh YouTube trả về bản dịch tiếng Trung như "Thuy Trieu" -> "潮汐")!
+ *    Tận dụng Apple Artist Top Tracks (nếu có) và TUYỆT ĐỐI KHÔNG tìm lại chính tên bài hát vừa phát!
  */
-function buildAutoplayFallbackQueries(lastSong, targetRegion = 'VI') {
-  const rawTitle = typeof lastSong === 'object' ? (lastSong.title || '') : String(lastSong || '');
-  const rawArtist = typeof lastSong === 'object' ? (lastSong.artist || lastSong.author || '') : '';
-  const { cleanArtist } = extractCleanArtistAndTitle(rawTitle, rawArtist);
-  const isRemix = /\b(remix|vinahouse|vinahey|nonstop|club\s*mix|bootleg)\b/i.test(rawTitle);
+async function buildAutoplayFallbackQueries(lastSong, targetRegion = 'VI', seedMeta = null) {
+  const meta = seedMeta || (await resolveTrackOriginAndMetaAsync(lastSong));
+  const rawTitle = meta.rawTitle || '';
+  const cleanArtist = meta.cleanArtist || '';
+  const isRemix = meta.isRemix || false;
   const queries = [];
+
+  // Ưu tiên 1: Nếu có appleArtistId từ Apple Music, lấy các bài hát chính thức khác của ca sĩ đó
+  if (meta.appleArtistId) {
+    try {
+      const topTracks = await getAppleArtistTopTracks(meta.appleArtistId, 10);
+      if (Array.isArray(topTracks) && topTracks.length > 0) {
+        const normCurrentTitle = normalizeSearchText(meta.realTitle);
+        for (const track of topTracks) {
+          if (normalizeSearchText(track.title) !== normCurrentTitle) {
+            queries.push(isRemix ? `${track.title} ${track.artist} remix` : `${track.title} ${track.artist} official audio`);
+            if (queries.length >= 2) break;
+          }
+        }
+      }
+    } catch (e) {}
+  }
 
   if (targetRegion === 'VI') {
     if (cleanArtist && cleanArtist.length >= 2) {
@@ -1554,7 +1622,7 @@ async function getYoutubeMix(lastSong, guildId = null, playedList = [], targetRe
     const videoId = match[1];
     const mixUrl = `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`;
 
-    const seedMeta = analyzeTrackOriginAndMeta(lastSong);
+    const seedMeta = await resolveTrackOriginAndMetaAsync(lastSong);
     const region = targetRegion || seedMeta.region;
     const isIntl = region === 'INTL';
 
@@ -1657,7 +1725,7 @@ async function getLastfmSimilar(lastSong, guildId = null, playedList = [], targe
   if (!apiKey || !lastSong || !lastSong.title) return null;
 
   try {
-    const seedMeta = analyzeTrackOriginAndMeta(lastSong);
+    const seedMeta = await resolveTrackOriginAndMetaAsync(lastSong);
     const region = targetRegion || seedMeta.region;
     const artist = seedMeta.realArtist;
     const songName = seedMeta.realTitle;
@@ -1720,11 +1788,11 @@ async function getHeuristicRelatedTrack(lastSong, guildId = null, playedList = [
   if (!lastSong || !lastSong.title) return null;
 
   try {
-    const seedMeta = analyzeTrackOriginAndMeta(lastSong);
+    const seedMeta = await resolveTrackOriginAndMetaAsync(lastSong);
     const region = targetRegion || seedMeta.region;
 
     // Sinh các query fallback chuẩn theo ca sĩ hoặc phong cách, KHÔNG LẶP TÊN BÀI HÁT
-    const fallbackQueries = buildAutoplayFallbackQueries(lastSong, region);
+    const fallbackQueries = await buildAutoplayFallbackQueries(lastSong, region, seedMeta);
     const searchLocale = region === 'INTL' ? 'en' : (region === 'VI' ? 'vi' : 'en');
 
     for (const query of fallbackQueries) {
@@ -1775,7 +1843,7 @@ async function getRelatedTracksPool(lastSong, guildIdOrHistory = [], useAi = fal
   const guildId = typeof guildIdOrHistory === 'string' ? guildIdOrHistory : null;
   const playedList = Array.isArray(guildIdOrHistory) ? guildIdOrHistory : (guildId ? historyManager.getHistory(guildId) : []);
 
-  const seedMeta = analyzeTrackOriginAndMeta(lastSong);
+  const seedMeta = await resolveTrackOriginAndMetaAsync(lastSong);
   const region = targetRegion || seedMeta.region;
 
   const guildSettings = guildId ? settingsManager.get(guildId) : null;
@@ -2695,6 +2763,7 @@ module.exports = {
   getRelatedTracksPool,
   createResource,
   analyzeTrackOriginAndMeta,
+  resolveTrackOriginAndMetaAsync,
   extractCleanArtistAndTitle,
   buildAutoplayFallbackQueries,
   detectTrackRegion,
