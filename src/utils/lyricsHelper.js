@@ -182,6 +182,15 @@ const VN_NUMBER_WORDS = {
 function generateVietnameseNumberVariants(text) {
   if (!text || typeof text !== 'string') return [text];
   const variants = [text];
+
+  // KHÔNG chuyển số thành chữ nếu văn bản thuộc các chuỗi định danh đặc thù:
+  // 1. Dạng seri số như "3107", "3107 3", "3107-3"
+  // 2. Nghệ danh có số như "16 Typh", "52Hz", "24k.Right"
+  // 3. Tần số hoặc độ phân giải như "2h", "4k", "1080p"
+  if (/\b(?:3107|52\s*hz|16\s*typh|24k|4k|1080p)\b/i.test(text) || /\b\d{3,}\s*\d*\b/.test(text)) {
+    return [text];
+  }
+
   const boundaryLeft = '(^|[\\s\\-–—()\\[\\].,!?:;/])';
   const boundaryRight = '(?=$|[\\s\\-–—()\\[\\].,!?:;/])';
 
@@ -750,7 +759,7 @@ const CJK_SCRIPT_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u3040-\u309F\
 const KNOWN_INTL_ARTISTS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|valorant|arcane|pentakill|true\s*damage|heartsteel|miyeon|soyeon|g\s*i\s*dle|gidle|\(g\)i-dle|sophie\s*powers|mimi\s*webb|madison\s*beer|jaira\s*burns|seraphine|lexie\s*liu|taylor\s*swift|the\s*weeknd|alan\s*walker|ed\s*sheeran|bruno\s*mars|ariana\s*grande|billie\s*eilish|justin\s*bieber|post\s*malone|dua\s*lipa|charlie\s*puth|shawn\s*mendes|camila\s*cabello|olivia\s*rodrigo|sabrina\s*carpenter|lana\s*del\s*rey|adele|rihanna|katy\s*perry|lady\s*gaga|maroon\s*5|imagine\s*dragons|coldplay|onerepublic|chainsmokers|linkin\s*park|eminem|drake|kendrick\s*lamar|travis\s*scott|sza|doja\s*cat|nicki\s*minaj|cardi\s*b|blackpink|bts|newjeans|aespa|ive|le\s*sserafim|twice|itzy|nmixx|babymonster|illit|kiss\s*of\s*life|stray\s*kids|seventeen|txt|enhypen|exo|bigbang|g\s*dragon|taeyang|iu|taeyeon|jungkook|jimin|v\s*bts|lisa|jennie|rose|jisoo|psy|yoasobi|ado|kenshi\s*yonezu|fujii\s*kaze|radwimps|lisa\s*japan|aimer|eve\s*japan|official\s*hige\s*dandism|king\s*gnu|vaundy|imase|jay\s*chou|jj\s*lin|g\.?e\.?m\.?|eric\s*chou|mayday|vevo)\b/i;
 
 // Danh sách nghệ sĩ V-Pop / V-Rap / V-Indie (Chuẩn hóa không dấu)
-const KNOWN_VN_ARTISTS_NORM_REGEX = /\b(quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|lam\s*chan\s*khang|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|vu|vũ)\b/i;
+const KNOWN_VN_ARTISTS_NORM_REGEX = /\b(w\s*n|wn|w\s*\/\s*n|duongg|nalu|titie|3107|quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|buitruonglinh|dangrangto|52hz|rio|coldzy|16\s*typh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|lam\s*chan\s*khang|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|ca\s*si\s*vu|hoang\s*thai\s*vu)\b/i;
 
 // Từ vựng & Âm tiết đặc trưng của bài hát Tiếng Việt khi viết KHÔNG DẤU (ví dụ: "Thuy Trieu", "Tinh Minh La Ki")
 const VN_ACCENTLESS_SYLLABLES_REGEX = /^(thuy|trieu|tinh|minh|la|ki|ky|anh|em|chung|ta|cua|tuong|lai|hien|tai|qua|khu|nguoi|yeu|thuong|nho|buon|vui|khoc|cuoi|trai|tim|giac|mo|mua|nang|gio|may|troi|bien|song|co|don|lang|quen|chia|tay|gap|nhau|nuoc|mat|doi|cho|vong|tay|ngot|ngao|am|ap|lanh|lung|duong|pho|chieu|thu|dong|xuan|ha|hoang|hon|binh|minh|bong|toi|ngan|van|kiep|duyen|phan|loi|hua|cau|the|chap|nhan|buong|bo|quay|ve|ra|di|o|lai|bao|gio|con|mai|chang|khong|chua|tung|da|dang|se|vua|moi|rat|lam|nhieu|mot|hai|ba|bon|nam|sau|bay|tam|chin|muoi|tram|nghin|ngon|lua|bo|vai|doi|moi|nu|cuoi|tieng|hat|loi|ca|nhip|dieu|phut|giay|dem|khuya|som|thien|duong|tran|gian|cuoc|doi|thanh|xuan|tuoi|tre|ngay|thang|dai|kho|ngoc|nghech|dam|me|mong|uoc|hy|vong|binh|yen|nhat|nhoa|phai|tan|vo|nat|bien|mat|nguyen|tran|le|pham|hoang|huynh|phan|vu|vo|dang|bui|do|ho|ngo|duong|quang|hung|duc|tuan|hieu|khanh|linh|trang|thao|huong|phuong|ngoc|vy|nhi)$/i;
@@ -832,9 +841,16 @@ function isVietnameseTrack(contextOrTitle = {}, maybeArtist = '') {
   const normCombined = normalizeStr(rawCombined);
   const normArtist = normalizeStr(`${artist} ${uploader}`);
 
-  // 1. Nếu có chữ Hàn (Hangul), Nhật (Kana), Trung (Hanzi) và không có dấu tiếng Việt -> Nhạc ngoại
-  if (CJK_SCRIPT_REGEX.test(rawCombined) && !VIETNAMESE_REGEX.test(rawCombined)) {
-    return false;
+  // 1. Nếu có chữ Hàn (Hangul), Nhật (Kana), Trung (Hanzi):
+  // Tuyệt đối không để Pinyin có thanh điệu Latinh (như Cháo Xī, Yī Diǎn) đánh lừa thành tiếng Việt,
+  // TRỪ KHI là ca khúc Việt Nam hát lại nhạc Hoa rõ ràng hoặc có ca sĩ Việt đã biết
+  if (CJK_SCRIPT_REGEX.test(rawCombined)) {
+    const isExplicitVnCover = /lời\s*việt|nhạc\s*hoa\s*lời\s*việt|vietsub|cover\s*tiếng\s*việt/i.test(rawCombined) ||
+      KNOWN_VN_ARTISTS_NORM_REGEX.test(normCombined) ||
+      KNOWN_VN_ARTISTS_NORM_REGEX.test(normArtist);
+    if (!isExplicitVnCover) {
+      return false;
+    }
   }
 
   // 2. Nhận diện Nghệ sĩ V-Pop / V-Rap / V-Indie chuẩn hóa không dấu (Quang Hùng MasterD, Lil Z Poet...)

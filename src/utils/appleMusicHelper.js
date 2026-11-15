@@ -47,24 +47,47 @@ function cleanQueryForApple(rawTitle, rawArtist = '') {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Bóc tách nếu có dạng "Ca sĩ - Bài hát"
+  // Bóc tách nếu có dạng "Ca sĩ - Bài hát" hoặc "Bài hát - Ca sĩ"
   let cleanArtist = String(rawArtist || '').replace(/\s*-\s*Topic$/i, '').trim();
   let cleanTrack = title;
 
   if (title.includes(' - ')) {
     const parts = title.split(' - ');
     if (parts.length >= 2) {
-      cleanArtist = cleanArtist || parts[0].trim();
-      cleanTrack = parts.slice(1).join(' - ').trim();
+      const p0 = parts[0].trim();
+      const p1 = parts.slice(1).join(' - ').trim();
+      const normArt = normalizeSearchText(cleanArtist);
+      const normP0 = normalizeSearchText(p0);
+      const normP1 = normalizeSearchText(p1);
+
+      if (normArt && (normP1.includes(normArt) || normP1 === normArt)) {
+        // Tiêu đề dạng: "Tên bài hát - Ca sĩ" (ví dụ: "3107 3 - W/n ft. Duongg")
+        cleanTrack = p0;
+        cleanArtist = cleanArtist || p1;
+      } else {
+        // Tiêu đề dạng chuẩn: "Ca sĩ - Tên bài hát"
+        cleanArtist = cleanArtist || p0;
+        cleanTrack = p1;
+      }
     }
   }
+
+  // Làm sạch feat/ft./prod. để iTunes Search API không bị nhiễu
+  cleanTrack = cleanTrack.replace(/\s*[\(\[](?:feat\.?|ft\.?|prod\.?|produced\s*by|beat\s*by|cùng|với)\s*[^()\[\]]+[\)\]]/gi, ' ')
+                         .replace(/\s+(?:feat\.?|ft\.?|prod\.?|produced\s*by)\s+.+$/gi, ' ')
+                         .trim();
 
   const queryParts = [];
   if (cleanArtist && cleanArtist.toLowerCase() !== 'youtube') {
     queryParts.push(cleanArtist);
   }
   if (cleanTrack) {
-    queryParts.push(cleanTrack);
+    const normArt = normalizeSearchText(cleanArtist);
+    const normTrk = normalizeSearchText(cleanTrack);
+    // Tránh lặp lại tên nghệ sĩ nếu trackName vô tình dính tên nghệ sĩ
+    if (!normArt || normTrk !== normArt) {
+      queryParts.push(cleanTrack);
+    }
   }
 
   const finalQuery = queryParts.join(' ').replace(/\s+/g, ' ').trim();
@@ -74,6 +97,13 @@ function cleanQueryForApple(rawTitle, rawArtist = '') {
     cleanTrack
   };
 }
+
+// Từ điển nghệ sĩ phục vụ phân vùng chuẩn xác từ Apple Music
+const INTL_ARTISTS_REGEX = /\b(bruno\s*mars|olivia\s*rodrigo|beyonce|beyoncé|taylor\s*swift|the\s*weeknd|alan\s*walker|ed\s*sheeran|ariana\s*grande|billie\s*eilish|justin\s*bieber|post\s*malone|dua\s*lipa|charlie\s*puth|shawn\s*mendes|sabrina\s*carpenter|lana\s*del\s*rey|adele|rihanna|katy\s*perry|lady\s*gaga|maroon\s*5|imagine\s*dragons|coldplay|onerepublic|chainsmokers|linkin\s*park|eminem|drake|kendrick\s*lamar|travis\s*scott|sza|doja\s*cat|billy\s*joel|one\s*direction|k\/da|kda|riot\s*games|vevo)\b/i;
+const KPOP_ARTISTS_REGEX = /\b(rosé|rose|blackpink|bts|newjeans|aespa|ive|le\s*sserafim|twice|itzy|nmixx|babymonster|illit|kiss\s*of\s*life|stray\s*kids|seventeen|txt|enhypen|exo|bigbang|g\s*dragon|taeyang|iu|taeyeon|jungkook|jimin|lisa|jennie|jisoo|psy|g\s*i\s*dle|gidle|\(?g\)?-?i-dle|yg\s*entertainment|hybe|smtown|jyp)\b/i;
+const JPOP_ARTISTS_REGEX = /\b(yoasobi|ayase|ado|kenshi\s*yonezu|fujii\s*kaze|radwimps|aimer|official\s*hige\s*dandism|king\s*gnu|vaundy|imase|hikaru\s*utada|yorushika|zutomayo|creepy\s*nuts|mrs\s*green\s*apple)\b/i;
+const CPOP_ARTISTS_REGEX = /\b(jay\s*chou|jj\s*lin|g\.?e\.?m\.?|eric\s*chou|mayday|ren\s*ran|tinh\s*lung|ngai\s*than|tang\s*trieu|chau\s*tham|dong\s*lan|mong\s*nhien|dinh\s*dai\s*huong|douyin|pinyin|mandopop|cpop|c-pop)\b/i;
+const KNOWN_VN_ARTISTS_REGEX = /\b(w\s*n|wn|w\s*\/\s*n|duongg|nalu|titie|3107|quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|buitruonglinh|dangrangto|52hz|rio|coldzy|16\s*typh|nguyen\s*tran\s*trung\s*quan)\b/i;
 
 /**
  * Suy luận vùng ngôn ngữ (Region) từ metadata của Apple Music
@@ -86,24 +116,33 @@ function inferRegionFromAppleItem(item) {
   const artistName = String(item.artistName || '');
   const collectionName = String(item.collectionName || '');
   const combined = `${trackName} ${artistName} ${collectionName}`;
+  const normArtist = normalizeSearchText(artistName);
 
-  // 1. Nhận diện K-Pop / Hàn Quốc (KR) TRƯỚC
-  if (genre.includes('k-pop') || genre.includes('korean') || HANGUL_REGEX.test(combined)) {
+  const isVnArtist = KNOWN_VN_ARTISTS_REGEX.test(normArtist) || KNOWN_VN_ARTISTS_REGEX.test(artistName);
+
+  // 1. Nhận diện K-Pop / Hàn Quốc (KR) TRƯỚC (chặn ROSÉ bị dính dấu É tiếng Việt)
+  if (!isVnArtist && (genre.includes('k-pop') || genre.includes('korean') || HANGUL_REGEX.test(combined) || KPOP_ARTISTS_REGEX.test(artistName) || KPOP_ARTISTS_REGEX.test(combined))) {
     return 'KR';
   }
 
-  // 2. Nhận diện J-Pop / Anime / Nhật Bản (JP) TRƯỚC
-  if (genre.includes('j-pop') || genre.includes('anime') || genre.includes('kayokyoku') || genre.includes('japanese') || KANA_REGEX.test(combined)) {
+  // 2. Nhận diện J-Pop / Anime / Nhật Bản (JP) TRƯỚC (chặn Kanji bị nhầm sang chữ Hán)
+  if (!isVnArtist && (genre.includes('j-pop') || genre.includes('anime') || genre.includes('kayokyoku') || genre.includes('japanese') || KANA_REGEX.test(combined) || JPOP_ARTISTS_REGEX.test(artistName))) {
     return 'JP';
   }
 
   // 3. Nhận diện C-Pop / Mandopop / Trung Quốc (CN) TRƯỚC (chặn Pinyin có dấu như Cháo Xī bị nhận nhầm sang tiếng Việt)
-  if (genre.includes('mandopop') || genre.includes('c-pop') || genre.includes('cantopop') || genre.includes('chinese') || HANZI_REGEX.test(combined)) {
+  if (!isVnArtist && (genre.includes('mandopop') || genre.includes('c-pop') || genre.includes('cantopop') || genre.includes('chinese') || HANZI_REGEX.test(combined) || CPOP_ARTISTS_REGEX.test(artistName))) {
     return 'CN';
   }
 
-  // 4. Nhận diện Nhạc Việt (VI) (quét cả trackName, artistName và collectionName)
+  // 3.5. Nhận diện Âu Mỹ / Quốc tế nếu có nghệ sĩ quốc tế đã biết (Bruno Mars, Olivia Rodrigo...)
+  if (!isVnArtist && (INTL_ARTISTS_REGEX.test(artistName) || INTL_ARTISTS_REGEX.test(combined))) {
+    return 'INTL';
+  }
+
+  // 4. Nhận diện Nhạc Việt (VI) (ưu tiên nghệ sĩ Việt, genre V-Pop và dấu tiếng Việt)
   if (
+    isVnArtist ||
     genre.includes('v-pop') ||
     genre.includes('vietnamese') ||
     genre.includes('nhạc việt') ||
@@ -196,23 +235,30 @@ async function resolveAppleMusicMetadata(rawTitle, rawArtist = '') {
         }
 
         // So khớp tên ca sĩ
-        if (normArtist && (normRawArtist.includes(normArtist) || normArtist.includes(normCleanArtist))) {
-          score += 30;
-        } else if (normRawTitle.includes(normArtist)) {
+        if (normCleanArtist && normCleanArtist !== 'youtube') {
+          if (normArtist && (normRawArtist.includes(normArtist) || normArtist.includes(normCleanArtist) || normRawTitle.includes(normArtist) || normCleanArtist.includes(normArtist))) {
+            score += 35;
+          } else {
+            // Phạt nếu tên bài trùng nhưng ca sĩ hoàn toàn khác (tránh ca khúc Âu Mỹ cướp bài V-Pop trùng tên)
+            score -= 40;
+          }
+        } else if (normArtist && normRawTitle.includes(normArtist)) {
           score += 20;
         }
 
-        if (score > highestScore && score >= 30) {
+        if (score > highestScore && score >= 25) {
           highestScore = score;
           bestMatch = item;
         }
       }
 
       if (!bestMatch) {
-        // Nếu không có bài nào khớp trên 30 điểm, lấy bài đầu tiên nếu tên bài nằm trong tiêu đề
+        // Chỉ lấy item đầu tiên nếu không có cleanArtist cụ thể, hoặc nếu item đầu tiên cũng khớp ca sĩ
         const first = json.results[0];
         const normFirstTrack = normalizeSearchText(first.trackName);
-        if (normRawTitle.includes(normFirstTrack) || normFirstTrack.includes(normCleanTrack)) {
+        const normFirstArtist = normalizeSearchText(first.artistName || '');
+        const artistMatches = !normCleanArtist || normCleanArtist === 'youtube' || normFirstArtist.includes(normCleanArtist) || normCleanArtist.includes(normFirstArtist) || normRawTitle.includes(normFirstArtist);
+        if (artistMatches && (normRawTitle.includes(normFirstTrack) || normFirstTrack.includes(normCleanTrack))) {
           bestMatch = first;
         }
       }

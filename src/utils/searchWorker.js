@@ -74,8 +74,22 @@ function evaluateVariantPenalty(rawTitle, normTitle, normArtist, rawQuery, normQ
   const isQueryAskingInstrumentOrCover = INSTRUMENT_OR_COVER_NORM_REGEX.test(normQuery) || INSTRUMENT_OR_COVER_RAW_REGEX.test(rawQuery);
   const isQueryAskingOtherVariant = OTHER_VARIANT_NORM_REGEX.test(normQuery);
 
-  const isCandidateInstrumentOrCover = INSTRUMENT_OR_COVER_NORM_REGEX.test(normTitle) || INSTRUMENT_OR_COVER_RAW_REGEX.test(rawTitle);
-  const isCandidateOtherVariant = OTHER_VARIANT_NORM_REGEX.test(combinedCandidateNorm);
+  // Miễn trừ phạt nhạc cụ / biến thể nếu video là bản phát hành chính thức (Official Audio / MV / Topic)
+  // và từ khóa nhạc cụ (Piano, Guitar, Live) thuộc về chính tên gốc của bài hát (như "Piano Man", "Teardrops On My Guitar", "Live While We're Young")
+  const isOfficialRelease = /\b(?:official\s*(?:music\s*)?video|official\s*audio|official\s*mv|official\s*lyric\s*video)\b/i.test(rawTitle) || normArtist.includes('topic');
+  const hasExplicitVariantTag = /\b(?:ver\.?\s*piano|piano\s*ver|ver\.?\s*guitar|guitar\s*ver|ver\.?\s*acoustic|acoustic\s*ver|cover|solo|fingerstyle|acoustic version|piano version|guitar solo|khong loi|instrumental|bien tau|hat lai|sheet|tutorial|huong dan|live stage|live session|hat live|fancam)\b/i.test(rawTitle);
+  const isExemptFromInstrumentPenalty = isOfficialRelease && !hasExplicitVariantTag;
+
+  let isCandidateInstrumentOrCover = INSTRUMENT_OR_COVER_NORM_REGEX.test(normTitle) || INSTRUMENT_OR_COVER_RAW_REGEX.test(rawTitle);
+  let isCandidateOtherVariant = OTHER_VARIANT_NORM_REGEX.test(combinedCandidateNorm);
+
+  if (isExemptFromInstrumentPenalty) {
+    isCandidateInstrumentOrCover = false;
+    // Nếu chỉ dính chữ "live" trong tiêu đề chính thức (ví dụ "Live While We're Young"), không phạt
+    if (/\blive\b/i.test(normTitle) && !/\b(?:live\s*stage|live\s*session|hat\s*live|fancam|live\s*concert)\b/i.test(normTitle)) {
+      isCandidateOtherVariant = false;
+    }
+  }
 
   let penalty = 0;
   let isUnrequestedVariant = false;
