@@ -2315,7 +2315,26 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   let fallbackRecord = null;
   let fallbackResult = null;
 
-  // ── ĐUA SONG SONG CÓ TRỌNG SỐ & PHÁT HIỆN THỦNG ĐOẠN (SMART GAP-RESILIENT RACE) ──
+  // ── ƯU TIÊN CHẤT LƯỢNG TUYỆT ĐỐI: ĐỢI YOUTUBE CC SUBTITLES TRƯỚC ──
+  // Đối với video YouTube, luôn ưu tiên lấy phụ đề chính thức của video gốc để giữ nguyên ngôn ngữ gốc (Hangul/K-Pop/J-Pop),
+  // chỉ khi video không có phụ đề CC mới fallback sang Zing MP3 / LRCLIB / khác.
+  if (activeLayers.includes('youtube_cc') && isYouTube && normalizedUrl) {
+    try {
+      const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
+      if (ytSubResult?.syncedLyrics && ytSubResult.syncedLyrics.length >= 3) {
+        setCachedLyrics(cacheKey, ytSubResult);
+        lyricsEvents.emit('lyricsFound', {
+          url: normalizedUrl || targetUrl,
+          cacheKey,
+          trackKey,
+          lyricsData: ytSubResult
+        });
+        return ytSubResult;
+      }
+    } catch (ytSubErr) {}
+  }
+
+  // ── ĐUA SONG SONG CÓ TRỌNG SỐ CHO CÁC NGUỒN DỰ PHÒNG CÒN LẠI ──
   const candidates = [];
   let hasTopPriorityPerfectWinner = false;
   let firstCandidateTimestamp = 0;
@@ -2353,18 +2372,6 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
       hasTopPriorityPerfectWinner = true;
     }
   };
-
-  // Tầng 1: YouTube CC (Chạy ngay t = 0ms nếu có cấu hình)
-  if (activeLayers.includes('youtube_cc') && isYouTube && normalizedUrl) {
-    racePromises.push((async () => {
-      try {
-        const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
-        if (ytSubResult?.syncedLyrics) {
-          recordCandidate('youtube_cc', ytSubResult);
-        }
-      } catch (ytSubErr) {}
-    })());
-  }
 
   // Tầng 2: Zing MP3 (Chạy ngay t = 0ms nếu có cấu hình)
   if (activeLayers.includes('zingmp3')) {
