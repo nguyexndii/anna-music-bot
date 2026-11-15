@@ -87,7 +87,22 @@ function inferRegionFromAppleItem(item) {
   const collectionName = String(item.collectionName || '');
   const combined = `${trackName} ${artistName} ${collectionName}`;
 
-  // 1. Nhận diện Nhạc Việt (VI)
+  // 1. Nhận diện K-Pop / Hàn Quốc (KR) TRƯỚC
+  if (genre.includes('k-pop') || genre.includes('korean') || HANGUL_REGEX.test(combined)) {
+    return 'KR';
+  }
+
+  // 2. Nhận diện J-Pop / Anime / Nhật Bản (JP) TRƯỚC
+  if (genre.includes('j-pop') || genre.includes('anime') || genre.includes('kayokyoku') || genre.includes('japanese') || KANA_REGEX.test(combined)) {
+    return 'JP';
+  }
+
+  // 3. Nhận diện C-Pop / Mandopop / Trung Quốc (CN) TRƯỚC (chặn Pinyin có dấu như Cháo Xī bị nhận nhầm sang tiếng Việt)
+  if (genre.includes('mandopop') || genre.includes('c-pop') || genre.includes('cantopop') || genre.includes('chinese') || HANZI_REGEX.test(combined)) {
+    return 'CN';
+  }
+
+  // 4. Nhận diện Nhạc Việt (VI) (quét cả trackName, artistName và collectionName)
   if (
     genre.includes('v-pop') ||
     genre.includes('vietnamese') ||
@@ -96,24 +111,10 @@ function inferRegionFromAppleItem(item) {
     genre.includes('trữ tình') ||
     genre.includes('bolero') ||
     VI_DIACRITIC_REGEX.test(trackName) ||
-    VI_DIACRITIC_REGEX.test(artistName)
+    VI_DIACRITIC_REGEX.test(artistName) ||
+    VI_DIACRITIC_REGEX.test(collectionName)
   ) {
     return 'VI';
-  }
-
-  // 2. Nhận diện K-Pop / Hàn Quốc (KR)
-  if (genre.includes('k-pop') || genre.includes('korean') || HANGUL_REGEX.test(combined)) {
-    return 'KR';
-  }
-
-  // 3. Nhận diện J-Pop / Anime / Nhật Bản (JP)
-  if (genre.includes('j-pop') || genre.includes('anime') || genre.includes('kayokyoku') || genre.includes('japanese') || KANA_REGEX.test(combined)) {
-    return 'JP';
-  }
-
-  // 4. Nhận diện C-Pop / Mandopop / Trung Quốc (CN)
-  if (genre.includes('mandopop') || genre.includes('c-pop') || genre.includes('cantopop') || genre.includes('chinese') || HANZI_REGEX.test(combined)) {
-    return 'CN';
   }
 
   // 5. Mặc định là Nhạc Quốc tế / US-UK (INTL)
