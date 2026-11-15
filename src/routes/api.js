@@ -776,8 +776,8 @@ module.exports = function createApiRouter(client) {
         hasPrevious: Boolean(queue?.previousSongs && queue.previousSongs.length > 0),
         ...((req.query.full === '1' || req.query.init === '1') ? {
           ...getCachedGuildStats(guildId, req.query.fresh === '1'),
-          favorites: caller?.userId ? ((await favoriteManager.getFavorites(caller.userId)) || []) : [],
-          userPlaylists: caller?.userId ? ((await userPlaylistManager.getUserPlaylists(caller.userId)) || []) : []
+          favorites: caller?.userId ? ((await favoriteManager.getFavorites(caller.userId, req.query.fresh === '1')) || []) : [],
+          userPlaylists: caller?.userId ? ((await userPlaylistManager.getUserPlaylists(caller.userId, req.query.fresh === '1')) || []) : []
         } : {})
       }
     });

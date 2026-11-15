@@ -61,9 +61,9 @@ class FavoriteManager {
   /**
    * Lấy danh sách bài hát yêu thích của người dùng (Có RAM Cache siêu tốc)
    */
-  async getFavorites(userId) {
+  async getFavorites(userId, forceFresh = false) {
     if (!userId) return [];
-    if (this.memoryCache.has(userId)) {
+    if (!forceFresh && this.memoryCache.has(userId)) {
       return this.memoryCache.get(userId);
     }
     try {
@@ -77,7 +77,9 @@ class FavoriteManager {
       // Fallback
     }
     const fallback = this.fallbackData.get(userId) || [];
-    this._setMemoryCache(userId, fallback);
+    if (fallback.length > 0) {
+      this._setMemoryCache(userId, fallback);
+    }
     return fallback;
   }
 
