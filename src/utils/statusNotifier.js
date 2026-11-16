@@ -406,7 +406,6 @@ const WEB_ALERT_COOLDOWN = 60 * 60 * 1000; // 1 tiếng cảnh báo 1 lần nế
  * Kiểm tra trạng thái hoạt động thực tế của Web Player proxy
  */
 async function checkWebPlayerHealth(client, adminId) {
-  const webHealthUrl = 'https://anna-music-bot-ui.pages.dev/api/health';
   const currentTunnel = getActiveTunnelUrl();
   const secret = config.webJwtSecret || '';
   const crypto = require('crypto');
@@ -419,12 +418,34 @@ async function checkWebPlayerHealth(client, adminId) {
   }
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7000);
-    const res = await fetch(webHealthUrl, { headers, signal: controller.signal });
-    clearTimeout(timeout);
+    let isHealthy = false;
 
-    if (res.ok) {
+    // 1. Kiểm tra trực tiếp qua Cloudflare Tunnel thực tế của VPS (chuẩn xác nhất)
+    if (currentTunnel) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const tunnelRes = await fetch(`${currentTunnel}/health`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (tunnelRes.ok) {
+          isHealthy = true;
+        }
+      } catch (tErr) {}
+    }
+
+    // 2. Nếu kiểm tra tunnel chưa thành công, thử kiểm tra qua domain gateway pages.dev
+    if (!isHealthy) {
+      const webHealthUrl = 'https://anna-music-bot-ui.pages.dev/api/health';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 7000);
+      const res = await fetch(webHealthUrl, { headers, signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        isHealthy = true;
+      }
+    }
+
+    if (isHealthy) {
       if (isWebDown) {
         isWebDown = false;
         const vnTime = getVietnamTime();
@@ -440,7 +461,7 @@ async function checkWebPlayerHealth(client, adminId) {
       }
       return true;
     } else {
-      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      throw new Error('Cả Cloudflare Tunnel và Web Gateway đều không phản hồi');
     }
   } catch (err) {
     const now = Date.now();
