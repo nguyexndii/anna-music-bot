@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
-const { verifyWebToken, createSessionToken, getPinAttemptStatus, recordPinFailure, clearPinFailures } = require('../utils/tokenHelper');
+const { verifyWebToken, createSessionToken, getPinAttemptStatus, recordPinFailure, clearPinFailures, enforceMapLimit } = require('../utils/tokenHelper');
 const { searchTrack, validateAndSanitizeMusicUrl } = require('../utils/musicExtractor');
 const searchService = require('../utils/searchService');
 const searchMultipleTracks = searchService.searchMultipleTracks || searchService.executeSearch;
@@ -165,6 +165,25 @@ module.exports = function createApiRouter(client) {
       res.status(429).json({ success: false, error: 'Bạn đang tra cứu lời bài hát quá nhanh, vui lòng chờ giây lát!' });
     }
   });
+
+  // Rate-limit cho /guilds/:guildId/action: tối đa 120 request/phút/IP (tương thích Cloudflare Tunnel)
+  const actionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
+    keyGenerator: (req) => getClientIp(req),
+    statusCode: 429,
+    handler: (req, res) => {
+      res.status(429).json({ success: false, code: 'RATE_LIMIT_EXCEEDED', error: 'Bạn đang thao tác quá nhanh, vui lòng chờ trong giây lát!' });
+    }
+  });
+
+  // Cơ chế Debounce thông minh phân cấp: 800ms cho navigation/playback, 150ms cho slider/light actions
+  const actionDebounceMap = new Map();
+  const MAX_ACTION_DEBOUNCE_SIZE = 1000;
+  const LIGHT_DEBOUNCE_ACTIONS = new Set(['volume', 'remove', 'removeBatch', 'move', 'toggleFavorite']);
 
   // Helper kiểm tra quyền máy chủ thuộc Whitelist (Private / Whitelist Multi-Guild)
   function isGuildAllowed(guildId, userId) {
@@ -1253,10 +1272,31 @@ module.exports = function createApiRouter(client) {
   });
 
   // 5. Thao tác điều khiển Player (Pause, Resume, Skip, Seek, Volume, 24/7...)
-  router.post('/guilds/:guildId/action', requireAuth, requireSameGuild, async (req, res) => {
+  router.post('/guilds/:guildId/action', actionLimiter, requireAuth, requireSameGuild, async (req, res) => {
     const { guildId } = req.params;
     const { action, value } = req.body;
     const user = req.user;
+
+    // --- BẮT ĐẦU CƠ CHẾ DEBOUNCE THÔNG MINH ---
+    const now = Date.now();
+    const isLightAction = LIGHT_DEBOUNCE_ACTIONS.has(action);
+    const cooldownMs = isLightAction ? 150 : 800;
+    const debounceKey = isLightAction
+      ? `${guildId}:${user?.userId || 'unknown'}:${action}`
+      : `${guildId}:${action}`;
+
+    const lastActionTime = actionDebounceMap.get(debounceKey) || 0;
+    if (now - lastActionTime < cooldownMs) {
+      return res.status(429).json({
+        success: false,
+        code: 'ACTION_DEBOUNCED',
+        error: isLightAction ? 'Thao tác quá nhanh, vui lòng chờ 0.15s!' : 'Thao tác điều hướng quá nhanh, vui lòng chờ 0.8s!'
+      });
+    }
+
+    enforceMapLimit(actionDebounceMap, MAX_ACTION_DEBOUNCE_SIZE);
+    actionDebounceMap.set(debounceKey, now);
+    // --- KẾT THÚC CƠ CHẾ DEBOUNCE ---
 
     const queue = client.musicManager ? client.musicManager.get(guildId) : null;
     if (!queue && action !== 'toggle247' && action !== 'set247' && action !== 'toggleAutoplay' && action !== 'setAutoplay' && action !== 'switchTo247' && action !== 'resetTo247' && action !== 'toggleLofiMode' && action !== 'playFavorites' && action !== 'playUserPlaylist' && action !== 'playNow') {
@@ -2180,10 +2220,10 @@ module.exports = function createApiRouter(client) {
         }
       }
 
-      // Nếu queue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
-      if (queue && queue.currentSong === currentTrack && queue.hasSyncedLyrics && Array.isArray(queue.cachedSyncedLyrics)) {
-        activeSyncedLyrics = queue.cachedSyncedLyrics;
-        activeAutoOffsetMs = (queue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
+      // Nếu callerQueue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
+      if (callerQueue && callerQueue.currentSong === currentTrack && (!targetUrl || targetUrl === currentTrack?.url) && callerQueue.hasSyncedLyrics && Array.isArray(callerQueue.cachedSyncedLyrics)) {
+        activeSyncedLyrics = callerQueue.cachedSyncedLyrics;
+        activeAutoOffsetMs = (callerQueue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
       }
 
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);

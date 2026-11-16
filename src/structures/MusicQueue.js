@@ -85,7 +85,7 @@ class MusicQueue {
     this.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play,
-        maxMissedFrames: 15
+        maxMissedFrames: 200
       }
     });
 
@@ -118,6 +118,7 @@ class MusicQueue {
     this.isQueueOnHold = false;
     this._bufferingTimeout = null;
     this._lofiRetryCount = 0;
+    this.sessionRegion = null; // Ghi nhớ vùng nhạc của phiên (ví dụ: 'VI') để Autoplay không bị lệch hướng sang US/UK
 
     // Quản lý Live Synced Lyrics trên Discord Embed
     this.liveLyricsTimer = null;
@@ -896,7 +897,12 @@ class MusicQueue {
       if (guildSettings.autoplay !== false && songToRelate && !wasLofiTrack) {
         const useAi = guildSettings.useAiAssistant !== false;
         const seedMeta = await resolveTrackOriginAndMetaAsync(songToRelate);
-        const targetRegion = seedMeta.region;
+        let targetRegion = seedMeta.region;
+        if (this.sessionRegion && this.sessionRegion === 'VI' && targetRegion === 'INTL') {
+          targetRegion = 'VI';
+        } else if (this.sessionRegion && !targetRegion) {
+          targetRegion = this.sessionRegion;
+        }
 
         let relatedTrack = null;
         try {
@@ -1648,6 +1654,15 @@ class MusicQueue {
         this._isPreemptingLofi = false;
       }
       this.currentSong.seekPosition = initialSeekSeconds;
+      if (!this.currentSong?.is247 && !this.currentSong?.requestedBy?.includes('Auto') && !this.currentSong?.requestedBy?.includes('Tự động')) {
+        try {
+          const { detectTrackRegion } = require('../utils/musicExtractor');
+          const detectedReg = detectTrackRegion(this.currentSong.title, this.currentSong.artist);
+          if (detectedReg) {
+            this.sessionRegion = detectedReg;
+          }
+        } catch (e) {}
+      }
       if (this.currentResource) {
         this._cleanupResource(this.currentResource);
         this.currentResource = null;
@@ -3153,7 +3168,12 @@ class MusicQueue {
       try {
         const useAi = guildSettings.useAiAssistant !== false;
         const seedMeta = analyzeTrackOriginAndMeta(this.currentSong);
-        const targetRegion = seedMeta.region;
+        let targetRegion = seedMeta.region;
+        if (this.sessionRegion && this.sessionRegion === 'VI' && targetRegion === 'INTL') {
+          targetRegion = 'VI';
+        } else if (this.sessionRegion && !targetRegion) {
+          targetRegion = this.sessionRegion;
+        }
         const pool = await getRelatedTracksPool(this.currentSong, this.guild.id, useAi, targetRegion);
         if (pool && pool.length > 0) {
           const nextTrack = pool[0];

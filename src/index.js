@@ -4,12 +4,11 @@ function signTunnelUrl(url, secret) {
   if (!url || !secret) return '';
   return crypto.createHmac('sha256', secret).update(url.trim().replace(/\/$/, '')).digest('hex');
 }
-// Thiết lập độ ưu tiên CPU cao nhất cho tiến trình phát nhạc trên Linux (nice -5)
+// Thiết lập độ ưu tiên CPU cao cho tiến trình Node.js trên Linux (nice -3) để bảo vệ timer 20ms gửi gói âm thanh Discord
 const os = require('os');
 try {
   if (process.platform === 'linux') {
-    // Đặt độ ưu tiên Node.js ở mức bình thường (0) để nhường quyền ưu tiên CPU cao (-5) cho FFmpeg giải mã âm thanh
-    os.setPriority(0, 0);
+    os.setPriority(0, -3);
   }
 } catch (e) {}
 

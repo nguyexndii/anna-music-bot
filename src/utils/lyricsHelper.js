@@ -759,7 +759,7 @@ const CJK_SCRIPT_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u3040-\u309F\
 const KNOWN_INTL_ARTISTS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|valorant|arcane|pentakill|true\s*damage|heartsteel|miyeon|soyeon|g\s*i\s*dle|gidle|\(g\)i-dle|sophie\s*powers|mimi\s*webb|madison\s*beer|jaira\s*burns|seraphine|lexie\s*liu|taylor\s*swift|the\s*weeknd|alan\s*walker|ed\s*sheeran|bruno\s*mars|ariana\s*grande|billie\s*eilish|justin\s*bieber|post\s*malone|dua\s*lipa|charlie\s*puth|shawn\s*mendes|camila\s*cabello|olivia\s*rodrigo|sabrina\s*carpenter|lana\s*del\s*rey|adele|rihanna|katy\s*perry|lady\s*gaga|maroon\s*5|imagine\s*dragons|coldplay|onerepublic|chainsmokers|linkin\s*park|eminem|drake|kendrick\s*lamar|travis\s*scott|sza|doja\s*cat|nicki\s*minaj|cardi\s*b|blackpink|bts|newjeans|aespa|ive|le\s*sserafim|twice|itzy|nmixx|babymonster|illit|kiss\s*of\s*life|stray\s*kids|seventeen|txt|enhypen|exo|bigbang|g\s*dragon|taeyang|iu|taeyeon|jungkook|jimin|v\s*bts|lisa|jennie|rose|jisoo|psy|yoasobi|ado|kenshi\s*yonezu|fujii\s*kaze|radwimps|lisa\s*japan|aimer|eve\s*japan|official\s*hige\s*dandism|king\s*gnu|vaundy|imase|jay\s*chou|jj\s*lin|g\.?e\.?m\.?|eric\s*chou|mayday|vevo)\b/i;
 
 // Danh sách nghệ sĩ V-Pop / V-Rap / V-Indie (Chuẩn hóa không dấu)
-const KNOWN_VN_ARTISTS_NORM_REGEX = /\b(w\s*n|wn|w\s*\/\s*n|duongg|nalu|titie|3107|quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|buitruonglinh|dangrangto|52hz|rio|coldzy|16\s*typh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|lam\s*chan\s*khang|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|ca\s*si\s*vu|hoang\s*thai\s*vu)\b/i;
+const KNOWN_VN_ARTISTS_NORM_REGEX = /\b(hngle|ari|w\s*n|wn|w\s*\/\s*n|duongg|nalu|titie|3107|quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|buitruonglinh|dangrangto|52hz|rio|coldzy|16\s*typh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|lam\s*chan\s*khang|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|ca\s*si\s*vu|hoang\s*thai\s*vu)\b/i;
 
 // Từ vựng & Âm tiết đặc trưng của bài hát Tiếng Việt khi viết KHÔNG DẤU (ví dụ: "Thuy Trieu", "Tinh Minh La Ki")
 const VN_ACCENTLESS_SYLLABLES_REGEX = /^(thuy|trieu|tinh|minh|la|ki|ky|anh|em|chung|ta|cua|tuong|lai|hien|tai|qua|khu|nguoi|yeu|thuong|nho|buon|vui|khoc|cuoi|trai|tim|giac|mo|mua|nang|gio|may|troi|bien|song|co|don|lang|quen|chia|tay|gap|nhau|nuoc|mat|doi|cho|vong|tay|ngot|ngao|am|ap|lanh|lung|duong|pho|chieu|thu|dong|xuan|ha|hoang|hon|binh|minh|bong|toi|ngan|van|kiep|duyen|phan|loi|hua|cau|the|chap|nhan|buong|bo|quay|ve|ra|di|o|lai|bao|gio|con|mai|chang|khong|chua|tung|da|dang|se|vua|moi|rat|lam|nhieu|mot|hai|ba|bon|nam|sau|bay|tam|chin|muoi|tram|nghin|ngon|lua|bo|vai|doi|moi|nu|cuoi|tieng|hat|loi|ca|nhip|dieu|phut|giay|dem|khuya|som|thien|duong|tran|gian|cuoc|doi|thanh|xuan|tuoi|tre|ngay|thang|dai|kho|ngoc|nghech|dam|me|mong|uoc|hy|vong|binh|yen|nhat|nhoa|phai|tan|vo|nat|bien|mat|nguyen|tran|le|pham|hoang|huynh|phan|vu|vo|dang|bui|do|ho|ngo|duong|quang|hung|duc|tuan|hieu|khanh|linh|trang|thao|huong|phuong|ngoc|vy|nhi)$/i;
@@ -1710,8 +1710,14 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       if (syncedLyrics.length >= 5) {
         if (isVN) {
           const sampleText = plainLines.slice(0, 20).join(' ');
-          if (!VIETNAMESE_REGEX.test(sampleText)) {
-            continue;
+          const hasVnAccents = VIETNAMESE_REGEX.test(sampleText);
+          if (!hasVnAccents) {
+            const englishStopWords = /\b(the|and|you|that|with|have|this|from|they|will|would|there|their|what|about|which|when|make|like|time|just|know|take|people|into|year|your|good|some|could|them|other|than|then|now|look|only|come|over|think|also|back|after|use|two|how|our|work|first|well|way|even|new|want|because|any|these|give|day|most|us)\b/gi;
+            const engMatches = sampleText.match(englishStopWords) || [];
+            const hasVnSyllables = typeof hasVietnameseSyllablePattern === 'function' && hasVietnameseSyllablePattern(sampleText);
+            if (engMatches.length >= 8 && !hasVnSyllables) {
+              continue;
+            }
           }
         } else {
           const sampleText = plainLines.slice(0, 20).join(' ');
@@ -1739,58 +1745,6 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
           isOfficialCc: true
         };
       }
-    }
-
-    // BƯỚC 1.5: Chỉ khi có track phụ đề chính thức (rankedOfficialTracks.length > 0) mà bước 1 tải JSON3/SRV3 thất bại
-    // thì mới gọi yt-dlp dump-single-json lấy URL timedtext chuẩn. Tuyệt đối không gọi nếu rankedOfficialTracks.length === 0!
-    if (rankedOfficialTracks.length > 0) {
-      try {
-        const ytdlpInfo = await fetchOfficialSubtitlesViaYtdlp(url);
-        if (ytdlpInfo && ytdlpInfo.subtitles) {
-          const ytdlpOfficial = getRankedSubtitleTracks(ytdlpInfo.subtitles || {}, context);
-          for (const candidateTrackList of ytdlpOfficial) {
-            const subTarget = candidateTrackList.find(s => s.ext === 'json3') || candidateTrackList[0];
-            if (!subTarget) continue;
-
-            const events = await downloadAndParseCaptionEvents(subTarget);
-            if (!events || events.length === 0) continue;
-
-            const { syncedLyrics, plainLines } = convertEventsToSyncedLyrics(events);
-            if (syncedLyrics.length >= 5) {
-              if (isVN) {
-                const sampleText = plainLines.slice(0, 20).join(' ');
-                if (!VIETNAMESE_REGEX.test(sampleText)) {
-                  continue;
-                }
-              } else {
-                const sampleText = plainLines.slice(0, 20).join(' ');
-                if (VIETNAMESE_REGEX.test(sampleText)) {
-                  continue;
-                }
-                if (!isJP && !isKR && !isCN) {
-                  if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
-                    continue;
-                  }
-                }
-              }
-
-              console.log(`[Lyrics CC yt-dlp] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chuẩn từ yt-dlp: ${ytdlpInfo.title || url}`);
-              return {
-                title: ytdlpInfo.title || rawTitle || 'YouTube Track',
-                artist: ytdlpInfo.uploader || ytdlpInfo.channel || artist || '',
-                lyrics: plainLines.join('\n'),
-                syncedLyrics,
-                duration: ytdlpInfo.duration || info?.duration,
-                autoOffsetMs: 0,
-                trackKey,
-                userSavedOffsetMs: userSavedOffsetMs || 0,
-                source: 'youtube_cc',
-                isOfficialCc: true
-              };
-            }
-          }
-        }
-      } catch (ytdlpFallbackErr) {}
     }
   } catch (e) {}
   return null;

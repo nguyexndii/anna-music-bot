@@ -219,7 +219,8 @@ function recordPinFailure(ip, inputPin) {
   const cleanPin = String(inputPin || '').trim();
   const now = Date.now();
   const current = failedPinAttempts.get(cleanIp);
-  const currentCount = (current && current.lockedUntil <= now ? 0 : (current?.count || 0)) + 1;
+  const isLockExpired = current && current.lockedUntil > 0 && current.lockedUntil <= now;
+  const currentCount = (isLockExpired ? 0 : (current?.count || 0)) + 1;
 
   if (currentCount >= 5) {
     // Khóa IP trong 5 phút
@@ -265,5 +266,6 @@ module.exports = {
   getPinAttemptStatus,
   recordPinFailure,
   clearPinFailures,
-  invalidateUserTokens
+  invalidateUserTokens,
+  enforceMapLimit
 };
