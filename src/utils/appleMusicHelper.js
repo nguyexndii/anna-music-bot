@@ -226,12 +226,20 @@ async function resolveAppleMusicMetadata(rawTitle, rawArtist = '') {
         const normTrack = normalizeSearchText(item.trackName);
         const normArtist = normalizeSearchText(item.artistName || '');
         let score = 0;
+        let hasTrackMatch = false;
 
-        // So khớp tên bài hát
+        // So khớp tên bài hát (BẮT BUỘC: Không nhận nếu tên bài hoàn toàn không khớp)
         if (normTrack === normCleanTrack || normTrack === normRawTitle) {
           score += 50;
-        } else if (normRawTitle.includes(normTrack) || normTrack.includes(normCleanTrack)) {
+          hasTrackMatch = true;
+        } else if (normRawTitle.includes(normTrack) || (normCleanTrack && normTrack.includes(normCleanTrack))) {
           score += 30;
+          hasTrackMatch = true;
+        }
+
+        if (!hasTrackMatch) {
+          // Tên bài không khớp -> Bỏ qua, tuyệt đối không nhận bài khác của cùng ca sĩ
+          continue;
         }
 
         // So khớp tên ca sĩ
@@ -246,7 +254,7 @@ async function resolveAppleMusicMetadata(rawTitle, rawArtist = '') {
           score += 20;
         }
 
-        if (score > highestScore && score >= 25) {
+        if (score > highestScore && score >= 30) {
           highestScore = score;
           bestMatch = item;
         }

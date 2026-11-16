@@ -1996,8 +1996,8 @@ function findBestZingSong(songs, targetTitle, targetArtist, expectedArtists = []
   });
   if (titleMatch) return titleMatch;
 
-  // 3. Fallback bài đầu tiên
-  return songs[0];
+  // 3. Không có bài nào khớp tên -> Trả về null (tránh nhận nhầm bài khác của cùng ca sĩ)
+  return null;
 }
 
 async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
@@ -2067,11 +2067,11 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
           const isNameMatch = variantsNorm.some(v => sNameNorm === v || sNameNorm.includes(v) || v.includes(sNameNorm));
           const isArtistMatch = expectedArtistsNorm.length === 0 || expectedArtistsNorm.some(ea => sArtistNorm.includes(ea) || ea.includes(sArtistNorm));
 
-          if (isNameMatch && isArtistMatch) {
+          if (candidate && isNameMatch && isArtistMatch) {
             songList = songs;
             matchedSong = candidate;
             break;
-          } else if (!songList) {
+          } else if (candidate && isNameMatch && !matchedSong) {
             songList = songs;
             matchedSong = candidate;
           }
@@ -2079,9 +2079,7 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
       }
     }
 
-    if (!matchedSong && songList && songList.length > 0) {
-      matchedSong = findBestZingSong(songList, rawTitle, artist, expectedArtists);
-    }
+    if (!matchedSong) return null;
 
     if (!matchedSong || !matchedSong.id) return null;
 
