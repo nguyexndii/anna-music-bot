@@ -1654,7 +1654,9 @@ class MusicQueue {
         this._isPreemptingLofi = false;
       }
       this.currentSong.seekPosition = initialSeekSeconds;
-      if (!this.currentSong?.is247 && !this.currentSong?.requestedBy?.includes('Auto') && !this.currentSong?.requestedBy?.includes('Tự động')) {
+      const reqByStr = typeof this.currentSong?.requestedBy === 'string' ? this.currentSong.requestedBy : '';
+      const isAutoTrack = reqByStr.includes('Auto') || reqByStr.includes('Tự động') || reqByStr.includes('Autoplay');
+      if (!this.currentSong?.is247 && !isAutoTrack) {
         try {
           const { detectTrackRegion } = require('../utils/musicExtractor');
           const detectedReg = detectTrackRegion(this.currentSong.title, this.currentSong.artist);
