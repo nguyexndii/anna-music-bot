@@ -36,14 +36,14 @@ module.exports = function createApiRouter(client) {
   router.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) {
-      const isAllowed = allowedOrigins.includes(origin) || /^https:\/\/[a-z0-9-]+\.anna-music-bot-ui\.pages\.dev$/i.test(origin);
+      const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.pages.dev') || /^https:\/\/[a-z0-9-]+\.anna-music-bot-ui\.pages\.dev$/i.test(origin);
       if (isAllowed) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
       }
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-vps-tunnel, x-vps-tunnel-sig');
     if (req.method === 'OPTIONS') {
       return res.sendStatus(204);
     }

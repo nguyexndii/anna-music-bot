@@ -511,8 +511,8 @@ let currentKnownTunnelUrl = '';
  * Tự động nhận diện URL trycloudflare.com hoặc Named Tunnel mới nhất
  * Thứ tự ưu tiên:
  * 1. Biến môi trường TUNNEL_URL
- * 2. File chuyên dụng data/active_tunnel.url (< 100 bytes do wrapper script ghi tức thì)
- * 3. File log PM2 (quét 512KB cuối và 64KB đầu để không sót URL dù file log lớn)
+ * 2. File log PM2 mới nhất (quét từ cuối file) và tự động cập nhật active_tunnel.url
+ * 3. File data/active_tunnel.url
  */
 function getActiveTunnelUrl() {
   // 1. Biến môi trường
@@ -520,7 +520,7 @@ function getActiveTunnelUrl() {
     return process.env.TUNNEL_URL.trim().replace(/\/$/, '');
   }
 
-  // 2. Ưu tiên đọc file data/active_tunnel.url (kích thước nhỏ < 100 bytes)
+  // Danh sách các file active_tunnel.url ứng viên
   const candidateUrlFiles = [
     process.env.TUNNEL_URL_FILE,
     process.env.ACTIVE_TUNNEL_FILE,
@@ -532,23 +532,7 @@ function getActiveTunnelUrl() {
     '/root/data/active_tunnel.url'
   ].filter(Boolean);
 
-  for (const filePath of candidateUrlFiles) {
-    try {
-      if (fs.existsSync(filePath)) {
-        const rawContent = fs.readFileSync(filePath, 'utf8').trim();
-        const lines = rawContent.split(/\r?\n/);
-        for (const line of lines) {
-          const match = line.match(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/i)
-            || line.match(/https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?/i);
-          if (match && isCleanTunnelUrl(match[0])) {
-            return match[0].replace(/\/$/, '');
-          }
-        }
-      }
-    } catch (e) {}
-  }
-
-  // 3. Fallback đọc file log PM2 khi chưa có file active_tunnel.url
+  // 2. Ưu tiên đọc file log PM2 mới nhất
   const logFiles = [
     process.env.TUNNEL_LOG_FILE,
     '/root/.pm2/logs/anna-tunnel-error.log',
@@ -557,6 +541,7 @@ function getActiveTunnelUrl() {
     path.join(process.env.HOME || process.env.USERPROFILE || '', '.pm2/logs/anna-tunnel-out.log')
   ].filter(Boolean);
 
+  let latestFromLog = '';
   for (const logPath of logFiles) {
     try {
       if (fs.existsSync(logPath)) {
@@ -574,8 +559,46 @@ function getActiveTunnelUrl() {
           for (let i = matches.length - 1; i >= 0; i--) {
             const candidate = matches[i][0];
             if (isCleanTunnelUrl(candidate)) {
-              return candidate;
+              latestFromLog = candidate.replace(/\/$/, '');
+              break;
             }
+          }
+        }
+        if (latestFromLog) break;
+      }
+    } catch (e) {}
+  }
+
+  if (latestFromLog) {
+    // Tự động ghi đè URL mới vào các file active_tunnel.url nếu khác biệt
+    for (const filePath of candidateUrlFiles) {
+      try {
+        const dir = path.dirname(filePath);
+        if (fs.existsSync(dir)) {
+          let currentContent = '';
+          if (fs.existsSync(filePath)) {
+            currentContent = fs.readFileSync(filePath, 'utf8').trim();
+          }
+          if (currentContent !== latestFromLog) {
+            fs.writeFileSync(filePath, latestFromLog + '\n', 'utf8');
+          }
+        }
+      } catch (e) {}
+    }
+    return latestFromLog;
+  }
+
+  // 3. Fallback đọc file data/active_tunnel.url khi log chưa có
+  for (const filePath of candidateUrlFiles) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const rawContent = fs.readFileSync(filePath, 'utf8').trim();
+        const lines = rawContent.split(/\r?\n/);
+        for (const line of lines) {
+          const match = line.match(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/i)
+            || line.match(/https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?/i);
+          if (match && isCleanTunnelUrl(match[0])) {
+            return match[0].replace(/\/$/, '');
           }
         }
       }
@@ -599,6 +622,12 @@ async function checkTunnelUrlChange(client, adminId) {
         const oldUrl = currentKnownTunnelUrl;
         currentKnownTunnelUrl = latestUrl;
         const vnTime = getVietnamTime();
+
+        // Tự động ghi đè URL mới vào active_tunnel.url
+        try {
+          const targetFile = path.resolve(__dirname, '../../data/active_tunnel.url');
+          fs.writeFileSync(targetFile, latestUrl + '\n', 'utf8');
+        } catch (_) {}
 
         await sendAdminDM(client, adminId, {
           title: '🔄 [Anna Music Bot] Cloudflare Tunnel Vừa Cấp URL Mới!',
