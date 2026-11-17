@@ -419,6 +419,18 @@ class MusicQueue {
     return await this.playbackEngine.enrichMissingThumbnails();
   }
 
+  async _play247BackgroundLofi() {
+    return await this.playbackEngine._play247BackgroundLofi();
+  }
+
+  async _play247LofiBackground() {
+    return await this.playbackEngine._play247LofiBackground();
+  }
+
+  async _prefetchAutoplayTrack() {
+    return await this.playbackEngine._prefetchAutoplayTrack();
+  }
+
   _cleanupResource(resource) {
     return this.playbackEngine._cleanupResource(resource);
   }

@@ -743,9 +743,9 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
         cacheOptions?.onAbort?.();
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 36s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 14s)'));
       }
-    }, 36000);
+    }, 14000);
 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;

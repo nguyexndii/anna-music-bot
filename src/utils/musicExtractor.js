@@ -48,6 +48,7 @@ const {
   isYouTubeCircuitOpen,
   recordYouTubeFailure,
   recordYouTubeSuccess,
+  getYouTubeCircuitRemainingMinutes,
   activeProcesses,
   registerProcess,
   killProcess,
@@ -716,7 +717,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
 
   if (isYouTubeCircuitOpen(options)) {
     cacheOptions?.onAbort?.();
-    console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000)}p), chuyển thẳng sang SoundCloud.`);
+    console.log(`[Circuit Breaker Active] YouTube đang ngắt tạm thời (còn ${getYouTubeCircuitRemainingMinutes()}p), chuyển thẳng sang SoundCloud.`);
     return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 
@@ -940,6 +941,7 @@ module.exports = {
   PrioritySemaphore,
   extractionSemaphore,
   isYouTubeCircuitOpen,
+  getYouTubeCircuitRemainingMinutes,
   streamUrlCache,
   setCachedStreamUrl,
   getCachedStreamUrl,

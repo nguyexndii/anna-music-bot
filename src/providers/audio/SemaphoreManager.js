@@ -234,6 +234,10 @@ function recordYouTubeSuccess() {
   }
 }
 
+function getYouTubeCircuitRemainingMinutes() {
+  return Math.max(0, Math.ceil((skipYouTubeStreamUntil - Date.now()) / 60000));
+}
+
 // Bộ quản lý tiến trình con (FFmpeg & yt-dlp) để chống tràn / rò rỉ RAM (Zombie processes)
 const activeProcesses = new Set();
 
@@ -294,6 +298,7 @@ module.exports = {
   isYouTubeCircuitOpen,
   recordYouTubeFailure,
   recordYouTubeSuccess,
+  getYouTubeCircuitRemainingMinutes,
   activeProcesses,
   registerProcess,
   killProcess,
