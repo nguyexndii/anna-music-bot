@@ -126,6 +126,8 @@ class MusicQueue {
     this.currentLyricIndex = -1;
     this.cachedSyncedLyrics = null;
     this.hasSyncedLyrics = false;
+    this.autoLyricOffsetMs = 0;
+    this.userLyricOffsetMs = 0;
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
@@ -2666,6 +2668,8 @@ class MusicQueue {
     this.currentLyricIndex = -1;
     this.cachedSyncedLyrics = null;
     this.hasSyncedLyrics = false;
+    this.autoLyricOffsetMs = 0;
+    this.userLyricOffsetMs = 0;
     this.currentLyricOffsetMs = 0;
     this._lastLyricsEditTime = 0;
     this._lastProgressEditTime = 0;
@@ -2758,7 +2762,9 @@ class MusicQueue {
 
     this.cachedSyncedLyrics = activeSyncedLyrics;
     this.hasSyncedLyrics = true;
-    this.currentLyricOffsetMs = (lyricsData.userSavedOffsetMs || 0) + activeAutoOffsetMs;
+    this.autoLyricOffsetMs = Number(activeAutoOffsetMs || 0);
+    this.userLyricOffsetMs = Number(lyricsData.userSavedOffsetMs || 0);
+    this.currentLyricOffsetMs = this.userLyricOffsetMs + this.autoLyricOffsetMs;
     this._lastLyricsEditTime = 0;
     this._lastRenderedLyricIdx = -1;
     this._lastRenderedChunkIdx = -1;

@@ -746,6 +746,9 @@ module.exports = function createApiRouter(client) {
             requestedBy: reqInfo.name,
             requestedByAvatar: reqInfo.avatar,
             requestedById: currentTrack.requestedById || (typeof currentTrack.requestedBy === 'object' ? currentTrack.requestedBy?.id : (typeof currentTrack.requestedBy === 'string' && currentTrack.requestedBy.startsWith('<@') ? currentTrack.requestedBy.replace(/[^0-9]/g, '') : null)) || null,
+            userSavedOffsetMs: queue?.userLyricOffsetMs ?? 0,
+            autoOffsetMs: queue?.autoLyricOffsetMs ?? 0,
+            totalLyricOffsetMs: queue?.currentLyricOffsetMs ?? 0,
             startTime: currentTrack.startTime || null
           };
         })() : null,
@@ -2131,9 +2134,11 @@ module.exports = function createApiRouter(client) {
       }
 
       // Nếu queue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
-      if (queue && queue.currentSong === currentTrack && queue.hasSyncedLyrics && Array.isArray(queue.cachedSyncedLyrics)) {
-        activeSyncedLyrics = queue.cachedSyncedLyrics;
-        activeAutoOffsetMs = (queue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
+      if (queue && queue.currentSong === currentTrack && queue.hasSyncedLyrics) {
+        if (Array.isArray(queue.cachedSyncedLyrics)) {
+          activeSyncedLyrics = queue.cachedSyncedLyrics;
+        }
+        activeAutoOffsetMs = (queue.autoLyricOffsetMs !== undefined) ? queue.autoLyricOffsetMs : activeAutoOffsetMs;
       }
 
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
@@ -2144,7 +2149,7 @@ module.exports = function createApiRouter(client) {
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: activeAutoOffsetMs,
-        userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
+        userSavedOffsetMs: (queue && queue.currentSong === currentTrack && typeof queue.userLyricOffsetMs === 'number') ? queue.userLyricOffsetMs : (lyricsData?.userSavedOffsetMs || 0),
         trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: activeSyncedLyrics,
@@ -2221,9 +2226,11 @@ module.exports = function createApiRouter(client) {
       }
 
       // Nếu callerQueue đã có cachedSyncedLyrics chuẩn hóa theo SponsorBlock trimStart cho bài hiện tại -> Đồng bộ ưu tiên
-      if (callerQueue && callerQueue.currentSong === currentTrack && (!targetUrl || targetUrl === currentTrack?.url) && callerQueue.hasSyncedLyrics && Array.isArray(callerQueue.cachedSyncedLyrics)) {
-        activeSyncedLyrics = callerQueue.cachedSyncedLyrics;
-        activeAutoOffsetMs = (callerQueue.currentLyricOffsetMs || 0) - (lyricsData?.userSavedOffsetMs || 0);
+      if (callerQueue && callerQueue.currentSong === currentTrack && (!targetUrl || targetUrl === currentTrack?.url) && callerQueue.hasSyncedLyrics) {
+        if (Array.isArray(callerQueue.cachedSyncedLyrics)) {
+          activeSyncedLyrics = callerQueue.cachedSyncedLyrics;
+        }
+        activeAutoOffsetMs = (callerQueue.autoLyricOffsetMs !== undefined) ? callerQueue.autoLyricOffsetMs : activeAutoOffsetMs;
       }
 
       const hasLyrics = Boolean(lyricsData && lyricsData.lyrics && lyricsData.lyrics.trim().length > 0);
@@ -2234,7 +2241,7 @@ module.exports = function createApiRouter(client) {
         isLofi: !!lyricsData?.isLofi,
         isAiGenerated: !!lyricsData?.isAiGenerated,
         autoOffsetMs: activeAutoOffsetMs,
-        userSavedOffsetMs: lyricsData?.userSavedOffsetMs || 0,
+        userSavedOffsetMs: (callerQueue && callerQueue.currentSong === currentTrack && typeof callerQueue.userLyricOffsetMs === 'number') ? callerQueue.userLyricOffsetMs : (lyricsData?.userSavedOffsetMs || 0),
         trackKey: lyricsData?.trackKey || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: activeSyncedLyrics,
@@ -2270,7 +2277,7 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    const clampedOffset = Math.max(-30000, Math.min(30000, Math.round(numOffset)));
+    const clampedOffset = Math.max(-60000, Math.min(60000, Math.round(numOffset)));
 
     // Kiểm tra quyền lưu mốc toàn server: Admin / DJ hoặc là người gọi bài hát đang phát
     const canSaveGlobal = isAdmin || hasMusicPermission(req.member) || (queue?.currentSong?.requestedById === user.userId);
@@ -2284,7 +2291,8 @@ module.exports = function createApiRouter(client) {
 
       // Đồng bộ ngay lập tức sang hàng đợi MusicQueue đang phát nếu có
       if (queue && queue.currentSong) {
-        queue.currentLyricOffsetMs = clampedOffset;
+        queue.userLyricOffsetMs = clampedOffset;
+        queue.currentLyricOffsetMs = clampedOffset + (queue.autoLyricOffsetMs || 0);
         if (queue.hasSyncedLyrics) {
           queue._lastLyricsEditTime = 0; // Bỏ qua cooldown để cập nhật Card ngay
           queue.scheduleNextLyricUpdate(queue.currentSong);
@@ -2329,7 +2337,7 @@ module.exports = function createApiRouter(client) {
       });
     }
 
-    const clampedOffset = Math.max(-30000, Math.min(30000, Math.round(numOffset)));
+    const clampedOffset = Math.max(-60000, Math.min(60000, Math.round(numOffset)));
 
     // Kiểm tra quyền lưu mốc toàn server: Admin / DJ hoặc là người gọi bài hát đang phát
     const canSaveGlobal = isAdmin || hasMusicPermission(member) || (queue?.currentSong?.requestedById === req.user.userId);
@@ -2343,7 +2351,8 @@ module.exports = function createApiRouter(client) {
 
       // Đồng bộ ngay lập tức sang hàng đợi MusicQueue đang phát nếu có
       if (queue && queue.currentSong) {
-        queue.currentLyricOffsetMs = clampedOffset;
+        queue.userLyricOffsetMs = clampedOffset;
+        queue.currentLyricOffsetMs = clampedOffset + (queue.autoLyricOffsetMs || 0);
         if (queue.hasSyncedLyrics) {
           queue._lastLyricsEditTime = 0; // Bỏ qua cooldown để cập nhật Card ngay
           queue.scheduleNextLyricUpdate(queue.currentSong);

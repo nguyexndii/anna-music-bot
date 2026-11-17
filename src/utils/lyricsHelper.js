@@ -1072,24 +1072,31 @@ async function _executeFetchYtdlpInfo(url, norm) {
 
   const cookieHeader = getYouTubeCookieHeader();
 
-  // ── PHƯƠNG PHÁP 1: InnerTube JSON API (IOS / WEB / WEB_REMIX) - Chỉ tải ~15KB JSON, không làm đơ Event Loop ──
+  // ── PHƯƠNG PHÁP 1: InnerTube JSON API (ANDROID_VR / IOS / WEB_REMIX) - Chỉ tải ~15KB JSON, không làm đơ Event Loop ──
   const innerTubeClients = [
     {
-      name: 'IOS',
-      version: '19.45.4',
-      ua: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)',
-      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.1.0.22B83' },
+      name: 'ANDROID_VR',
+      version: '1.60.19',
+      ua: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+      extra: {
+        deviceMake: 'Oculus',
+        deviceModel: 'Quest 3',
+        androidSdkVersion: 32,
+        osName: 'Android',
+        osVersion: '12L'
+      },
       skipThirdParty: true
     },
     {
-      name: 'WEB',
-      version: '2.20241126.01.00',
-      ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      extra: {}
+      name: 'IOS',
+      version: '20.03.02',
+      ua: 'com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)',
+      extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.2.1.22C161' },
+      skipThirdParty: true
     },
     {
       name: 'WEB_REMIX',
-      version: '1.20241118.01.00',
+      version: '1.20250115.01.00',
       ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       extra: {}
     }
@@ -1170,19 +1177,38 @@ async function _executeFetchYtdlpInfo(url, norm) {
         extractJsonAssignedToVar(html, 'window["ytInitialPlayerResponse"] =');
 
       const parsed = buildParsedPlayerInfo(playerResponse);
-      if (parsed) {
+      if (parsed && parsed.hasCaptions) {
         const finalInfo = fallbackParsedInfo ? {
           ...fallbackParsedInfo,
           ...parsed,
           subtitles: { ...(fallbackParsedInfo.subtitles || {}), ...(parsed.subtitles || {}) },
           automatic_captions: { ...(fallbackParsedInfo.automatic_captions || {}), ...(parsed.automatic_captions || {}) },
-          hasCaptions: Boolean(parsed.hasCaptions || fallbackParsedInfo.hasCaptions)
+          hasCaptions: true
         } : parsed;
         setCachedYtdlpInfo(url, finalInfo);
         return finalInfo;
       }
     }
   } catch (watchErr) {}
+
+  // ── PHƯƠNG PHÁP 3: Fallback yt-dlp siêu nhẹ có kiểm soát tải CPU trên VPS 1 Core ──
+  try {
+    const ytdlpInfo = await fetchOfficialSubtitlesViaYtdlp(url);
+    if (ytdlpInfo && (ytdlpInfo.subtitles || ytdlpInfo.automatic_captions)) {
+      const merged = {
+        title: ytdlpInfo.title || fallbackParsedInfo?.title || '',
+        uploader: ytdlpInfo.uploader || ytdlpInfo.channel || fallbackParsedInfo?.uploader || '',
+        channel: ytdlpInfo.channel || ytdlpInfo.uploader || fallbackParsedInfo?.channel || '',
+        duration: ytdlpInfo.duration || fallbackParsedInfo?.duration || 0,
+        description: ytdlpInfo.description || fallbackParsedInfo?.description || '',
+        subtitles: ytdlpInfo.subtitles || {},
+        automatic_captions: ytdlpInfo.automatic_captions || {},
+        hasCaptions: true
+      };
+      setCachedYtdlpInfo(url, merged);
+      return merged;
+    }
+  } catch (ytdlpFallbackErr) {}
 
   if (fallbackParsedInfo) {
     setCachedYtdlpInfo(url, fallbackParsedInfo);
@@ -1193,19 +1219,34 @@ async function _executeFetchYtdlpInfo(url, norm) {
   return null;
 }
 
+function resolveTrackLanguageRegion(context = {}, appleMeta = null) {
+  if (appleMeta && appleMeta.region) return appleMeta.region;
+  try {
+    const { detectTrackRegion } = require('./musicExtractor');
+    if (typeof detectTrackRegion === 'function') {
+      const reg = detectTrackRegion(
+        `${context.rawTitle || ''} ${context.videoTitle || ''}`.trim(),
+        `${context.artist || ''} ${context.uploader || ''}`.trim()
+      );
+      if (reg) return reg;
+    }
+  } catch (e) {}
+  return isVietnameseTrack(context) ? 'VI' : 'INTL';
+}
+
 /**
  * Sắp xếp danh sách các track phụ đề theo thứ tự ưu tiên phù hợp với ngữ cảnh bài hát
  */
-function getRankedSubtitleTracks(subsMap, context = {}) {
+function getRankedSubtitleTracks(subsMap, context = {}, appleMeta = null, allowAsr = false) {
   if (!subsMap || typeof subsMap !== 'object') return [];
   const entries = Object.entries(subsMap).filter(([, arr]) => Array.isArray(arr) && arr.length > 0);
   if (entries.length === 0) return [];
 
-  const isVN = isVietnameseTrack(context);
-  const fullContextStr = `${context.rawTitle || ''} ${context.videoTitle || ''} ${context.artist || ''} ${context.uploader || ''}`;
-  const isKR = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(fullContextStr);
-  const isJP = /[\u3040-\u309F\u30A0-\u30FF]/.test(fullContextStr);
-  const isCN = /[\u4E00-\u9FFF]/.test(fullContextStr);
+  const region = resolveTrackLanguageRegion(context, appleMeta);
+  const isVN = region === 'VI';
+  const isKR = region === 'KR';
+  const isJP = region === 'JP';
+  const isCN = region === 'CN';
 
   const scored = entries.map(([key, trackArr]) => {
     const track = trackArr[0];
@@ -1217,14 +1258,19 @@ function getRankedSubtitleTracks(subsMap, context = {}) {
     let score = 0;
 
     // Tránh các bản dịch tự động sang ngôn ngữ khác (vssId có dạng .t.)
-    if (vssId.includes('.t.')) {
-      score -= 50;
+    if (vssId.includes('.t.') || kLow.includes('tlang=')) {
+      return { key, trackArr, score: -999 };
     }
 
-    if (isVN) {
-      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+    // Nếu không cho phép Auto ASR mà track là ASR -> Loại bỏ ngay lập tức!
+    if (!allowAsr && isAsr) {
+      return { key, trackArr, score: -999 };
+    }
 
+    const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
+    const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
+
+    if (isVN) {
       if (isViLang && !isAsr) {
         score += 150; // Phụ đề tiếng Việt chính thức (do người tải lên)
       } else if (isViLang) {
@@ -1234,48 +1280,40 @@ function getRankedSubtitleTracks(subsMap, context = {}) {
       } else if (isViName) {
         score += 85;
       } else if (kLow.startsWith('und')) {
-        score += 40;
-      } else if (kLow.startsWith('en') || langCode.startsWith('en')) {
-        // CẤM / PHẠT NẶNG track tiếng Anh trên bài nhạc Việt để không nhận nhầm lời dịch tiếng Anh (như bài Thủy Triều)
-        score -= 150;
+        score += 45;
+      } else if (!isAsr && (kLow.startsWith('en') || langCode.startsWith('en'))) {
+        // Cho điểm dương nhỏ (15) với phụ đề chính thức gắn nhầm nhãn 'en' trên MV Việt (sẽ được lọc chữ Việt ở bước đọc text)
+        score += 15;
       } else {
-        score -= 80;
+        score -= 150;
       }
     } else if (isKR) {
-      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
       if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho K-Pop
       else if (kLow.startsWith('ko') || langCode.startsWith('ko')) score += 150;
-      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
+      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 60;
+      else if (kLow.startsWith('und')) score += 30;
       else score -= 50;
     } else if (isJP) {
-      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
       if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho J-Pop
       else if (kLow.startsWith('ja') || langCode.startsWith('ja')) score += 150;
-      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
+      else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 60;
+      else if (kLow.startsWith('und')) score += 30;
       else score -= 50;
     } else if (isCN) {
-      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
       if (isViLang || isViName) score -= 999; // Cấm tuyệt đối bản dịch tiếng Việt cho C-Pop
       else if (kLow.startsWith('zh') || langCode.startsWith('zh')) score += 150;
       else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 50;
+      else if (kLow.startsWith('und')) score += 30;
       else score -= 50;
     } else {
-      const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
-      const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
-      // BÀI HÁT QUỐC TẾ: Cấm tuyệt đối track phụ đề tiếng Việt (bản dịch Vietsub)
       if (isViLang || isViName) {
         score -= 999;
       } else if (kLow === 'en' || kLow === 'en-orig' || kLow.startsWith('en-') || kLow.startsWith('en_') || langCode.startsWith('en')) {
         score += 150;
       } else if (kLow.startsWith('und')) {
         score += 30;
-      } else if (['ja', 'ko', 'zh', 'ar', 'ru', 'th', 'hi', 'fr', 'de', 'es'].some(l => kLow.startsWith(l))) {
-        score -= 50;
       } else {
-        score += 10;
+        score -= 50;
       }
     }
 
@@ -1468,14 +1506,14 @@ function convertEventsToSyncedLyrics(events) {
     const validSubLines = [];
 
     for (const subLine of subLines) {
-      const cleaned = subLine.replace(/^[♪♫♬\s\-–—]+|[♪♫♬\s\-–—]+$/g, '').trim();
+      let cleaned = subLine.replace(/^[♪♫♬\s\-–—]+|[♪♫♬\s\-–—]+$/g, '').trim();
+      // 1. Xóa ký tự điều hướng hoặc speaker indicator (>> hoặc > hoặc »)
+      cleaned = cleaned.replace(/^[>»]+\s*/g, '').trim();
+      // 2. Xóa các tag chú thích âm thanh dù ở đầu, giữa hay cuối câu: [âm nhạc], (tiếng vỗ tay), [music]...
+      cleaned = cleaned.replace(/\[\s*(?:âm\s*nhạc|nhạc|tiếng\s*vỗ\s*tay|tiếng\s*cười|tiếng\s*hò\s*reo|music|applause|laughter|intro|outro|lời\s*bài\s*hát|subtitles?|caption|instrumental)\s*\]/gi, '').trim();
+      cleaned = cleaned.replace(/\(\s*(?:âm\s*nhạc|nhạc|tiếng\s*vỗ\s*tay|tiếng\s*cười|tiếng\s*hò\s*reo|music|applause|laughter|intro|outro|instrumental)\s*\)/gi, '').trim();
+      cleaned = cleaned.replace(/^[♪♫♬\s\-–—]+|[♪♫♬\s\-–—]+$/g, '').trim();
       if (!cleaned) continue;
-      // Bỏ qua chú thích âm thanh [Âm nhạc], [Music], (Tiếng vỗ tay), [Tiếng cười]...
-      if (/^\[[\p{L}\p{N}\s.,!&'-]+\]$/u.test(cleaned) || /^\([\p{L}\p{N}\s.,!&'-]+\)$/u.test(cleaned)) {
-        if (/\b(?:âm\s*nhạc|nhạc|tiếng\s*vỗ\s*tay|tiếng\s*cười|tiếng\s*hò\s*reo|music|applause|laughter|intro|outro|lời\s*bài\s*hát|subtitles?|caption)\b/i.test(cleaned)) {
-          continue;
-        }
-      }
       // Bỏ qua dòng credit đầu/cuối MV
       if (creditNoiseRegex.test(cleaned)) {
         continue;
@@ -1619,7 +1657,7 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
 
   try {
     const { isCpuOverloaded } = require('./systemMonitor');
-    if (typeof isCpuOverloaded === 'function' && isCpuOverloaded(1.35)) {
+    if (typeof isCpuOverloaded === 'function' && isCpuOverloaded(0.95)) {
       return null;
     }
   } catch (e) {}
@@ -1630,13 +1668,33 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
     try {
       const infoOpts = {
         dumpSingleJson: true,
+        noPlaylist: true,
         noWarnings: true,
-        preferFreeFormats: true,
-        skipDownload: true
+        skipDownload: true,
+        socketTimeout: 5,
+        retries: 1,
+        extractorArgs: 'youtube:player_client=android,ios,mweb',
+        jsRuntimes: `node:${process.execPath}`,
+        noCheckCertificates: true
       };
+
+      const candidates = [
+        process.env.YTDLP_COOKIES_FILE,
+        path.resolve(__dirname, '../../youtube.cookies'),
+        path.resolve(process.cwd(), 'youtube.cookies'),
+        '/root/anna-music-bot/youtube.cookies'
+      ].filter(Boolean);
+
+      for (const cookiePath of candidates) {
+        if (fs.existsSync(cookiePath) && fs.statSync(cookiePath).size > 100) {
+          infoOpts.cookies = cookiePath;
+          break;
+        }
+      }
+
       const info = await Promise.race([
         ytdlp(url, infoOpts),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle dump timeout')), 14000))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle timeout')), 5500))
       ]).catch(() => null);
 
       if (!info) return null;
@@ -1657,7 +1715,7 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
 }
 
 /**
- * TẦNG 1: Trích xuất phụ đề CC chính thức từ YouTube Video (Duyệt qua mọi candidate track để không bỏ sót)
+ * TẦNG 1: Trích xuất phụ đề CC chính thức & Auto ASR từ YouTube Video (Duyệt qua mọi candidate track để không bỏ sót)
  */
 async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
   if (!isSafeYouTubeUrl(url)) return null;
@@ -1668,7 +1726,9 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
     // Tầng 0: Kiểm tra metadata phụ đề đã lưu sẵn trong RAM lúc musicExtractor tải bài
     if (videoId && youtubeSubtitlesMetaCache.has(videoId)) {
       const cachedMeta = youtubeSubtitlesMetaCache.get(videoId);
-      if (cachedMeta && (cachedMeta.subtitles || cachedMeta.automaticCaptions)) {
+      const hasAnySubs = (cachedMeta?.subtitles && Object.keys(cachedMeta.subtitles).length > 0) ||
+                         (cachedMeta?.automaticCaptions && Object.keys(cachedMeta.automaticCaptions).length > 0);
+      if (hasAnySubs) {
         info = {
           title: rawTitle,
           uploader: artist,
@@ -1682,6 +1742,7 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
     if (!info) {
       info = await fetchYtdlpInfo(url);
     }
+    if (!info) return null;
 
     const context = {
       rawTitle,
@@ -1690,15 +1751,52 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       uploader: info?.uploader || info?.channel || ''
     };
 
-    const isVN = appleMeta ? (appleMeta.region === 'VI') : isVietnameseTrack(context);
-    const fullContextStr = `${rawTitle || ''} ${context.videoTitle || ''} ${artist || ''} ${context.uploader || ''}`;
-    const isKR = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(fullContextStr);
-    const isJP = /[\u3040-\u309F\u30A0-\u30FF]/.test(fullContextStr);
-    const isCN = /[\u4E00-\u9FFF]/.test(fullContextStr);
-    const rankedOfficialTracks = getRankedSubtitleTracks(info?.subtitles || {}, context);
-    const rankedAutoTracks = getRankedSubtitleTracks(info?.automatic_captions || {}, context);
+    const region = resolveTrackLanguageRegion(context, appleMeta);
+    const isVN = region === 'VI';
+    const isKR = region === 'KR';
+    const isJP = region === 'JP';
+    const isCN = region === 'CN';
 
-    // BƯỚC 1: Duyệt qua tất cả phụ đề chính thức (Official CC do ca sĩ/kênh tải lên)
+    // CHỈ duyệt phụ đề chính thức (Official CC do ca sĩ/kênh tải lên) - TUYỆT ĐỐI KHÔNG LẤY AUTO ASR!
+    const rankedOfficialTracks = getRankedSubtitleTracks(info?.subtitles || {}, context, appleMeta, false);
+    if (!rankedOfficialTracks || rankedOfficialTracks.length === 0) {
+      return null;
+    }
+
+    const validateAndBuildCcResult = (syncedLyrics, plainLines) => {
+      const minLines = 5;
+      if (syncedLyrics.length < minLines) return null;
+      const sampleText = plainLines.slice(0, 25).join(' ');
+      if (isVN) {
+        const hasVnAccents = VIETNAMESE_REGEX.test(sampleText);
+        if (!hasVnAccents) {
+          const englishStopWords = /\b(the|and|you|that|with|have|this|from|they|will|would|there|their|what|about|which|when|make|like|time|just|know|take|people|into|year|your|good|some|could|them|other|than|then|now|look|only|come|over|think|also|back|after|use|two|how|our|work|first|well|way|even|new|want|because|any|these|give|day|most|us)\b/gi;
+          const engMatches = sampleText.match(englishStopWords) || [];
+          const hasVnSyllables = typeof hasVietnameseSyllablePattern === 'function' && hasVietnameseSyllablePattern(sampleText);
+          if (engMatches.length >= 6 && !hasVnSyllables) return null;
+        }
+      } else {
+        if (VIETNAMESE_REGEX.test(sampleText)) return null;
+        if (!isJP && !isKR && !isCN && /[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+          return null;
+        }
+      }
+
+      return {
+        title: info.title || rawTitle || 'YouTube Track',
+        artist: info.uploader || info.channel || artist || '',
+        lyrics: plainLines.join('\n'),
+        syncedLyrics,
+        duration: info.duration,
+        autoOffsetMs: 0,
+        trackKey,
+        userSavedOffsetMs: userSavedOffsetMs || 0,
+        source: 'youtube_cc',
+        isOfficialCc: true
+      };
+    };
+
+    // Duyệt qua tất cả phụ đề chính thức (Official CC do ca sĩ/kênh tải lên)
     for (const candidateTrackList of rankedOfficialTracks) {
       const subTarget = candidateTrackList.find(s => s.ext === 'json3') || candidateTrackList[0];
       if (!subTarget) continue;
@@ -1707,43 +1805,10 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       if (!events || events.length === 0) continue;
 
       const { syncedLyrics, plainLines } = convertEventsToSyncedLyrics(events);
-      if (syncedLyrics.length >= 5) {
-        if (isVN) {
-          const sampleText = plainLines.slice(0, 20).join(' ');
-          const hasVnAccents = VIETNAMESE_REGEX.test(sampleText);
-          if (!hasVnAccents) {
-            const englishStopWords = /\b(the|and|you|that|with|have|this|from|they|will|would|there|their|what|about|which|when|make|like|time|just|know|take|people|into|year|your|good|some|could|them|other|than|then|now|look|only|come|over|think|also|back|after|use|two|how|our|work|first|well|way|even|new|want|because|any|these|give|day|most|us)\b/gi;
-            const engMatches = sampleText.match(englishStopWords) || [];
-            const hasVnSyllables = typeof hasVietnameseSyllablePattern === 'function' && hasVietnameseSyllablePattern(sampleText);
-            if (engMatches.length >= 8 && !hasVnSyllables) {
-              continue;
-            }
-          }
-        } else {
-          const sampleText = plainLines.slice(0, 20).join(' ');
-          if (VIETNAMESE_REGEX.test(sampleText)) {
-            continue;
-          }
-          if (!isJP && !isKR && !isCN) {
-            if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
-              continue;
-            }
-          }
-        }
-
-        console.log(`[Lyrics CC] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chính thức từ video YouTube: ${info.title || url}`);
-        return {
-          title: info.title || rawTitle || 'YouTube Track',
-          artist: info.uploader || info.channel || artist || '',
-          lyrics: plainLines.join('\n'),
-          syncedLyrics,
-          duration: info.duration,
-          autoOffsetMs: 0,
-          trackKey,
-          userSavedOffsetMs: userSavedOffsetMs || 0,
-          source: 'youtube_cc',
-          isOfficialCc: true
-        };
+      const res = validateAndBuildCcResult(syncedLyrics, plainLines);
+      if (res) {
+        console.log(`[Lyrics CC Official] Đã trích xuất ${syncedLyrics.length} câu phụ đề CC chính thức từ video YouTube: ${info.title || url}`);
+        return res;
       }
     }
   } catch (e) {}
@@ -1756,16 +1821,16 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
 async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec, lrcDurationSec = 0) {
   if (!isSafeYouTubeUrl(url) || !syncedLyrics || syncedLyrics.length === 0) return 0;
 
-  // ── BƯỚC 0: Nhận diện đoạn diễn xuất / kịch đầu MV qua SponsorBlock API (~60-150ms) ──
+  // ── BƯỚC 0: Nhận diện đoạn diễn xuất / kịch ngoài âm nhạc qua SponsorBlock API (~60-150ms) ──
   const videoId = extractVideoId(url);
   if (videoId) {
     try {
-      const sbUrl = `https://sponsor.ajay.app/api/skipSegments?videoID=${videoId}&categories=${encodeURIComponent(JSON.stringify(['music_offtopic', 'intro']))}`;
+      const sbUrl = `https://sponsor.ajay.app/api/skipSegments?videoID=${videoId}&categories=${encodeURIComponent(JSON.stringify(['music_offtopic']))}`;
       const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(1000) });
       if (sbRes.ok) {
         const segments = await sbRes.json();
         if (Array.isArray(segments)) {
-          // Tìm phân đoạn offtopic / intro ở đầu video (bắt đầu trong 3 giây đầu, dài từ 2s đến 180s, và locked === 1 hoặc votes >= 2)
+          // Tìm phân đoạn offtopic ở đầu video (bắt đầu trong 3 giây đầu, dài từ 2s đến 180s, và locked === 1 hoặc votes >= 2)
           const introSeg = segments.find(s =>
             Array.isArray(s.segment) &&
             s.segment[0] <= 3.0 &&
@@ -1775,7 +1840,7 @@ async function detectYouTubeIntroOffset(url, syncedLyrics, targetDurationSec, lr
           );
           if (introSeg) {
             const introDurationMs = Math.round(introSeg.segment[1] * 1000);
-            console.log(`[Lyrics Auto-Offset SponsorBlock] Phát hiện MV có đoạn kịch/intro đầu video dài ${(introDurationMs / 1000).toFixed(2)}s, tự động lùi mốc lời!`);
+            console.log(`[Lyrics Auto-Offset SponsorBlock] Phát hiện MV có đoạn kịch/offtopic đầu video dài ${(introDurationMs / 1000).toFixed(2)}s, tự động lùi mốc lời!`);
             return -introDurationMs;
           }
         }
@@ -1922,7 +1987,6 @@ async function buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurat
     isRemixOrDurationMismatch: Boolean(isTrueRemix && isRemixOrDurationMismatch),
     hasTriedCc: isYt
   };
-  setCachedLyrics(cacheKey, lrclibResult);
   return lrclibResult;
 }
 
@@ -1970,34 +2034,56 @@ function formatLrcTimestamp(ms) {
   return `[${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}]`;
 }
 
-function findBestZingSong(songs, targetTitle, targetArtist, expectedArtists = []) {
+const ROMAJI_HANGUL_ROMAJA_NOISE_REGEX = /\b(wasurerarenai|sayonara|anata|watashi|kokoro|modorenai|uketomeru|honto\s+ni|dekiru\s+koto|kono\s+mama|kimi\s+no|boku\s+no|aishiteru|saranghae|neukkyeobwa|sesangeul|michyeo|chagapdeon)\b/i;
+
+function findBestZingSong(songs, targetTitle, targetArtist, expectedArtists = [], targetDurationSec = 0) {
   if (!Array.isArray(songs) || songs.length === 0) return null;
   const variants = generateVietnameseNumberVariants(cleanTitle(targetTitle));
   const cleanTargets = variants.map(v => normalizeStr(v)).filter(Boolean);
-  const expArtList = (Array.isArray(expectedArtists) && expectedArtists.length > 0) ? expectedArtists : (targetArtist ? [targetArtist] : []);
-  const cleanTargetArtists = expArtList.map(a => normalizeStr(cleanArtistName(a))).filter(Boolean);
+  const expArtList = (Array.isArray(expectedArtists) && expectedArtists.length > 0)
+    ? expectedArtists
+    : (targetArtist ? [targetArtist] : []);
+  const cleanTargetArtists = expArtList
+    .map(a => normalizeStr(cleanArtistName(a)))
+    .filter(a => a && !['youtube', 'youtubemusic', 'unknown', 'variousartists'].includes(a));
 
-  // 1. Tìm bài trùng cả tên (theo bất kỳ biến thể nào) và ca sĩ
+  const isTitleExactOrStrongMatch = (sName) => {
+    if (!sName) return false;
+    return cleanTargets.some(ct => {
+      if (sName === ct) return true;
+      // Chỉ cho phép includes nếu tên bài có từ 2 từ trở lên (>= 7 ký tự) để tránh từ ngắn như "Let Go", "Stay" bắt nhầm bài khác
+      if (ct.length >= 7 && ct.includes(' ') && (sName.includes(ct) || ct.includes(sName))) {
+        return true;
+      }
+      return false;
+    });
+  };
+
+  // BẮT BUỘC: Nếu biết tên ca sĩ, PHẢI khớp cả tên bài lẫn ca sĩ! Tuyệt đối không lấy bài của ca sĩ khác!
   if (cleanTargetArtists.length > 0) {
     const exactMatch = songs.find(s => {
       const sName = normalizeStr(s.name);
       const sArtist = normalizeStr(s.artist || s.artistsNames || '');
-      const titleMatched = cleanTargets.some(ct => sName === ct || sName.includes(ct) || ct.includes(sName));
+      const titleMatched = isTitleExactOrStrongMatch(sName);
       const artistMatched = cleanTargetArtists.some(cta => sArtist.includes(cta) || cta.includes(sArtist));
-      return titleMatched && artistMatched;
+      if (!titleMatched || !artistMatched) return false;
+      if (targetDurationSec > 30 && s.duration > 30 && !detectVariantTrack(targetTitle)) {
+        if (Math.abs(Number(s.duration) - targetDurationSec) > 25) return false;
+      }
+      return true;
     });
-    if (exactMatch) return exactMatch;
+    return exactMatch || null;
   }
 
-  // 2. Tìm bài trùng tên bài hát (theo bất kỳ biến thể nào)
-  const titleMatch = songs.find(s => {
+  // Trường hợp hoàn toàn không có thông tin ca sĩ: Phải khớp chính xác 100% tên bài và thời lượng (lệch <= 12s)
+  return songs.find(s => {
     const sName = normalizeStr(s.name);
-    return cleanTargets.some(ct => sName === ct || sName.includes(ct) || ct.includes(sName));
-  });
-  if (titleMatch) return titleMatch;
-
-  // 3. Không có bài nào khớp tên -> Trả về null (tránh nhận nhầm bài khác của cùng ca sĩ)
-  return null;
+    if (!cleanTargets.some(ct => sName === ct)) return false;
+    if (targetDurationSec > 30 && s.duration > 30) {
+      return Math.abs(Number(s.duration) - targetDurationSec) <= 12;
+    }
+    return true;
+  }) || null;
 }
 
 async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
@@ -2045,8 +2131,6 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
 
     let songList = null;
     let matchedSong = null;
-    const variantsNorm = titleVariants.map(v => normalizeStr(v)).filter(Boolean);
-    const expectedArtistsNorm = expectedArtists.map(a => normalizeStr(cleanArtistName(a))).filter(Boolean);
 
     for (const q of queries) {
       const acUrl = `https://ac.zingmp3.vn/complete?type=artist,song,key,hub&num=5&query=${encodeURIComponent(q)}`;
@@ -2061,25 +2145,15 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
         const acData = await acRes.json().catch(() => null);
         const songs = acData?.data?.[0]?.song;
         if (Array.isArray(songs) && songs.length > 0) {
-          const candidate = findBestZingSong(songs, rawTitle, artist, expectedArtists);
-          const sNameNorm = normalizeStr(candidate?.name || '');
-          const sArtistNorm = normalizeStr(candidate?.artist || candidate?.artistsNames || '');
-          const isNameMatch = variantsNorm.some(v => sNameNorm === v || sNameNorm.includes(v) || v.includes(sNameNorm));
-          const isArtistMatch = expectedArtistsNorm.length === 0 || expectedArtistsNorm.some(ea => sArtistNorm.includes(ea) || ea.includes(sArtistNorm));
-
-          if (candidate && isNameMatch && isArtistMatch) {
+          const candidate = findBestZingSong(songs, rawTitle, artist, expectedArtists, targetDurationSec);
+          if (candidate) {
             songList = songs;
             matchedSong = candidate;
             break;
-          } else if (candidate && isNameMatch && !matchedSong) {
-            songList = songs;
-            matchedSong = candidate;
           }
         }
       }
     }
-
-    if (!matchedSong) return null;
 
     if (!matchedSong || !matchedSong.id) return null;
 
@@ -2148,6 +2222,17 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
 
     if (!syncedLyrics && !plainLyrics) return null;
 
+    const combinedText = plainLyrics || (syncedLyrics ? syncedLyrics.map(s => s.text).join('\n') : '');
+    if (!isLyricLanguageConsistent(rawTitle, artist, combinedText)) {
+      return null;
+    }
+    const region = resolveTrackLanguageRegion({ rawTitle, artist }, appleMeta);
+    // Nếu là bài Âu Mỹ (INTL) hoặc K-Pop/J-Pop/C-Pop mà Zing MP3 trả về phiên âm Romaji/Romaja -> Loại bỏ ngay!
+    if (region !== 'VI' && ROMAJI_HANGUL_ROMAJA_NOISE_REGEX.test(combinedText)) {
+      console.log(`[ZingMP3 Guard] Loại bỏ lời phiên âm Romaji/Romaja không chuẩn cho bài quốc tế: "${rawTitle}"`);
+      return null;
+    }
+
     let autoOffsetMs = 0;
     if (syncedLyrics && targetUrl && (targetUrl.includes('youtube.com') || targetUrl.includes('youtu.be'))) {
       try {
@@ -2172,117 +2257,142 @@ async function fetchZingMp3Lyrics(rawTitle, artist = '', targetDurationSec = 0, 
   }
 }
 
+async function querySingleLrclibVariant(item, rawTitle, artist, targetDurationSec, targetUrl, cacheKey, trackKey, userSavedOffsetMs) {
+  try {
+    if (item.track && item.artist) {
+      const getUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(item.track)}&artist_name=${encodeURIComponent(item.artist)}`;
+      const res = await fetch(getUrl, {
+        headers: { 'User-Agent': 'AnnaMusicBot/2.0 (Discord Music Bot)' },
+        signal: AbortSignal.timeout(2500)
+      }).catch(() => null);
+      if (res && res.ok) {
+        const match = await res.json().catch(() => null);
+        if (match && (match.plainLyrics || match.syncedLyrics)) {
+          if (!isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics)) {
+            if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+              const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
+              const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
+
+              if (isExactTier1) {
+                if (match.syncedLyrics && match.syncedLyrics.trim().length > 10) {
+                  const built = await buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, false);
+                  if (built) return { exactSynced: built };
+                } else if (match.plainLyrics) {
+                  return {
+                    plainFallback: {
+                      title: match.trackName || rawTitle,
+                      artist: match.artistName || artist || '',
+                      lyrics: match.plainLyrics.trim(),
+                      syncedLyrics: null,
+                      duration: match.duration,
+                      autoOffsetMs: 0,
+                      trackKey,
+                      userSavedOffsetMs: userSavedOffsetMs || 0,
+                      source: 'lrclib'
+                    }
+                  };
+                }
+              } else {
+                return { fallbackRecord: match };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const queryStr = item.q || `${item.track || ''} ${item.artist || ''}`.trim();
+    if (queryStr) {
+      const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(queryStr)}`;
+      const res = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'AnnaMusicBot/2.0 (Discord Music Bot)' },
+        signal: AbortSignal.timeout(2500)
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null);
+        const results = Array.isArray(data) ? data : (data ? [data] : []);
+        if (results.length > 0) {
+          results.sort((a, b) => {
+            const aValid = isValidMatch(a, item.expectedTrack || item.track, item.expectedArtist || item.artist);
+            const bValid = isValidMatch(b, item.expectedTrack || item.track, item.expectedArtist || item.artist);
+            if (aValid && !bValid) return -1;
+            if (!aValid && bValid) return 1;
+
+            if (targetDurationSec > 0) {
+              const aDiff = typeof a.duration === 'number' ? Math.abs(a.duration - targetDurationSec) : 9999;
+              const bDiff = typeof b.duration === 'number' ? Math.abs(b.duration - targetDurationSec) : 9999;
+              return aDiff - bDiff;
+            }
+            return 0;
+          });
+
+          for (const match of results) {
+            const hasSynced = Boolean(match?.syncedLyrics && match.syncedLyrics.trim().length > 10);
+            const hasPlain = Boolean(match?.plainLyrics && match.plainLyrics.trim().length > 10);
+
+            if ((hasSynced || hasPlain) && !isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics) && isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
+              const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
+              const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
+
+              if (isExactTier1) {
+                if (hasSynced) {
+                  const built = await buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, false);
+                  if (built) return { exactSynced: built };
+                } else if (hasPlain) {
+                  return {
+                    plainFallback: {
+                      title: match.trackName || rawTitle,
+                      artist: match.artistName || artist || '',
+                      lyrics: match.plainLyrics.trim(),
+                      syncedLyrics: null,
+                      duration: match.duration,
+                      autoOffsetMs: 0,
+                      trackKey,
+                      userSavedOffsetMs: userSavedOffsetMs || 0,
+                      source: 'lrclib'
+                    }
+                  };
+                }
+              } else {
+                return { fallbackRecord: match };
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function fetchLrclibLyrics(rawTitle, artist = '', targetDurationSec = 0, targetUrl = null, cacheKey = null, trackKey = null, userSavedOffsetMs = 0, appleMeta = null) {
   const variants = generateSearchVariants(rawTitle, artist, appleMeta).slice(0, 6);
   let plainFallback = null;
   let fallbackRecord = null;
 
-  for (const item of variants) {
-    try {
-      if (item.track && item.artist) {
-        const getUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(item.track)}&artist_name=${encodeURIComponent(item.artist)}`;
-        const res = await fetch(getUrl, {
-          headers: { 'User-Agent': 'AnnaMusicBot/2.0 (Discord Music Bot)' },
-          signal: AbortSignal.timeout(2500)
-        }).catch(() => null);
-        if (res && res.ok) {
-          const match = await res.json().catch(() => null);
-          if (match && (match.plainLyrics || match.syncedLyrics)) {
-            if (!isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics)) {
-              if (isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-                const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
-                const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
+  // Tăng tốc: Chạy song song 3 biến thể ưu tiên cao nhất cùng lúc (Promise.all)
+  const primaryVariants = variants.slice(0, 3);
+  const secondaryVariants = variants.slice(3);
 
-                if (isExactTier1) {
-                  if (match.syncedLyrics && match.syncedLyrics.trim().length > 10) {
-                    const built = await buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, false);
-                    if (built) return { exactSynced: built };
-                  } else if (!plainFallback && match.plainLyrics) {
-                    plainFallback = {
-                      title: match.trackName || rawTitle,
-                      artist: match.artistName || artist || '',
-                      lyrics: match.plainLyrics.trim(),
-                      syncedLyrics: null,
-                      duration: match.duration,
-                      autoOffsetMs: 0,
-                      trackKey,
-                      userSavedOffsetMs: userSavedOffsetMs || 0,
-                      source: 'lrclib'
-                    };
-                  }
-                } else {
-                  if (!fallbackRecord || (!fallbackRecord.syncedLyrics && match.syncedLyrics)) {
-                    fallbackRecord = match;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+  const primaryResults = await Promise.all(
+    primaryVariants.map(v => querySingleLrclibVariant(v, rawTitle, artist, targetDurationSec, targetUrl, cacheKey, trackKey, userSavedOffsetMs))
+  );
 
-      const queryStr = item.q || `${item.track || ''} ${item.artist || ''}`.trim();
-      if (queryStr) {
-        const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(queryStr)}`;
-        const res = await fetch(searchUrl, {
-          headers: { 'User-Agent': 'AnnaMusicBot/2.0 (Discord Music Bot)' },
-          signal: AbortSignal.timeout(2500)
-        }).catch(() => null);
+  for (const res of primaryResults) {
+    if (!res) continue;
+    if (res.exactSynced) return { exactSynced: res.exactSynced };
+    if (!plainFallback && res.plainFallback) plainFallback = res.plainFallback;
+    if (!fallbackRecord && res.fallbackRecord) fallbackRecord = res.fallbackRecord;
+  }
 
-        if (res && res.ok) {
-          const data = await res.json().catch(() => null);
-          const results = Array.isArray(data) ? data : (data ? [data] : []);
-          if (results.length > 0) {
-            results.sort((a, b) => {
-              const aValid = isValidMatch(a, item.expectedTrack || item.track, item.expectedArtist || item.artist);
-              const bValid = isValidMatch(b, item.expectedTrack || item.track, item.expectedArtist || item.artist);
-              if (aValid && !bValid) return -1;
-              if (!aValid && bValid) return 1;
-
-              if (targetDurationSec > 0) {
-                const aDiff = typeof a.duration === 'number' ? Math.abs(a.duration - targetDurationSec) : 9999;
-                const bDiff = typeof b.duration === 'number' ? Math.abs(b.duration - targetDurationSec) : 9999;
-                return aDiff - bDiff;
-              }
-              return 0;
-            });
-
-            for (const match of results) {
-              const hasSynced = Boolean(match?.syncedLyrics && match.syncedLyrics.trim().length > 10);
-              const hasPlain = Boolean(match?.plainLyrics && match.plainLyrics.trim().length > 10);
-
-              if ((hasSynced || hasPlain) && !isGarbageLyrics(match.plainLyrics) && !isGarbageLyrics(match.syncedLyrics) && isLyricLanguageConsistent(rawTitle, artist, match.plainLyrics || match.syncedLyrics) && isValidMatch(match, item.expectedTrack || item.track, item.expectedArtist || item.artist)) {
-                const durDiff = (targetDurationSec > 0 && typeof match.duration === 'number') ? Math.abs(match.duration - targetDurationSec) : 0;
-                const isExactTier1 = (durDiff <= 15) || (!detectVariantTrack(rawTitle) && durDiff <= 60) || (targetDurationSec === 0);
-
-                if (isExactTier1) {
-                  if (hasSynced) {
-                    const built = await buildLrclibResult(match, rawTitle, artist, targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, false);
-                    if (built) return { exactSynced: built };
-                  } else if (!plainFallback && hasPlain) {
-                    plainFallback = {
-                      title: match.trackName || rawTitle,
-                      artist: match.artistName || artist || '',
-                      lyrics: match.plainLyrics.trim(),
-                      syncedLyrics: null,
-                      duration: match.duration,
-                      autoOffsetMs: 0,
-                      trackKey,
-                      userSavedOffsetMs: userSavedOffsetMs || 0,
-                      source: 'lrclib'
-                    };
-                  }
-                } else {
-                  if (!fallbackRecord || (!fallbackRecord.syncedLyrics && match.syncedLyrics)) {
-                    fallbackRecord = match;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {}
+  // Nếu 3 biến thể đầu chưa ra exactSynced, duyệt tuần tự các biến thể phụ còn lại
+  for (const item of secondaryVariants) {
+    const res = await querySingleLrclibVariant(item, rawTitle, artist, targetDurationSec, targetUrl, cacheKey, trackKey, userSavedOffsetMs);
+    if (!res) continue;
+    if (res.exactSynced) return { exactSynced: res.exactSynced };
+    if (!plainFallback && res.plainFallback) plainFallback = res.plainFallback;
+    if (!fallbackRecord && res.fallbackRecord) fallbackRecord = res.fallbackRecord;
   }
 
   return { plainFallback, fallbackRecord };
@@ -2366,6 +2476,32 @@ function pickBestLyricsCandidate(candidates) {
   return best.result;
 }
 
+/**
+ * Tự động sắp xếp và lọc các tầng nguồn theo khu vực ngôn ngữ của bài hát
+ * - 'VI' (Nhạc Việt): ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics']
+ * - 'KR', 'JP', 'CN' (K-Pop, J-Pop, C-Pop): LOẠI BỎ 'zingmp3' hoàn toàn để tránh lời phiên âm Romaji/Romaja hoặc tiếng Việt chèn vào
+ * - 'INTL' (Âu Mỹ / Quốc tế): Đặt 'lrclib' trước 'zingmp3'
+ */
+function getDynamicLyricsLayers(configuredLayers, trackRegion) {
+  const baseLayers = (Array.isArray(configuredLayers) && configuredLayers.length > 0)
+    ? [...configuredLayers]
+    : ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'];
+
+  if (trackRegion === 'KR' || trackRegion === 'JP' || trackRegion === 'CN') {
+    return baseLayers.filter(l => l !== 'zingmp3');
+  }
+
+  if (trackRegion === 'INTL') {
+    const withoutZing = baseLayers.filter(l => l !== 'zingmp3');
+    if (baseLayers.includes('zingmp3')) {
+      withoutZing.push('zingmp3'); // Đẩy Zing MP3 xuống làm fallback cuối cùng
+    }
+    return withoutZing;
+  }
+
+  return baseLayers;
+}
+
 async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null) {
   if (!rawTitle || typeof rawTitle !== 'string') return null;
 
@@ -2395,14 +2531,21 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   const fallbackKey = generateTrackKey(rawTitle, artist, null);
   const userSavedOffsetMs = await getSavedLyricOffset(trackKey, fallbackKey);
 
-  const activeLayers = (Array.isArray(lyricsLayers) && lyricsLayers.length > 0)
-    ? lyricsLayers
-    : ['youtube_cc', 'zingmp3', 'lrclib', 'syncedlyrics'];
+  // Tra cứu metadata chuẩn từ Apple Music (chạy 1 lần, có RAM Cache 24h & deduplication)
+  const appleMeta = await resolveAppleMusicMetadata(rawTitle, artist).catch(() => null);
+  const trackRegion = resolveTrackLanguageRegion({ rawTitle, artist }, appleMeta);
+  const activeLayers = getDynamicLyricsLayers(lyricsLayers, trackRegion);
 
   const cached = getCachedLyrics(cacheKey);
   if (cached) {
     if (cached.notFound) return cached;
     if (isGarbageLyrics(cached.lyrics)) {
+      lyricsMemoryCache.delete(cacheKey);
+    } else if (cached.isAutoAsr || (cached.source === 'youtube_cc' && !cached.isOfficialCc)) {
+      // Loại bỏ ngay bản cache cũ dính Auto ASR rác
+      lyricsMemoryCache.delete(cacheKey);
+    } else if ((trackRegion === 'KR' || trackRegion === 'JP' || trackRegion === 'CN') && cached.source === 'zingmp3') {
+      // Loại bỏ bản cache cũ từ Zing MP3 cho bài hát K-Pop/J-Pop/C-Pop
       lyricsMemoryCache.delete(cacheKey);
     } else if (activeLayers.includes(cached.source) || !cached.source) {
       return {
@@ -2443,9 +2586,6 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   let fallbackRecord = null;
   let fallbackResult = null;
 
-  // Tra cứu metadata chuẩn từ Apple Music (chạy 1 lần, có RAM Cache 24h & deduplication)
-  const appleMeta = await resolveAppleMusicMetadata(rawTitle, artist).catch(() => null);
-
   // ── ƯU TIÊN CHẤT LƯỢNG TUYỆT ĐỐI: ĐỢI YOUTUBE CC SUBTITLES TRƯỚC ──
   // Đối với video YouTube, luôn ưu tiên lấy phụ đề chính thức của video gốc để giữ nguyên ngôn ngữ gốc (Hangul/K-Pop/J-Pop),
   // chỉ khi video không có phụ đề CC mới fallback sang Zing MP3 / LRCLIB / khác.
@@ -2476,6 +2616,9 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
     return idx !== -1 ? idx : 999;
   };
 
+  // Nguồn ưu tiên cao nhất còn lại trong cuộc đua song song (bỏ qua youtube_cc đã chạy trước)
+  const topRemainingLayer = activeLayers.find(l => l !== 'youtube_cc') || activeLayers[0];
+
   const recordCandidate = (layerName, res) => {
     if (!res || !Array.isArray(res.syncedLyrics) || res.syncedLyrics.length < 3) return;
     const quality = evaluateLyricsQuality(res.syncedLyrics);
@@ -2489,17 +2632,9 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
     if (!firstCandidateTimestamp) {
       firstCandidateTimestamp = Date.now();
     }
-    // Cập nhật RAM Cache & phát event Hot-Attach cho bài đang phát
-    setCachedLyrics(cacheKey, res);
-    lyricsEvents.emit('lyricsFound', {
-      url: normalizedUrl || targetUrl,
-      cacheKey,
-      trackKey,
-      lyricsData: res
-    });
 
-    // Nếu là nguồn ưu tiên số 1 của người dùng VÀ không bị thủng đoạn -> Chốt thắng ngay (0ms delay)
-    if (candidate.priority === 0 && !candidate.quality.hasAbnormalGap) {
+    // Nếu là nguồn ưu tiên cao nhất còn lại trong cuộc đua VÀ không bị thủng đoạn -> Chốt thắng ngay (0ms delay)
+    if (layerName === topRemainingLayer && !candidate.quality.hasAbnormalGap) {
       hasTopPriorityPerfectWinner = true;
     }
   };
@@ -2564,7 +2699,7 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   // Đua song song thông minh:
   // - Nếu nguồn ưu tiên #1 hoàn hảo: Chốt ngay không chờ
   // - Nếu nguồn về trước bị thủng đoạn (gap >= 22s): Cho phép cửa sổ đợi 700ms để nguồn khác cứu cánh
-  // - Nếu nguồn về trước không phải ưu tiên #1: Chờ cửa sổ ưu tiên ngắn 250ms
+  // - Nếu nguồn về trước không phải ưu tiên #1: Chờ cửa sổ ưu tiên 650ms để LRCLIB kịp về
   await Promise.race([
     new Promise(resolve => {
       const interval = setInterval(() => {
@@ -2577,8 +2712,8 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
           const elapsedSinceFirst = Date.now() - firstCandidateTimestamp;
           const hasFlawlessCandidate = candidates.some(c => !c.quality.hasAbnormalGap);
 
-          // Trường hợp 1: Đã có nguồn không bị thủng lỗ và đã qua cửa sổ ưu tiên 250ms
-          if (hasFlawlessCandidate && elapsedSinceFirst >= 250) {
+          // Trường hợp 1: Đã có nguồn không bị thủng lỗ và đã qua cửa sổ ưu tiên 650ms
+          if (hasFlawlessCandidate && elapsedSinceFirst >= 650) {
             clearInterval(interval);
             return resolve();
           }
@@ -2604,13 +2739,21 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
 
   if (syncedWinner) {
     setCachedLyrics(cacheKey, syncedWinner);
+    lyricsEvents.emit('lyricsFound', {
+      url: normalizedUrl || targetUrl,
+      cacheKey,
+      trackKey,
+      lyricsData: syncedWinner
+    });
     return syncedWinner;
   }
 
   // Nếu không tầng nào ra Synced Lyrics chuẩn, thử lấy fallback synced từ bản gốc lệch thời lượng (LRCLIB)
   if (fallbackRecord && fallbackRecord.syncedLyrics) {
     const isActualRemixMismatch = detectVariantTrack(rawTitle);
-    return await buildLrclibResult(fallbackRecord, rawTitle, artist, normalizedUrl || targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, isActualRemixMismatch);
+    const fallbackRes = await buildLrclibResult(fallbackRecord, rawTitle, artist, normalizedUrl || targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, isActualRemixMismatch);
+    if (fallbackRes) setCachedLyrics(cacheKey, fallbackRes);
+    return fallbackRes;
   }
 
   // Tầng dự phòng cuối: Trích xuất lời từ Description YouTube

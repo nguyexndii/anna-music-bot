@@ -1037,28 +1037,80 @@ async function searchTrack(query, targetDurationSec = 0) {
             signal: AbortSignal.timeout(2000)
           }).then(res => res.ok ? res.json() : null).catch(() => null);
 
-          const innerTubePromise = fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)'
+          const innerTubeClients = [
+            {
+              name: 'ANDROID_VR',
+              version: '1.60.19',
+              ua: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+              extra: { deviceMake: 'Oculus', deviceModel: 'Quest 3', androidSdkVersion: 32, osName: 'Android', osVersion: '12L' }
             },
-            body: JSON.stringify({
-              videoId,
-              context: {
-                client: {
-                  clientName: 'IOS',
-                  clientVersion: '19.45.4',
-                  hl: 'vi',
-                  gl: 'VN'
+            {
+              name: 'IOS',
+              version: '20.03.02',
+              ua: 'com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)',
+              extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.2.1.22C161' }
+            }
+          ];
+
+          let innerData = null;
+          for (const cCfg of innerTubeClients) {
+            try {
+              const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': cCfg.ua
+                },
+                body: JSON.stringify({
+                  videoId,
+                  context: {
+                    client: {
+                      clientName: cCfg.name,
+                      clientVersion: cCfg.version,
+                      hl: 'vi',
+                      gl: 'VN',
+                      ...cCfg.extra
+                    }
+                  }
+                }),
+                signal: AbortSignal.timeout(2200)
+              });
+              if (res.ok) {
+                const d = await res.json();
+                if (d?.videoDetails?.videoId || d?.videoDetails?.lengthSeconds) {
+                  innerData = d;
+                  break;
                 }
               }
-            }),
-            signal: AbortSignal.timeout(2000)
-          }).then(res => res.ok ? res.json() : null).catch(() => null);
+            } catch (err) {}
+          }
 
-          const [oembedData, innerData] = await Promise.all([oEmbedPromise, innerTubePromise]);
+          const oembedData = await oEmbedPromise;
           const innerDetails = innerData?.videoDetails;
+
+          // Lưu ngay danh sách phụ đề CC trích xuất được vào RAM Cache
+          try {
+            const rawCaps = innerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+            if (Array.isArray(rawCaps) && rawCaps.length > 0) {
+              const { cacheYoutubeSubtitlesMeta } = require('./lyricsHelper');
+              if (typeof cacheYoutubeSubtitlesMeta === 'function') {
+                const subMap = {};
+                const autoMap = {};
+                for (const cap of rawCaps) {
+                  if (!cap || !cap.baseUrl) continue;
+                  const lang = cap.languageCode || 'und';
+                  const vssId = String(cap.vssId || '');
+                  const isAuto = cap.kind === 'asr' || vssId.startsWith('a.');
+                  const nameText = cap.name?.runs?.map(r => r.text).join('') || cap.name?.simpleText || lang;
+                  const entry = [{ ext: 'json3', url: cap.baseUrl + (cap.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3'), rawUrl: cap.baseUrl, name: nameText, vssId, languageCode: lang, kind: cap.kind }];
+                  const targetMap = isAuto ? autoMap : subMap;
+                  const key = targetMap[lang] ? `${lang}_${vssId || Object.keys(targetMap).length}` : lang;
+                  targetMap[key] = entry;
+                }
+                cacheYoutubeSubtitlesMeta(videoId, subMap, autoMap);
+              }
+            }
+          } catch (capErr) {}
 
           const rawTitle = innerDetails?.title || oembedData?.title || '';
           const rawArtist = oembedData?.author_name || innerDetails?.author || 'YouTube';
