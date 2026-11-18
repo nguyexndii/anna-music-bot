@@ -104,9 +104,15 @@ app.get(['/health', '/api/health'], (req, res) => {
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   const indexPath = path.join(__dirname, '../public/index.html');
-  res.sendFile(fs.existsSync(indexPath) ? indexPath : path.join(__dirname, '../public/index.html')).catch(() => {
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath, (err) => {
+      if (err && !res.headersSent) {
+        res.send('🎵 Anna Music Bot (24/7) đang hoạt động ổn định!');
+      }
+    });
+  } else {
     res.send('🎵 Anna Music Bot (24/7) đang hoạt động ổn định!');
-  });
+  }
 });
 
 function startServer(port) {
