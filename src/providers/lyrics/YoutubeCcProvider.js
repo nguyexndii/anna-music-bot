@@ -2,6 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const fetch = globalThis.fetch || require('node-fetch');
 const {
+  registerProcess,
+  killProcess
+} = require('../audio/SemaphoreManager');
+const {
   normalizeStr,
   cleanTitle,
   cleanArtistName,
@@ -299,10 +303,35 @@ async function fetchOfficialSubtitlesViaYtdlp(url) {
         }
       }
 
-      const info = await Promise.race([
-        ytdlp(url, infoOpts),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('yt-dlp subtitle timeout')), 5500))
+      const subProc = ytdlp.exec(url, infoOpts, { detached: process.platform !== 'win32' });
+      subProc.catch?.(() => {});
+      registerProcess(subProc);
+
+      let timer = null;
+      const timeoutPromise = new Promise((_, rej) => {
+        timer = setTimeout(() => {
+          killProcess(subProc);
+          rej(new Error('yt-dlp subtitle timeout'));
+        }, 5500);
+      });
+
+      const rawResult = await Promise.race([
+        subProc,
+        timeoutPromise
       ]).catch(() => null);
+
+      if (timer) clearTimeout(timer);
+
+      let info = null;
+      if (rawResult?.stdout) {
+        try {
+          info = JSON.parse(rawResult.stdout);
+        } catch {
+          info = rawResult.stdout;
+        }
+      } else if (rawResult && typeof rawResult === 'object' && (rawResult.subtitles || rawResult.automatic_captions)) {
+        info = rawResult;
+      }
 
       if (!info) return null;
       const videoId = extractVideoId(url);

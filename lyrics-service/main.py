@@ -1,9 +1,14 @@
 import concurrent.futures
-import functools
 import re
+import socket
+import threading
+import time
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+
+# Ngăn chặn socket/thread bị treo vô hạn trên I/O mạng
+socket.setdefaulttimeout(3.0)
 
 app = FastAPI(title="Anna Music - Lyrics Fallback Service", version="1.0.0")
 
@@ -64,7 +69,7 @@ def health_check():
 # Bỏ "Lrclib" vì Node.js đã gọi trực tiếp API LRCLIB cực nhanh (<150ms)
 FAST_PROVIDERS = ["Musixmatch", "NetEase"]
 # Tái sử dụng ThreadPool tĩnh toàn cục để tránh chi phí khởi tạo / hủy thread liên tục trên VPS 2GB
-_provider_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_provider_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 def _search_single_provider(query: str, provider: str, synced_only: bool) -> Optional[str]:
     import syncedlyrics
@@ -78,8 +83,14 @@ def _search_single_provider(query: str, provider: str, synced_only: bool) -> Opt
     except Exception:
         return None
 
-@functools.lru_cache(maxsize=512)
-def _cached_search_lyrics(query: str) -> Optional[str]:
+# TTL Cache cho kết quả tìm kiếm lyrics (6h cho hit, 5m cho miss)
+_lyrics_cache: Dict[str, tuple] = {}
+_cache_lock = threading.Lock()
+HIT_CACHE_TTL = 6 * 3600      # 6 giờ (21600s) cho bài hát tìm thấy
+MISS_CACHE_TTL = 5 * 60       # 5 phút (300s) cho bài hát không tìm thấy
+MAX_CACHE_ENTRIES = 2000
+
+def _search_lyrics_direct(query: str) -> Optional[str]:
     # 1. Đua song song giữa Musixmatch và NetEase cho Synced Lyrics (LRC) bằng pool dùng chung
     futures = {
         _provider_pool.submit(_search_single_provider, query, prov, True): prov
@@ -102,6 +113,34 @@ def _cached_search_lyrics(query: str) -> Optional[str]:
         except Exception:
             pass
     return None
+
+def _cached_search_lyrics(query: str) -> Optional[str]:
+    now = time.time()
+    with _cache_lock:
+        if query in _lyrics_cache:
+            val, expire_at = _lyrics_cache[query]
+            if now < expire_at:
+                return val
+            else:
+                _lyrics_cache.pop(query, None)
+
+    # Tìm kiếm trực tiếp nếu chưa có trong cache hoặc đã hết hạn (chạy ngoài lock để không nghẽn các request khác)
+    res = _search_lyrics_direct(query)
+
+    # Thu dọn cache và cập nhật an toàn với Lock
+    with _cache_lock:
+        if len(_lyrics_cache) >= MAX_CACHE_ENTRIES:
+            expired_keys = [k for k, (_, exp) in list(_lyrics_cache.items()) if now >= exp]
+            for k in expired_keys:
+                _lyrics_cache.pop(k, None)
+            if len(_lyrics_cache) >= MAX_CACHE_ENTRIES:
+                oldest_key = next(iter(_lyrics_cache), None)
+                if oldest_key:
+                    _lyrics_cache.pop(oldest_key, None)
+
+        ttl = HIT_CACHE_TTL if res else MISS_CACHE_TTL
+        _lyrics_cache[query] = (res, now + ttl)
+    return res
 
 @app.get("/lyrics")
 def get_lyrics(

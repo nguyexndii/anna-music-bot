@@ -82,41 +82,40 @@ function generateTrackKey(title, artist = '', targetUrl = null) {
   return `song_${cleanT}_${cleanA}`.replace(/\s+/g, '_').slice(0, 100);
 }
 
-async function getSavedLyricOffset(trackKey, fallbackKey = null) {
+async function getSavedLyricOffset(trackKey, fallbackKey = null, guildId = null) {
   if (!trackKey) return 0;
-  if (lyricOffsetsMemoryCache.has(trackKey)) {
-    return lyricOffsetsMemoryCache.get(trackKey);
+  const effectiveGuildId = guildId || 'global';
+  const memKey = `${effectiveGuildId}:${trackKey}`;
+  if (lyricOffsetsMemoryCache.has(memKey)) {
+    return lyricOffsetsMemoryCache.get(memKey);
   }
-  if (fallbackKey && lyricOffsetsMemoryCache.has(fallbackKey)) {
-    return lyricOffsetsMemoryCache.get(fallbackKey);
+  const fallbackMemKey = fallbackKey ? `${effectiveGuildId}:${fallbackKey}` : null;
+  if (fallbackMemKey && lyricOffsetsMemoryCache.has(fallbackMemKey)) {
+    return lyricOffsetsMemoryCache.get(fallbackMemKey);
   }
   if (!LyricOffset) return 0;
   try {
     const mongoose = require('mongoose');
     if (!mongoose.connection || mongoose.connection.readyState !== 1) return 0;
 
-    let doc = await LyricOffset.findOne({ trackKey }).lean().exec();
+    let doc = await LyricOffset.findOne({ guildId: effectiveGuildId, trackKey }).lean().exec();
     if (!doc && fallbackKey) {
-      doc = await LyricOffset.findOne({ trackKey: fallbackKey }).lean().exec();
+      doc = await LyricOffset.findOne({ guildId: effectiveGuildId, trackKey: fallbackKey }).lean().exec();
     }
     const offset = (doc && typeof doc.offsetMs === 'number') ? doc.offsetMs : 0;
-    setLyricOffsetsMemoryCache(trackKey, offset);
+    setLyricOffsetsMemoryCache(memKey, offset);
     return offset;
   } catch (e) {
     return 0;
   }
 }
 
-async function saveLyricOffset(trackKey, offsetMs, title = '', artist = '') {
+async function saveLyricOffset(trackKey, offsetMs, title = '', artist = '', guildId = null) {
   if (!trackKey) return;
   const numOffset = Math.round(Number(offsetMs) || 0);
-  setLyricOffsetsMemoryCache(trackKey, numOffset);
-
-  for (const [, entry] of lyricsMemoryCache.entries()) {
-    if (entry?.data && entry.data.trackKey === trackKey) {
-      entry.data.userSavedOffsetMs = numOffset;
-    }
-  }
+  const effectiveGuildId = guildId || 'global';
+  const memKey = `${effectiveGuildId}:${trackKey}`;
+  setLyricOffsetsMemoryCache(memKey, numOffset);
 
   if (!LyricOffset) return;
   try {
@@ -124,8 +123,8 @@ async function saveLyricOffset(trackKey, offsetMs, title = '', artist = '') {
     if (!mongoose.connection || mongoose.connection.readyState !== 1) return;
 
     await LyricOffset.findOneAndUpdate(
-      { trackKey },
-      { offsetMs: numOffset, title: title || '', artist: artist || '', updatedAt: new Date() },
+      { guildId: effectiveGuildId, trackKey },
+      { guildId: effectiveGuildId, offsetMs: numOffset, title: title || '', artist: artist || '', updatedAt: new Date() },
       { upsert: true, returnDocument: 'after' }
     );
 
@@ -361,7 +360,7 @@ function getDynamicLyricsLayers(configuredLayers, trackRegion) {
   return baseLayers;
 }
 
-async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null) {
+async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null, guildId = null) {
   if (!rawTitle || typeof rawTitle !== 'string') return null;
 
   const safeTitle = rawTitle.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim().slice(0, 150);
@@ -375,7 +374,7 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
     return await inFlightLyrics.get(cacheKey);
   }
 
-  const p = _executeFetchLyrics(safeTitle, safeArtist, durationMs, targetUrl, normalizedUrl, cacheKey, lyricsLayers);
+  const p = _executeFetchLyrics(safeTitle, safeArtist, durationMs, targetUrl, normalizedUrl, cacheKey, lyricsLayers, guildId);
   inFlightLyrics.set(cacheKey, p);
   try {
     return await p;
@@ -384,11 +383,11 @@ async function fetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = nu
   }
 }
 
-async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, normalizedUrl, cacheKey, lyricsLayers) {
+async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, normalizedUrl, cacheKey, lyricsLayers, guildId = null) {
   const isYouTube = Boolean(normalizedUrl && (normalizedUrl.includes('youtube.com') || normalizedUrl.includes('youtu.be')));
   const trackKey = generateTrackKey(rawTitle, artist, normalizedUrl);
   const fallbackKey = generateTrackKey(rawTitle, artist, null);
-  const userSavedOffsetMs = await getSavedLyricOffset(trackKey, fallbackKey);
+  const userSavedOffsetMs = await getSavedLyricOffset(trackKey, fallbackKey, guildId);
 
   const appleMeta = await resolveAppleMusicMetadata(rawTitle, artist).catch(() => null);
   const trackRegion = resolveTrackLanguageRegion({ rawTitle, artist }, appleMeta);
@@ -414,7 +413,7 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
         songFingerprint: cached.songFingerprint || songFingerprint,
         autoOffsetMs: (cached.autoOffsetMs !== undefined) ? cached.autoOffsetMs : 0,
         isRemixOrDurationMismatch: Boolean(cached.isRemixOrDurationMismatch),
-        userSavedOffsetMs: (userSavedOffsetMs !== undefined && userSavedOffsetMs !== null) ? userSavedOffsetMs : (cached.userSavedOffsetMs || 0)
+        userSavedOffsetMs: Number(userSavedOffsetMs) || 0
       };
     }
   }
@@ -795,9 +794,9 @@ async function executeParallelWaterfallSearch({
   });
 }
 
-function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null) {
+function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null, guildId = null) {
   if (!rawTitle) return;
-  fetchLyrics(rawTitle, artist, durationMs, targetUrl, lyricsLayers)
+  fetchLyrics(rawTitle, artist, durationMs, targetUrl, lyricsLayers, guildId)
     .then(res => {
       if (res && !res.notFound) {
         console.log(`[Lyrics Pre-fetch Cache] Đã nạp sẵn lời bài hát vào RAM: "${rawTitle}" (Source: ${res.source}, AutoOffset: ${res.autoOffsetMs || 0}ms)`);

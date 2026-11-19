@@ -96,20 +96,26 @@ module.exports = function createPlaylistRoutes(client, auth, routeState) {
   });
 
   // 3. Cập nhật playlist (đổi tên / sửa mô tả / đổi ảnh bìa)
-  router.put('/playlists/me/:playlistId', auth.requireAuth, async (req, res) => {
+  router.put('/playlists/me/:playlistId', express.json({ limit: '600kb' }), auth.requireAuth, async (req, res) => {
     try {
       const { playlistId } = req.params;
       const { name, description, thumbnail } = req.body;
 
-      // Sanitize thumbnail: cho phép URL hoặc Data URL (base64 image <= 500KB)
-      let cleanThumb = thumbnail;
+      // Sanitize thumbnail: loại bỏ data:image/svg+xml, chỉ cho phép data:image safe base64 (<= 500KB) hoặc https whitelist
+      let cleanThumb = undefined;
       if (typeof thumbnail === 'string') {
         const trimmed = thumbnail.trim();
-        if (trimmed.startsWith('data:image/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        if (trimmed === '') {
+          cleanThumb = null;
+        } else if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
           cleanThumb = trimmed.length <= 500000 ? trimmed : null;
-        } else if (trimmed === '') {
+        } else if (trimmed.startsWith('https://')) {
+          cleanThumb = auth.sanitizeThumbnailUrl(trimmed);
+        } else {
           cleanThumb = null;
         }
+      } else if (thumbnail === null) {
+        cleanThumb = null;
       }
 
       const updated = await userPlaylistManager.updatePlaylist(req.user.userId, playlistId, { name, description, thumbnail: cleanThumb });

@@ -87,7 +87,13 @@ if (fs.existsSync(eventsPath)) {
 // 4. Keep-Alive Web Server (Express) & API Routes
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '32kb' }));
+const defaultJsonParser = express.json({ limit: '32kb' });
+app.use((req, res, next) => {
+  if (req.method === 'PUT' && req.path.startsWith('/api/playlists/me/')) {
+    return next(); // Nhường cho express.json({ limit: '600kb' }) trong playlistRoutes.js
+  }
+  return defaultJsonParser(req, res, next);
+});
 app.use('/api', createApiRouter(client));
 app.use(express.static(path.join(__dirname, '../public')));
 

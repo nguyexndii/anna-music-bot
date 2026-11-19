@@ -739,7 +739,7 @@ class QueuePlaybackEngine {
       const { prefetchLyrics } = require('../../utils/lyricsHelper');
       const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
       const durMs = parseDurationToMs(nextTrack.duration);
-      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, guildSettings?.lyricsLayers);
+      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, guildSettings?.lyricsLayers, this.guild?.id);
     } catch (lyricPrefetchErr) {}
   }
 
@@ -997,7 +997,7 @@ class QueuePlaybackEngine {
                 const { prefetchLyrics } = require('../../utils/lyricsHelper');
                 const guildSettings = this.guild?.id ? settingsManager.get(this.guild.id) : null;
                 const durMs = songForLyric.durationMs || parseDurationToMs(songForLyric.duration);
-                prefetchLyrics(songForLyric.title, songForLyric.artist, durMs, songForLyric.url, guildSettings?.lyricsLayers);
+                prefetchLyrics(songForLyric.title, songForLyric.artist, durMs, songForLyric.url, guildSettings?.lyricsLayers, this.guild?.id);
               } catch (e) {}
             }
           }, 2000);

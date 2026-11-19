@@ -167,7 +167,7 @@ class DiscordCardRenderer {
       if (!nextTrack || nextTrack.is247) return;
 
       const durMs = nextTrack.durationMs || (nextTrack.duration ? parseDurationToMs(nextTrack.duration) : 0);
-      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, layers);
+      prefetchLyrics(nextTrack.title, nextTrack.artist, durMs, nextTrack.url, layers, this.queue.guild?.id);
     } catch (e) {}
   }
 
@@ -259,7 +259,7 @@ class DiscordCardRenderer {
 
       const guildSettings = this.queue.guild?.id ? settingsManager.get(this.queue.guild.id) : null;
       const durationMs = (song.rawDurationSec ? song.rawDurationSec * 1000 : (song.durationMs || (song.duration ? parseDurationToMs(song.duration) : 0)));
-      const lyricsData = await fetchLyrics(song.title, song.artist, durationMs, song.url, guildSettings?.lyricsLayers);
+      const lyricsData = await fetchLyrics(song.title, song.artist, durationMs, song.url, guildSettings?.lyricsLayers, this.queue.guild?.id);
 
       if (this.queue.isDestroyed || this.queue.isStopped || this.queue.currentSong !== song) return;
 

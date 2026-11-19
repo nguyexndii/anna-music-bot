@@ -34,7 +34,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
       }
       const guildSettings = settingsManager.get(guildId);
       const songDurMs = currentTrack.rawDurationSec ? currentTrack.rawDurationSec * 1000 : (durMs || 0);
-      const lyricsData = await getLyrics(safeTitle, queryArtist, songDurMs, currentTrack.url, guildSettings?.lyricsLayers);
+      const lyricsData = await getLyrics(safeTitle, queryArtist, songDurMs, currentTrack.url, guildSettings?.lyricsLayers, guildId);
 
       // Nếu bài hát đang phát chưa có Live Lyrics trên Discord mà API vừa tìm thấy lời -> Tự động nạp nóng (Hot-Attach)
       if (queue && queue.currentSong && !queue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
@@ -131,7 +131,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
       if (queryArtist === 'YouTube Music' || queryArtist === 'YouTube' || queryArtist === 'Unknown') {
         queryArtist = '';
       }
-      const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl);
+      const lyricsData = await getLyrics(title, queryArtist, durationMs, targetUrl, null, req.user?.guildId);
 
       const callerQueue = req.user?.guildId && client.musicManager ? client.musicManager.get(req.user.guildId) : null;
       if (callerQueue && callerQueue.currentSong && !callerQueue.hasSyncedLyrics && lyricsData?.syncedLyrics?.length >= 3) {
@@ -240,7 +240,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
     }
 
     try {
-      await saveLyricOffset(trackKey, clampedOffset, title, artist);
+      await saveLyricOffset(trackKey, clampedOffset, title, artist, guildId);
 
       // Đồng bộ ngay lập tức sang hàng đợi MusicQueue đang phát nếu có
       if (queue && queue.currentSong) {
@@ -300,7 +300,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
     }
 
     try {
-      await saveLyricOffset(trackKey, clampedOffset, title, artist);
+      await saveLyricOffset(trackKey, clampedOffset, title, artist, guildId);
 
       // Đồng bộ ngay lập tức sang hàng đợi MusicQueue đang phát nếu có
       if (queue && queue.currentSong) {

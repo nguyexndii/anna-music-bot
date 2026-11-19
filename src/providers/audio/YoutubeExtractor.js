@@ -494,8 +494,18 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
  */
 function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, options = {}) {
   const isLowPriority = (options?.priority === 'low');
+  audioCacheManager.acquireRead(filePath);
+  let readReleased = false;
+  const releaseLock = () => {
+    if (!readReleased) {
+      readReleased = true;
+      audioCacheManager.releaseRead(filePath);
+    }
+  };
+
   return new Promise((resolve, reject) => {
     if (options?.signal?.aborted) {
+      releaseLock();
       const err = new Error('The operation was aborted');
       err.name = 'AbortError';
       return reject(err);
@@ -540,6 +550,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
         cleanupSignal();
         killProcess(ffmpegProcess);
         try { passThroughStream.destroy(); } catch (e) {}
+        releaseLock();
         const err = new Error('The operation was aborted');
         err.name = 'AbortError';
         reject(err);
@@ -574,6 +585,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
     passThroughStream.on('close', () => {
       cleanupSignal();
       killProcess(ffmpegProcess);
+      releaseLock();
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
@@ -581,6 +593,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
       if (!firstChunkReceived) {
         cleanupSignal();
         killProcess(ffmpegProcess);
+        releaseLock();
         reject(new Error('Quá thời gian chờ âm thanh từ SSD Cache File (Timeout 15s)'));
       }
     }, 15000);
@@ -597,6 +610,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
         cleanupSignal();
         try { passThroughStream.destroy(); } catch (e) {}
         killProcess(ffmpegProcess);
+        releaseLock();
       };
       resolve(resource);
     });
@@ -606,6 +620,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
       cleanupSignal();
       if (!firstChunkReceived) {
         killProcess(ffmpegProcess);
+        releaseLock();
         const lastErr = ffmpegStderr.slice(-200).trim();
         reject(new Error(`FFmpeg File Direct exited with code ${code}: ${lastErr}`));
       } else {
@@ -636,6 +651,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
   }
 
   return new Promise((resolve, reject) => {
+    let manuallyDestroyed = false;
     if (options?.signal?.aborted) {
       const err = new Error('The operation was aborted');
       err.name = 'AbortError';
@@ -673,7 +689,10 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       ytdlpStreamProcess = ytdlp.exec('', ytdlpOptions, {
         detached: process.platform !== 'win32'
       });
-      if (ytdlpStreamProcess) registerProcess(ytdlpStreamProcess);
+      if (ytdlpStreamProcess) {
+        ytdlpStreamProcess.catch?.(() => {}); // prevent unhandledRejection when killProcess is called
+        registerProcess(ytdlpStreamProcess);
+      }
     } catch (err) {
       return reject(err);
     }
@@ -742,6 +761,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     let abortListener = null;
     if (options?.signal) {
       abortListener = () => {
+        manuallyDestroyed = true;
         try { passThroughStream.destroy(); } catch (e) {}
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
@@ -815,9 +835,11 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     });
     passThroughStream.on('close', () => {
       try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
-      killProcess(ffmpegProcess);
-      killProcess(ytdlpStreamProcess);
-      cacheOptions?.onAbort?.();
+      if (manuallyDestroyed === true || !firstChunkReceived) {
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
+      }
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
@@ -845,6 +867,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       });
 
       resource.destroy = () => {
+        manuallyDestroyed = true;
         if (abortListener && options?.signal) {
           options.signal.removeEventListener('abort', abortListener);
         }
@@ -858,7 +881,7 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       resolve(resource);
     });
 
-    ffmpegProcess.on('close', (code) => {
+    ffmpegProcess.on('close', (code, signal) => {
       clearTimeout(safetyTimeout);
       if (abortListener && options?.signal) {
         options.signal.removeEventListener('abort', abortListener);
@@ -871,12 +894,14 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         const lastErr = (ytdlpStderr || ffmpegStderr).slice(-200).trim();
         reject(new Error(`FFmpeg exited with code ${code}: ${lastErr}`));
       } else {
-        if (code !== 0 && code !== null) {
-          const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
-          if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
-          cacheOptions?.onAbort?.();
-        } else {
+        if (code === 0 && !signal && !manuallyDestroyed) {
           cacheOptions?.onCommit?.();
+        } else {
+          if (code !== 0 && code !== null) {
+            const lastErr = (ffmpegStderr || ytdlpStderr).slice(-200).trim();
+            if (lastErr) console.warn(`[FFmpeg exited code ${code}]:`, lastErr);
+          }
+          cacheOptions?.onAbort?.();
         }
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);

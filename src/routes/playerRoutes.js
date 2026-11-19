@@ -207,7 +207,8 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
         }
         try {
           const queue = client.musicManager.getOrCreate(guild, textChannel, voiceChannel);
-          const validTracks = req.body.tracks.slice(0, 100);
+          const rawTracks = req.body.tracks.slice(0, 100);
+          const validTracks = [];
           const memberAvatar = member.displayAvatarURL ? member.displayAvatarURL({ dynamic: true }) : user.avatar;
           const requesterObj = {
             id: member.id,
@@ -216,7 +217,11 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
             avatar: memberAvatar
           };
           const userMention = `<@${member.id}>`;
-          for (const t of validTracks) {
+          for (const t of rawTracks) {
+            if (!t || typeof t !== 'object') continue;
+            const safeTrackUrl = t.url ? validateAndSanitizeMusicUrl(t.url) : null;
+            if (!safeTrackUrl) continue;
+            t.url = safeTrackUrl;
             t.title = auth.sanitizeDiscordText(t.title, 200) || 'Unknown Track';
             t.artist = auth.sanitizeDiscordText(t.artist, 100) || 'Unknown Artist';
             t.thumbnail = auth.sanitizeThumbnailUrl(t.thumbnail);
@@ -225,6 +230,10 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
             t.requestedByName = member.displayName || user.username;
             t.requestedByAvatar = memberAvatar;
             t.requestedById = member.id;
+            validTracks.push(t);
+          }
+          if (validTracks.length === 0) {
+            return res.status(400).json({ success: false, error: 'Không tìm thấy bài hát hợp lệ để nạp vào hàng chờ!' });
           }
           await queue.addSongs(validTracks, requesterObj);
           auth.sendWebQueueNotification(req.guild, queue, guildSettings, t(guildId, 'web_notify.added_tracks', {

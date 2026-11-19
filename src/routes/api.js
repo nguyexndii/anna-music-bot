@@ -12,7 +12,6 @@ const createPlaylistRoutes = require('./playlistRoutes');
  */
 module.exports = function createApiRouter(client) {
   const router = express.Router();
-  router.use(express.json());
 
   // Cấu hình CORS siết chặt: Whitelist các domain được chỉ định hoặc Cloudflare Pages
   const allowedOrigins = process.env.ALLOWED_ORIGINS

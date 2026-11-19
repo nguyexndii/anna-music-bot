@@ -20,6 +20,30 @@ class AudioCacheManager {
     this.cacheMap = new Map();
     this.totalCacheBytes = 0;
     this.isInitialized = false;
+    this._isEvicting = false;
+    this.activeReads = new Map();
+  }
+
+  /**
+   * Đánh dấu tệp cache đang được đọc/phát bởi Discord Audio Player (tránh bị LRU xóa)
+   */
+  acquireRead(filePath) {
+    if (!filePath) return;
+    const count = this.activeReads.get(filePath) || 0;
+    this.activeReads.set(filePath, count + 1);
+  }
+
+  /**
+   * Giải phóng tệp cache khi luồng phát kết thúc hoặc bị hủy
+   */
+  releaseRead(filePath) {
+    if (!filePath) return;
+    const count = this.activeReads.get(filePath) || 0;
+    if (count <= 1) {
+      this.activeReads.delete(filePath);
+    } else {
+      this.activeReads.set(filePath, count - 1);
+    }
   }
 
   /**
@@ -259,33 +283,41 @@ class AudioCacheManager {
    * Thuật toán LRU Eviction: Xóa các bài cũ nhất ít nghe nhất khi dung lượng vượt quá trần
    */
   async evictIfNeeded() {
-    if (this.totalCacheBytes <= this.maxCacheBytes) return;
+    if (this._isEvicting || this.totalCacheBytes <= this.maxCacheBytes) return;
+    this._isEvicting = true;
 
-    // Ngưỡng an toàn sau khi dọn là 90% trần dung lượng
-    const targetBytes = this.maxCacheBytes * 0.90;
-    console.log(`[AudioCache LRU] Dung lượng hiện tại (${(this.totalCacheBytes / (1024 * 1024 * 1024)).toFixed(2)}GB) vượt trần ${(this.maxCacheBytes / (1024 * 1024 * 1024)).toFixed(0)}GB. Đang dọn dẹp về mức ${(targetBytes / (1024 * 1024 * 1024)).toFixed(2)}GB...`);
+    try {
+      // Ngưỡng an toàn sau khi dọn là 90% trần dung lượng
+      const targetBytes = this.maxCacheBytes * 0.90;
+      console.log(`[AudioCache LRU] Dung lượng hiện tại (${(this.totalCacheBytes / (1024 * 1024 * 1024)).toFixed(2)}GB) vượt trần ${(this.maxCacheBytes / (1024 * 1024 * 1024)).toFixed(0)}GB. Đang dọn dẹp về mức ${(targetBytes / (1024 * 1024 * 1024)).toFixed(2)}GB...`);
 
-    // Sắp xếp các file theo lastAccessedAt tăng dần (cũ nhất lên đầu)
-    const sorted = [...this.cacheMap.entries()].sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt);
+      // Sắp xếp các file theo lastAccessedAt tăng dần (cũ nhất lên đầu)
+      const sorted = [...this.cacheMap.entries()].sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt);
 
-    let deletedCount = 0;
-    let freedBytes = 0;
+      let deletedCount = 0;
+      let freedBytes = 0;
 
-    for (const [key, entry] of sorted) {
-      if (this.totalCacheBytes <= targetBytes) break;
+      for (const [key, entry] of sorted) {
+        if (this.totalCacheBytes <= targetBytes) break;
 
-      try {
-        if (fs.existsSync(entry.filePath)) {
-          await fs.promises.unlink(entry.filePath);
-        }
-        this.totalCacheBytes -= entry.size;
-        freedBytes += entry.size;
-        this.cacheMap.delete(key);
-        deletedCount++;
-      } catch (e) {}
+        // Bỏ qua các file hiện đang được phát trong voice channel
+        if ((this.activeReads.get(entry.filePath) || 0) > 0) continue;
+
+        try {
+          if (fs.existsSync(entry.filePath)) {
+            await fs.promises.unlink(entry.filePath);
+          }
+          this.totalCacheBytes -= entry.size;
+          freedBytes += entry.size;
+          this.cacheMap.delete(key);
+          deletedCount++;
+        } catch (e) {}
+      }
+
+      console.log(`[AudioCache LRU] Hoàn tất dọn dẹp: Đã xóa ${deletedCount} bài cũ nhất, giải phóng ${(freedBytes / (1024 * 1024)).toFixed(1)}MB trên SSD.`);
+    } finally {
+      this._isEvicting = false;
     }
-
-    console.log(`[AudioCache LRU] Hoàn tất dọn dẹp: Đã xóa ${deletedCount} bài cũ nhất, giải phóng ${(freedBytes / (1024 * 1024)).toFixed(1)}MB trên SSD.`);
   }
 }
 

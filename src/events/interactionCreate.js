@@ -1021,7 +1021,7 @@ async function handleInteractionCreate(client, interaction) {
             guildName: interaction.guild.name,
             isAdmin: Boolean(isAdmin)
           };
-          const { token, pin } = generateWebToken(userData, 3, 24);
+          const { token, pin } = generateWebToken(userData, 2, 24);
           const tunnelUrl = getActiveTunnelUrl();
           const baseUrl = config.webUrl || 'https://anna-music-bot-ui.pages.dev';
           const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
@@ -1050,7 +1050,7 @@ async function handleInteractionCreate(client, interaction) {
             .setColor('#2B2D31')
             .setTitle(`${EMOJI_TAG.musicNotesDouble} Quản Lý Playlist Cá Nhân`)
             .setDescription(desc)
-            .setFooter({ text: `Mã PIN: ${pin} (Hiệu lực trong 5 phút)` });
+            .setFooter({ text: `Mã PIN: ${pin} (Hiệu lực trong 2 phút)` });
 
           const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()

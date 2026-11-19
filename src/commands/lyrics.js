@@ -61,7 +61,7 @@ module.exports = {
 
     try {
       const layers = settingsManager.get(guildId).lyricsLayers;
-      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl, layers);
+      const result = await fetchLyrics(targetTitle, targetArtist, targetDurationMs, targetUrl, layers, guildId);
 
       if (!result || !result.lyrics) {
         return ctx.editReply({

@@ -81,7 +81,8 @@ function generateWebToken(userData, pinExpiryMinutes = 2, sessionExpiryHours = 2
     guildId: String(userData.guildId),
     guildName: userData.guildName || 'Server',
     isAdmin: Boolean(userData.isAdmin),
-    sessionExpiryHours
+    sessionExpiryHours,
+    iat: now
   };
 
   // Lưu PIN và OTC vào store, liên kết chéo cặp khóa linkedCode và đánh dấu isOneTime = true
@@ -143,24 +144,31 @@ function verifyWebToken(tokenOrPin, consume = false) {
       return null;
     }
 
+    const revokedAt = global._revokedUsersMap?.get(String(stored.userId)) || 0;
+    if (revokedAt && (!stored.iat || stored.iat <= revokedAt)) {
+      tokenStore.delete(cleanInput);
+      return null;
+    }
+
     if (stored.isOneTime) {
-      if (consume) {
-        // Tiêu hủy mã 1 lần ngay lập tức và hủy luôn mã liên kết (cặp PIN & OTC)
-        tokenStore.delete(cleanInput);
-        if (stored.linkedCode && tokenStore.has(stored.linkedCode)) {
-          tokenStore.delete(stored.linkedCode);
-        }
-
-        // Thông báo cho webSessionManager cập nhật tin nhắn Discord nếu có
-        try {
-          const { notifyWebSessionSuccess } = require('./webSessionManager');
-          notifyWebSessionSuccess(stored.userId, stored.guildId, stored.pin);
-        } catch (_) {}
-
-        const sessionToken = createSessionToken(stored, stored.sessionExpiryHours || 24);
-        return { ...stored, sessionToken };
+      if (!consume) {
+        return null;
       }
-      return stored;
+
+      // Tiêu hủy mã 1 lần ngay lập tức và hủy luôn mã liên kết (cặp PIN & OTC)
+      tokenStore.delete(cleanInput);
+      if (stored.linkedCode && tokenStore.has(stored.linkedCode)) {
+        tokenStore.delete(stored.linkedCode);
+      }
+
+      // Thông báo cho webSessionManager cập nhật tin nhắn Discord nếu có
+      try {
+        const { notifyWebSessionSuccess } = require('./webSessionManager');
+        notifyWebSessionSuccess(stored.userId, stored.guildId, stored.pin);
+      } catch (_) {}
+
+      const sessionToken = createSessionToken(stored, stored.sessionExpiryHours || 24);
+      return { ...stored, sessionToken };
     }
 
     return stored;
@@ -180,7 +188,7 @@ function verifyWebToken(tokenOrPin, consume = false) {
       const payload = JSON.parse(Buffer.from(base64Payload, 'base64url').toString('utf8'));
       if (Date.now() > payload.exp) return null;
       const revokedAt = global._revokedUsersMap?.get(String(payload.userId)) || 0;
-      if (payload.iat && payload.iat <= revokedAt) return null;
+      if (revokedAt && (!payload.iat || payload.iat <= revokedAt)) return null;
       return payload;
     } catch (e) {
       return null;

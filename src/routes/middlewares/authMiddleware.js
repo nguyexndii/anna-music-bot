@@ -10,7 +10,9 @@ function getClientIp(req) {
   const isLocal = remote === '127.0.0.1' || remote === 'localhost' || remote === '1';
 
   if (isLocal) {
-    return String(req.headers['x-real-client-ip'] || req.headers['cf-connecting-ip'] || req.ip || 'unknown-ip').split(',')[0].trim();
+    const proxySecretOk = Boolean(process.env.PROXY_SHARED_SECRET) && req.headers['x-proxy-secret'] === process.env.PROXY_SHARED_SECRET;
+    const rawIp = (proxySecretOk && req.headers['x-real-client-ip']) || req.headers['cf-connecting-ip'] || req.ip || 'unknown-ip';
+    return String(rawIp).split(',')[0].trim();
   }
   return (req.ip || req.socket?.remoteAddress || 'unknown-ip').trim();
 }
@@ -132,7 +134,7 @@ const actionLimiter = rateLimit({
 
 // Middleware xác thực Magic Token
 const requireAuth = (req, res, next) => {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query.token || req.body.token;
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.token;
   if (!token) {
     return res.status(401).json({ success: false, error: 'Thiếu Magic Token hoặc phiên đã hết hạn' });
   }
