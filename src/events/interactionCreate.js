@@ -838,7 +838,7 @@ async function handleInteractionCreate(client, interaction) {
         // Tạo Components V2 Container chuẩn đồng bộ với lệnh /web
         const webContainer = {
           type: 17,
-          accent_color: 0x2B7FFF,
+          accent_color: 0x2B2D31,
           components: [
             {
               type: 9,

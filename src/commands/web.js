@@ -71,7 +71,7 @@ module.exports = {
     // 4. Tạo Components V2 Container
     const webContainer = {
       type: 17,
-      accent_color: 0x2B7FFF,
+      accent_color: 0x2B2D31,
       components: [
         {
           type: 9,

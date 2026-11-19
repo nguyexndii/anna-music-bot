@@ -473,7 +473,7 @@ function createNowPlayingCard(song, queue) {
 
   const container = {
     type: 17, // ComponentType.Container
-    accent_color: 0x2b7fff, // Màu xanh dương (#2b7fff)
+    accent_color: 0x2B2D31, // Màu xám tối giản (#2B2D31)
     components: [
       headerComponent,
       // 2. Thanh tiến trình thời gian liền mạch (kèm lời bài hát nếu có)
@@ -862,7 +862,7 @@ function createQueueContainer(queue, page = 1) {
 
   return {
     type: 17,
-    accent_color: 0x2B7FFF,
+    accent_color: 0x2B2D31,
     components: containerComponents
   };
 }
