@@ -144,6 +144,7 @@ class UserPlaylistManager {
       if (typeof description === 'string') pl.description = description.trim().slice(0, 300);
       if (thumbnail !== undefined) {
         pl.thumbnail = thumbnail ? String(thumbnail).trim() : null;
+        pl.customThumbnail = Boolean(pl.thumbnail);
       }
       pl.updatedAt = new Date();
 
@@ -159,6 +160,7 @@ class UserPlaylistManager {
       if (typeof description === 'string') pl.description = description.trim().slice(0, 300);
       if (thumbnail !== undefined) {
         pl.thumbnail = thumbnail ? String(thumbnail).trim() : null;
+        pl.customThumbnail = Boolean(pl.thumbnail);
       }
       pl.updatedAt = new Date();
 
