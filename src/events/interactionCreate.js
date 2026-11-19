@@ -64,6 +64,18 @@ function cleanTrackUrl(rawUrl) {
     for (const key of toDelete) {
       parsed.searchParams.delete(key);
     }
+
+    // Rút gọn youtube.com/watch?v=ID thành youtu.be/ID nếu có thể để tiết kiệm ký tự
+    const hostname = parsed.hostname.toLowerCase();
+    if ((hostname === 'youtube.com' || hostname === 'www.youtube.com' || hostname === 'm.youtube.com') && parsed.pathname === '/watch') {
+      const videoId = parsed.searchParams.get('v');
+      if (videoId && /^[\w-]{11}$/.test(videoId)) {
+        parsed.searchParams.delete('v');
+        const remainingParams = parsed.searchParams.toString();
+        return `https://youtu.be/${videoId}${remainingParams ? '?' + remainingParams : ''}`;
+      }
+    }
+
     return parsed.toString();
   } catch {
     return rawUrl;
@@ -108,25 +120,48 @@ async function handleInteractionCreate(client, interaction) {
             if (cleanUrl.length > 100) {
               const hash = crypto.createHash('md5').update(cleanUrl).digest('hex');
               const refKey = `urlref:${hash}`;
+              const MAX_AUTOCOMPLETE_MAP_SIZE = 300;
+
               if (!global._autocompleteUrlMap) {
                 global._autocompleteUrlMap = new Map();
               }
-              global._autocompleteUrlMap.set(refKey, {
-                url: cleanUrl,
-                expiresAt: Date.now() + 5 * 60 * 1000
-              });
+
+              // Khi ghi đè refKey, nhớ hủy timer cũ
+              const oldEntry = global._autocompleteUrlMap.get(refKey);
+              if (oldEntry?.timer) {
+                clearTimeout(oldEntry.timer);
+              }
+
+              // Giới hạn trần MAX_SIZE = 300: nếu Map size >= 300, xóa entry cũ nhất (FIFO)
+              if (global._autocompleteUrlMap.size >= MAX_AUTOCOMPLETE_MAP_SIZE && !global._autocompleteUrlMap.has(refKey)) {
+                const oldestKey = global._autocompleteUrlMap.keys().next().value;
+                if (oldestKey) {
+                  const oldest = global._autocompleteUrlMap.get(oldestKey);
+                  if (oldest?.timer) clearTimeout(oldest.timer);
+                  global._autocompleteUrlMap.delete(oldestKey);
+                }
+              }
+
               const cleanupTimer = setTimeout(() => {
                 global._autocompleteUrlMap?.delete(refKey);
               }, 5 * 60 * 1000);
               if (cleanupTimer.unref) cleanupTimer.unref();
 
+              global._autocompleteUrlMap.set(refKey, {
+                url: cleanUrl,
+                expiresAt: Date.now() + 5 * 60 * 1000,
+                timer: cleanupTimer
+              });
+
+              const displayName = `🔗 Phát: ${cleanUrl.length > 80 ? cleanUrl.slice(0, 77) + '...' : cleanUrl}`;
               return interaction.respond([{
-                name: refKey,
+                name: displayName,
                 value: refKey
               }]).catch(() => {});
             } else {
+              const displayName = `🔗 Phát: ${cleanUrl.length > 80 ? cleanUrl.slice(0, 77) + '...' : cleanUrl}`;
               return interaction.respond([{
-                name: cleanUrl,
+                name: displayName,
                 value: cleanUrl
               }]).catch(() => {});
             }
@@ -566,14 +601,6 @@ async function handleInteractionCreate(client, interaction) {
         } else if (selectedValue === 'set_dj_only') {
           const newVal = !currentSettings.djOnly;
           updatedSettings = settingsManager.update(guildId, { djOnly: newVal });
-        } else if (selectedValue === 'set_crossfade') {
-          let newCrossfade = 3;
-          if (currentSettings.crossfadeDuration === 3) newCrossfade = 5;
-          else if (currentSettings.crossfadeDuration === 5) newCrossfade = 10;
-          else if (currentSettings.crossfadeDuration === 10) newCrossfade = 0;
-          else newCrossfade = 3;
-
-          updatedSettings = settingsManager.update(guildId, { crossfadeDuration: newCrossfade });
         } else if (selectedValue === 'set_timeout') {
           let newTimeout = 60;
           if (currentSettings.emptyChannelTimeout === 60) newTimeout = 120;
@@ -1392,11 +1419,19 @@ async function handleInteractionCreate(client, interaction) {
             }
             queue.skip();
           } else if (customId === 'btn_stop') {
-            queue.stop();
+            await queue.stop();
+            queue._pendingButtonAction = null;
           }
 
           // Cập nhật lại giao diện NowPlaying message
-          const songForEmbed = queue.currentSong || (is247Mode ? { requestedBy: 'Auto (24/7)', title: t(interaction.guildId, 'player.radio_card_title'), is247: true } : null);
+          const isCurrent247 = Boolean(queue.mode247 || is247Mode);
+          const songForEmbed = queue.currentSong || (isCurrent247 ? {
+            requestedBy: 'Auto (24/7)',
+            title: queue.isStopped
+              ? (settingsManager.get(interaction.guildId)?.language === 'en' ? '24/7 Idle (Radio Paused)' : 'Đài Phát Thanh 24/7 (24/7 Idle)')
+              : t(interaction.guildId, 'player.radio_card_title'),
+            is247: true
+          } : null);
           if (songForEmbed) {
             const isV2Message = interaction.message?.components?.[0]?.type === 17 || interaction.message?.flags?.has?.(32768);
             if (isV2Message) {

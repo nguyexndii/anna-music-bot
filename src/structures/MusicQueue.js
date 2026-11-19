@@ -478,6 +478,10 @@ class MusicQueue {
       clearTimeout(this._repostCardTimer);
       this._repostCardTimer = null;
     }
+    if (this._chatRepostDebounceTimer) {
+      clearTimeout(this._chatRepostDebounceTimer);
+      this._chatRepostDebounceTimer = null;
+    }
     this.playbackEngine._clearBufferingWatchdog();
     this.clearPlayCountTimer();
     this.clearCrossfadeTimer();

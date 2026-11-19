@@ -485,10 +485,12 @@ class DiscordCardRenderer {
   }
 
   async repostNowPlayingCardToBottom() {
+    if (this._isReposting) return;
     if (this.queue.isDestroyed || this.queue.isStopped || !this.queue.currentSong || !this.queue.textChannel) return;
     const is247Lofi = Boolean(this.queue.currentSong?.requestedBy === 'Auto (24/7)' || this.queue.currentSong?.is247);
     if (is247Lofi) return;
 
+    this._isReposting = true;
     try {
       let isAlreadyLast = false;
       try {
@@ -520,6 +522,8 @@ class DiscordCardRenderer {
       }
     } catch (err) {
       console.warn('[RepostNowPlayingCard] Lỗi khi đưa thẻ Now Playing xuống đáy:', err.message);
+    } finally {
+      this._isReposting = false;
     }
   }
 }

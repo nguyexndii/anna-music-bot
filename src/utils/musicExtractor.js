@@ -168,7 +168,7 @@ async function searchTrack(query, targetDurationSec = 0) {
     let cleanQuery = query.trim().slice(0, 150).trim();
     if (cleanQuery.startsWith('-')) return null;
 
-    if ((cleanQuery.includes('spotify.com/') || cleanQuery.startsWith('spotify:')) && !/^https?:\/\//i.test(cleanQuery)) {
+    if ((cleanQuery.includes('spotify.com/') || cleanQuery.includes('spotify.link') || cleanQuery.startsWith('spotify:')) && !/^https?:\/\//i.test(cleanQuery)) {
       cleanQuery = 'https://' + cleanQuery;
     }
 
@@ -181,10 +181,27 @@ async function searchTrack(query, targetDurationSec = 0) {
       cleanQuery = sanitizedUrl;
     }
 
+    // Phân giải link rút gọn spotify.link nếu có
+    if (cleanQuery.includes('spotify.link')) {
+      try {
+        const headRes = await fetch(cleanQuery, { method: 'HEAD', redirect: 'follow' });
+        if (headRes?.url && headRes.url.includes('spotify.com')) {
+          cleanQuery = headRes.url;
+        }
+      } catch (e) {
+        try {
+          const getRes = await fetch(cleanQuery, { redirect: 'follow' });
+          if (getRes?.url && getRes.url.includes('spotify.com')) {
+            cleanQuery = getRes.url;
+          }
+        } catch (e2) {}
+      }
+    }
+
     query = cleanQuery;
 
     // Chuẩn hóa và nhận diện đường dẫn / URI Spotify
-    const isSpotify = cleanQuery.includes('spotify.com') || cleanQuery.startsWith('spotify:') || SPOTIFY_URL_REGEX.test(cleanQuery) || SPOTIFY_URI_REGEX.test(cleanQuery);
+    const isSpotify = cleanQuery.includes('spotify.com') || cleanQuery.includes('spotify.link') || cleanQuery.startsWith('spotify:') || SPOTIFY_URL_REGEX.test(cleanQuery) || SPOTIFY_URI_REGEX.test(cleanQuery);
     let spotifyInfo = null;
     if (isSpotify) {
       cleanQuery = normalizeSpotifyUrl(cleanQuery);
@@ -393,6 +410,11 @@ async function searchTrack(query, targetDurationSec = 0) {
       } catch (ytdlpErr) {
         console.warn('[SoundCloud yt-dlp error]:', ytdlpErr.message);
       }
+    }
+
+    // Chốt chặn bảo vệ Step 5: Tuyệt đối không để link Spotify rơi xuống Step 5 Direct Stream
+    if (isSpotify) {
+      return null;
     }
 
     // 5. Xử lý đường dẫn Direct HTTP/HTTPS (File audio hoặc Livestream)
@@ -637,7 +659,7 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
   let targetUrl = typeof trackItem === 'string' ? trackItem : (trackItem.url || trackItem.searchQuery);
   const trackTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery) : trackItem;
 
-  const isSpotifyUrl = typeof targetUrl === 'string' && targetUrl.includes('spotify.com');
+  const isSpotifyUrl = typeof targetUrl === 'string' && (targetUrl.includes('spotify.com') || targetUrl.includes('spotify.link') || targetUrl.startsWith('spotify:'));
   if (!targetUrl || isSpotifyUrl || (!targetUrl.startsWith('http') && trackItem.searchQuery)) {
     try {
       const searchTarget = trackItem.searchQuery || trackItem.title || trackTitle;
@@ -669,6 +691,12 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     } catch (e) {
       console.warn('[Resolve track URL failed]:', e.message);
     }
+  }
+
+  // Chốt chặn: Nếu targetUrl vẫn là Spotify URL không thể phân giải sang YouTube, chặn ngay không để rơi xuống Step 5 / yt-dlp
+  if (typeof targetUrl === 'string' && (targetUrl.includes('spotify.com') || targetUrl.includes('spotify.link') || targetUrl.startsWith('spotify:'))) {
+    console.warn(`[SpotifyExtractor Guard] targetUrl vẫn là Spotify URL không thể phân giải sang YouTube: "${targetUrl}". Đã chặn rơi xuống Direct Stream.`);
+    return null;
   }
 
   const rawTitle = typeof trackItem === 'object' ? (trackItem.title || trackItem.searchQuery || '') : (trackTitle || '');

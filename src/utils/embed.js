@@ -208,8 +208,11 @@ function is247Track(song, queue) {
   return false;
 }
 
-function createProgressBar(currentMs, totalMs, size = 15, is247Mode = false) {
+function createProgressBar(currentMs, totalMs, size = 15, is247Mode = false, isStopped = false) {
   if (is247Mode) {
+    if (isStopped) {
+      return `\`IDLE\` ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ \`24/7\``;
+    }
     return `\`LIVE\` ${EMOJI_TAG.radioButton || '<:anna_radio_btn:1562668699217952798>'}▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ \`∞\``;
   }
 
@@ -346,8 +349,11 @@ function createNowPlayingCard(song, queue) {
     isEn = guildSettings?.language === 'en';
   } catch (e) {}
 
+  const is247Idle = is247Mode && Boolean(queue?.isStopped || !queue?.currentSong);
   const defaultTitle = is247Mode
-    ? (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7')
+    ? (is247Idle
+        ? (isEn ? '24/7 Idle (Radio Paused)' : 'Đài Phát Thanh 24/7 (24/7 Idle)')
+        : (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7'))
     : (isEn ? 'Now Playing' : 'Bài hát đang phát');
 
   const safeTitle = formatMarkdownTitle(song?.title || defaultTitle, 58);
@@ -380,7 +386,7 @@ function createNowPlayingCard(song, queue) {
   // Thanh tiến trình
   const currentMs = ((song?.seekPosition || 0) * 1000) + (queue?.currentResource?.playbackDuration || 0);
   const totalMs = song?.durationMs || parseDurationToMs(song?.duration);
-  const progressStr = createProgressBar(currentMs, totalMs, 15, is247Mode);
+  const progressStr = createProgressBar(currentMs, totalMs, 15, is247Mode, Boolean(queue?.isStopped));
 
   // Trạng thái các nút & Optimistic Action
   const pendingAction = queue?._pendingButtonAction;
@@ -430,11 +436,16 @@ function createNowPlayingCard(song, queue) {
   let progressContent;
 
   if (is247Mode) {
+    const is247Idle = Boolean(queue?.isStopped || !queue?.currentSong);
     headerComponent = {
       type: 10,
-      content: isEn
-        ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Lofi Radio Station**\n*Relaxing 24/7 Lofi background music playing continuously*`
-        : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`
+      content: is247Idle
+        ? (isEn
+            ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Idle (Radio Paused)**\n*Bot is in 24/7 standby mode. Use /play to start music!*`
+            : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh 24/7 (24/7 Idle)**\n*Bot đang ở trạng thái chờ 24/7 Idle. Dùng lệnh /play để phát nhạc!*`)
+        : (isEn
+            ? `### ${EMOJI_TAG.radio || '📻'} **24/7 Lofi Radio Station**\n*Relaxing 24/7 Lofi background music playing continuously*`
+            : `### ${EMOJI_TAG.radio || '📻'} **Đài Phát Thanh Lofi 24/7**\n*Nhạc nền Lofi thư giãn đang phát liên tục 24/7*`)
     };
     progressContent = lyricsBlock ? `${lyricsBlock}\n\n${progressStr}` : progressStr;
   } else {
@@ -484,7 +495,7 @@ function createNowPlayingCard(song, queue) {
           { type: 2, style: 2, custom_id: 'btn_previous', label: prevLabel, emoji: CUSTOM_EMOJIS.back, disabled: !isPlayable || is247Mode || !hasPrevious || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_pause', label: isPausedOrStopped ? resumeLabel : pauseLabel, emoji: isPausedOrStopped ? CUSTOM_EMOJIS.playCircle : CUSTOM_EMOJIS.pauseCircle, disabled: !isPlayable || is247Mode || hasPendingAction },
           { type: 2, style: 2, custom_id: 'btn_skip', label: skipLabel, emoji: CUSTOM_EMOJIS.skip, disabled: !isPlayable || is247Mode || hasPendingAction },
-          { type: 2, style: 2, custom_id: 'btn_stop', label: stopLabel, emoji: CUSTOM_EMOJIS.stopCircle, disabled: (!isPlayable && !is247Mode) || hasPendingAction }
+          { type: 2, style: 2, custom_id: 'btn_stop', label: stopLabel, emoji: CUSTOM_EMOJIS.stopCircle, disabled: (!isPlayable && !is247Mode) || (is247Mode && Boolean(queue?.isStopped)) || hasPendingAction }
         ]
       },
       // 4. Hàng 2 (3 nút cân đối): Queue | Loop | Autoplay (Đã bỏ btn_lyrics)
@@ -535,14 +546,17 @@ function createNowPlayingEmbed(song, queue) {
   const guildSettings = queue?.guild?.id ? require('../structures/SettingsManager').get(queue.guild.id) : null;
   const isEn = guildSettings?.language === 'en';
 
+  const is247Idle = is247Mode && Boolean(queue?.isStopped || !queue?.currentSong);
   const defaultTitle = is247Mode
-    ? (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7')
+    ? (is247Idle
+        ? (isEn ? '24/7 Idle (Radio Paused)' : 'Đài Phát Thanh 24/7 (24/7 Idle)')
+        : (isEn ? '24/7 Lofi Radio Station' : 'Đài Phát Thanh Lofi 24/7'))
     : (isEn ? 'Now Playing Track' : 'Bài hát đang phát');
   const safeTitle = formatMarkdownTitle(song?.title || defaultTitle, 58);
   const songUrl = (song?.url && song.url.startsWith('http')) ? song.url : 'https://discord.com';
   const currentMs = ((song?.seekPosition || 0) * 1000) + (queue?.currentResource?.playbackDuration || 0);
   const totalMs = song?.durationMs || parseDurationToMs(song?.duration);
-  const progressBar = createProgressBar(currentMs, totalMs, 15, is247Mode);
+  const progressBar = createProgressBar(currentMs, totalMs, 15, is247Mode, Boolean(queue?.isStopped));
 
   const embed = new EmbedBuilder()
     .setAuthor({ name: isEn ? 'Now Playing' : 'Đang Phát Nhạc', iconURL: queue?.guild?.client?.user?.displayAvatarURL() })
@@ -618,7 +632,7 @@ function createMusicControls(queue) {
       .setLabel(stopLabel)
       .setEmoji(CUSTOM_EMOJIS.stopCircle)
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled((!isPlayable && !is247Mode) || hasPendingAction)
+      .setDisabled((!isPlayable && !is247Mode) || (is247Mode && Boolean(queue?.isStopped)) || hasPendingAction)
   );
 
   const userSongsCount = (queue?.songs || []).filter(
@@ -1056,11 +1070,6 @@ function createSettingsSelectMenu(settings) {
         .setDescription(isEn ? `Restricted command access to DJ role (Current: ${settings.djOnly ? onText : offText})` : `Chỉ người có vai trò DJ mới dùng được lệnh (Hiện tại: ${settings.djOnly ? onText : offText})`)
         .setValue('set_dj_only')
         .setEmoji(CUSTOM_EMOJIS.settings),
-      new StringSelectMenuOptionBuilder()
-        .setLabel(isEn ? 'Crossfade Duration' : 'Hòa âm chuyển bài (Crossfade)')
-        .setDescription(isEn ? `Smooth transition effect (Current: ${settings.crossfadeDuration}s)` : `Hiệu ứng mượt mà khi đổi bài (Hiện tại: ${settings.crossfadeDuration}s)`)
-        .setValue('set_crossfade')
-        .setEmoji(CUSTOM_EMOJIS.equalizer),
       new StringSelectMenuOptionBuilder()
         .setLabel(isEn ? 'Empty Room Disconnect Timeout' : 'Thời gian tự rời khi phòng trống')
         .setDescription(isEn ? `Seconds to wait before leaving (Current: ${settings.emptyChannelTimeout || 60}s)` : `Số giây chờ trước khi out nếu không có ai (Hiện tại: ${settings.emptyChannelTimeout || 60}s)`)

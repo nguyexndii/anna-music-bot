@@ -471,13 +471,16 @@ class QueuePlaybackEngine {
 
         if (this.player.state.status === AudioPlayerStatus.Idle) {
           await this.playNext();
+          const userSongs = this.getUserSongs();
+          const position = userSongs.findIndex(s => s === song) + 1;
+          return { song, position: position > 0 ? position : 1, isPlayingNow: false };
         } else {
           this.player.stop(true);
+          const userSongs = this.getUserSongs();
+          const rawIndex = userSongs.findIndex(s => s === song);
+          const position = rawIndex > 0 ? rawIndex : 1;
+          return { song, position, isPlayingNow: false };
         }
-
-        const userSongs = this.getUserSongs();
-        const position = userSongs.findIndex(s => s === song) + 1;
-        return { song, position: position > 0 ? position : (existingUserSongs.length + 1), isPlayingNow: false };
       } else {
         this.songs.unshift(song);
         this._saveSessionState();
@@ -594,13 +597,16 @@ class QueuePlaybackEngine {
 
         if (this.player.state.status === AudioPlayerStatus.Idle) {
           await this.playNext();
+          const userSongs = this.getUserSongs();
+          const firstPos = userSongs.findIndex(s => s === finalTracks[0]) + 1;
+          return { count: finalTracks.length, firstPosition: firstPos > 0 ? firstPos : 1, isPlayingNow: false };
         } else {
           this.player.stop(true);
+          const userSongs = this.getUserSongs();
+          const rawIdx = userSongs.findIndex(s => s === finalTracks[0]);
+          const firstPos = rawIdx > 0 ? rawIdx : 1;
+          return { count: finalTracks.length, firstPosition: firstPos, isPlayingNow: false };
         }
-
-        const userSongs = this.getUserSongs();
-        const firstPos = userSongs.findIndex(s => s === finalTracks[0]) + 1;
-        return { count: finalTracks.length, firstPosition: firstPos > 0 ? firstPos : (existingUserSongs.length + 1), isPlayingNow: false };
       } else {
         this.songs.unshift(...finalTracks);
         this._saveSessionState();
@@ -1972,6 +1978,10 @@ class QueuePlaybackEngine {
     this._clearCrossfadeTimer();
     this._clearSessionSaveInterval();
     this.clearPreloadTimer();
+    if (this.queue._chatRepostDebounceTimer) {
+      clearTimeout(this.queue._chatRepostDebounceTimer);
+      this.queue._chatRepostDebounceTimer = null;
+    }
     if (this.queue.preloadedResource) {
       this._cleanupResource(this.queue.preloadedResource);
       this.queue.preloadedResource = null;
@@ -2011,7 +2021,9 @@ class QueuePlaybackEngine {
         this._saveSessionState();
         await this._play247BackgroundLofi();
       } finally {
-        this.queue._switchingTo247 = false;
+        setTimeout(() => {
+          this.queue._switchingTo247 = false;
+        }, 500);
       }
     } else {
       // Nếu đang phát Lofi (hoặc không có bài user) mà Admin stop thì dừng im lặng (isStopped = true, status ♾️ 24/7 Idle), không tự động phát lại Lofi ép buộc
@@ -2106,58 +2118,63 @@ class QueuePlaybackEngine {
     this.queue._switchingTo247Lock = now;
 
     this.queue._switchingTo247 = true;
-    this.queue.mode247 = true;
-    settingsManager.update(this.guild.id, { mode247: true });
+    try {
+      this.queue.mode247 = true;
+      settingsManager.update(this.guild.id, { mode247: true });
 
-    this.queue.voiceManager.clearDisconnectTimer();
-    this.queue.voiceManager.clearEmptyRoomTimer();
-    this.queue.voiceManager.clear247IdleTimer();
-    this.clearCrossfadeTimer();
-    this.clearPreloadTimer();
+      this.queue.voiceManager.clearDisconnectTimer();
+      this.queue.voiceManager.clearEmptyRoomTimer();
+      this.queue.voiceManager.clear247IdleTimer();
+      this.clearCrossfadeTimer();
+      this.clearPreloadTimer();
 
-    if (this.queue.preloadedResource) {
-      this._cleanupResource(this.queue.preloadedResource);
-      this.queue.preloadedResource = null;
-      this.queue.preloadedSongUrl = null;
+      if (this.queue.preloadedResource) {
+        this._cleanupResource(this.queue.preloadedResource);
+        this.queue.preloadedResource = null;
+        this.queue.preloadedSongUrl = null;
+      }
+      this.queue.prefetchedSong = null;
+      this.queue.autoplayPool = [];
+
+      this.queue.loopMode = 'off';
+      if (this.songs && this.songs.length > 0) {
+        this.queue.isQueueOnHold = true;
+      }
+
+      if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
+        this.queue.lastUserTrack = this.currentSong;
+      }
+
+      this.clearPlayCountTimer();
+      this.currentSong = null;
+
+      if (this.player) {
+        this.player.stop(true);
+      }
+      if (this.currentResource) {
+        this._cleanupResource(this.currentResource);
+        this.currentResource = null;
+      }
+      this.queue.isStopped = false;
+
+      const activeChannel = this.queue.voiceManager.getVoiceChannel();
+      if (activeChannel) {
+        setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
+      }
+
+      await this._play247BackgroundLofi();
+
+      await sessionManager.saveSession(this.guild.id, {
+        voiceChannelId: this.queue.voiceChannel?.id,
+        textChannelId: this.queue.textChannel?.id,
+        mode247: true,
+        status: 'idle_247'
+      });
+    } finally {
+      setTimeout(() => {
+        this.queue._switchingTo247 = false;
+      }, 500);
     }
-    this.queue.prefetchedSong = null;
-    this.queue.autoplayPool = [];
-
-    this.queue.loopMode = 'off';
-    if (this.songs && this.songs.length > 0) {
-      this.queue.isQueueOnHold = true;
-    }
-
-    if (this.currentSong && !this.currentSong.is247 && this.currentSong.requestedBy !== 'Auto (24/7)') {
-      this.queue.lastUserTrack = this.currentSong;
-    }
-
-    this.clearPlayCountTimer();
-    this.currentSong = null;
-    if (this.currentResource) {
-      this._cleanupResource(this.currentResource);
-      this.currentResource = null;
-    }
-
-    if (this.player) {
-      this.player.stop(true);
-    }
-    this.queue.isStopped = false;
-    this.queue._switchingTo247 = false;
-
-    const activeChannel = this.queue.voiceManager.getVoiceChannel();
-    if (activeChannel) {
-      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
-    }
-
-    await this._play247BackgroundLofi();
-
-    await sessionManager.saveSession(this.guild.id, {
-      voiceChannelId: this.queue.voiceChannel?.id,
-      textChannelId: this.queue.textChannel?.id,
-      mode247: true,
-      status: 'idle_247'
-    });
 
     return {
       success: true,
@@ -2194,12 +2211,12 @@ class QueuePlaybackEngine {
 
       if (this.songs && this.songs.length > 0) {
         this.currentSong = null;
+        if (this.player) {
+          this.player.stop(true);
+        }
         if (this.currentResource) {
           this._cleanupResource(this.currentResource);
           this.currentResource = null;
-        }
-        if (this.player) {
-          this.player.stop(true);
         }
         await this.playNext();
         return {
@@ -2214,12 +2231,12 @@ class QueuePlaybackEngine {
       const trackToReplay = this.queue.lastUserTrack || (this.queue.previousSongs && this.queue.previousSongs.length > 0 ? this.queue.previousSongs[this.queue.previousSongs.length - 1] : null);
       if (trackToReplay) {
         this.currentSong = null;
+        if (this.player) {
+          this.player.stop(true);
+        }
         if (this.currentResource) {
           this._cleanupResource(this.currentResource);
           this.currentResource = null;
-        }
-        if (this.player) {
-          this.player.stop(true);
         }
         const songCopy = { ...trackToReplay, is247: false };
         if (songCopy.requestedBy === 'Auto (24/7)') {

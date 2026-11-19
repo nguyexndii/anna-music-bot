@@ -43,8 +43,26 @@ function parseSpotifyUrl(url) {
  */
 async function parseSpotifyMetadata(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
-  const parsed = parseSpotifyUrl(rawUrl);
-  const normalizedUrl = normalizeSpotifyUrl(rawUrl);
+
+  let cleanUrl = rawUrl.trim();
+  if (cleanUrl.includes('spotify.link')) {
+    try {
+      const res = await fetch(cleanUrl, { method: 'HEAD', redirect: 'follow' });
+      if (res?.url && res.url.includes('spotify.com')) {
+        cleanUrl = res.url;
+      }
+    } catch (e) {
+      try {
+        const res = await fetch(cleanUrl, { redirect: 'follow' });
+        if (res?.url && res.url.includes('spotify.com')) {
+          cleanUrl = res.url;
+        }
+      } catch (e2) {}
+    }
+  }
+
+  const parsed = parseSpotifyUrl(cleanUrl);
+  const normalizedUrl = normalizeSpotifyUrl(cleanUrl);
 
   if (parsed?.type === 'track') {
     const trackId = parsed.id;
@@ -53,32 +71,8 @@ async function parseSpotifyMetadata(rawUrl) {
     let durationMs = 0;
     let thumbnail = null;
 
-    // 1. Thử trích xuất qua spotify-url-info với URL đã chuẩn hóa (bỏ /intl-*)
-    try {
-      const data = await spotifyUrlInfo.getData(normalizedUrl);
-      if (data && (data.name || data.title)) {
-        trackName = (data.name || data.title || '').trim();
-        artistName = data.artists?.map(a => a.name).join(', ') || data.artists?.[0]?.name || data.artist || '';
-        durationMs = data.duration_ms || data.duration || 0;
-        thumbnail = data.coverArt?.sources?.[0]?.url || null;
-      }
-    } catch (e) {}
-
-    // 2. Fallback qua Spotify oEmbed
-    if (!trackName && trackId) {
-      try {
-        const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
-        if (oRes.ok) {
-          const oData = await oRes.json();
-          trackName = (oData.title || '').trim();
-          artistName = (oData.author_name || '').trim();
-          thumbnail = oData.thumbnail_url || null;
-        }
-      } catch (e) {}
-    }
-
-    // 3. Fallback qua Spotify Web API chính thức nếu có Token
-    if (!trackName && trackId) {
+    // 1. Thử qua Spotify Web API chính thức nếu có Token (ưu tiên số 1: đầy đủ tên, nghệ sĩ, thời lượng, ảnh bìa gốc)
+    if (trackId) {
       try {
         const token = await getSpotifyApiToken();
         if (token) {
@@ -92,6 +86,67 @@ async function parseSpotifyMetadata(rawUrl) {
             durationMs = apiData.duration_ms || 0;
             thumbnail = apiData.album?.images?.[0]?.url || null;
           }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Thử trích xuất qua spotify-url-info với URL đã chuẩn hóa (bỏ /intl-*)
+    if (!trackName) {
+      try {
+        const data = await spotifyUrlInfo.getData(normalizedUrl);
+        if (data && (data.name || data.title)) {
+          trackName = (data.name || data.title || '').trim();
+          artistName = data.artists?.map(a => a.name).join(', ') || data.artists?.[0]?.name || data.artist || '';
+          durationMs = data.duration_ms || data.duration || 0;
+          thumbnail = data.coverArt?.sources?.[0]?.url || null;
+        }
+      } catch (e) {}
+    }
+
+    // 2b. Thử trích xuất trực tiếp từ Embed __NEXT_DATA__
+    if (!trackName && trackId) {
+      try {
+        const embedRes = await fetch(`https://open.spotify.com/embed/track/${trackId}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        if (embedRes.ok) {
+          const html = await embedRes.text();
+          const match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+          if (match && match[1]) {
+            const nextData = JSON.parse(match[1]);
+            const entity = nextData?.props?.pageProps?.state?.data?.entity;
+            if (entity) {
+              trackName = (entity.name || entity.title || '').trim();
+              artistName = entity.artists?.map(a => a.name).join(', ') || entity.artist || '';
+              durationMs = entity.duration || entity.duration_ms || 0;
+              thumbnail = entity.coverArt?.sources?.[0]?.url || null;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Fallback cuối cùng qua Spotify oEmbed (chỉ trả title, author_name, thumbnail, duration = 0)
+    if (!trackName && trackId) {
+      try {
+        const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+        if (oRes.ok) {
+          const oData = await oRes.json();
+          trackName = (oData.title || '').trim();
+          artistName = (oData.author_name || '').trim();
+          thumbnail = oData.thumbnail_url || null;
+        }
+      } catch (e) {}
+    }
+
+    // Bổ sung thumbnail từ oEmbed nếu các bước trên chưa lấy được ảnh
+    if (trackName && !thumbnail && trackId) {
+      try {
+        const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+        if (oRes.ok) {
+          const oData = await oRes.json();
+          if (oData.thumbnail_url) thumbnail = oData.thumbnail_url;
+          if (!artistName && oData.author_name) artistName = oData.author_name.trim();
         }
       } catch (e) {}
     }

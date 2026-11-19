@@ -54,6 +54,7 @@ const ALLOWED_MUSIC_HOSTNAMES = new Set([
   'youtu.be',
   'open.spotify.com',
   'spotify.com',
+  'spotify.link',
   'soundcloud.com',
   'm.soundcloud.com',
   'on.soundcloud.com'

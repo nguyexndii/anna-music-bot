@@ -80,13 +80,23 @@ module.exports = {
     // Giải mã urlref:<hash> từ Autocomplete nếu URL bị cắt ngắn do vượt quá 100 ký tự
     if (query.startsWith('urlref:')) {
       const cached = global._autocompleteUrlMap?.get(query);
+      let resolvedUrl = null;
       if (cached) {
         if (typeof cached === 'string') {
-          query = cached;
+          resolvedUrl = cached;
         } else if (cached.url && (!cached.expiresAt || cached.expiresAt > Date.now())) {
-          query = cached.url;
+          resolvedUrl = cached.url;
         }
       }
+
+      if (!resolvedUrl) {
+        const expiredMsg = isEn
+          ? '❌ This link has expired from the suggestion list. Please paste the URL again to play!'
+          : '❌ Liên kết này đã hết hạn từ danh sách gợi ý. Vui lòng dán lại URL để phát!';
+        return ctx.reply({ content: expiredMsg, ephemeral: true });
+      }
+
+      query = resolvedUrl;
     }
 
     if (!query) {
