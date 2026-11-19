@@ -590,7 +590,7 @@ async function searchTrack(query, targetDurationSec = 0) {
 
     // 6. Tìm kiếm YouTube cho từ khóa qua Worker Thread
     try {
-      const results = await executeSearch(cleanQuery, 5, 'official');
+      const results = await executeSearch(cleanQuery, 5, 'official', targetDurationSec);
       if (results && results.length > 0) {
         return [results[0]];
       }
@@ -688,6 +688,9 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
         : playDurationSec;
       return await createDirectFileStream(cachedEntry.filePath, userSeek, cachePlayDurationSec, options);
     } catch (cachePlayErr) {
+      if (cachePlayErr.name === 'AbortError' || cachePlayErr.message?.includes('aborted') || options?.signal?.aborted) {
+        throw cachePlayErr;
+      }
       console.warn(`[AudioCache Read Failed]:`, cachePlayErr.message);
     }
   }
@@ -728,6 +731,9 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     return res;
   } catch (ytErr) {
     cacheOptions?.onAbort?.();
+    if (ytErr.name === 'AbortError' || options?.signal?.aborted) {
+      throw ytErr;
+    }
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
 
@@ -837,9 +843,10 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
  */
 async function createResource(trackItem, crossfadeSeconds = 0, seekSeconds = 0, options = {}) {
   const priority = options?.priority || trackItem?.priority || 'high';
+  const signal = options?.signal || trackItem?.signal || null;
   return await extractionSemaphore.run(async () => {
-    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds, { ...options, priority });
-  }, priority);
+    return await _doCreateResource(trackItem, crossfadeSeconds, seekSeconds, { ...options, priority, signal });
+  }, priority, signal);
 }
 
 /**

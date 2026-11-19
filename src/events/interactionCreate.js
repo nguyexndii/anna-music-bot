@@ -271,10 +271,9 @@ async function handleInteractionCreate(client, interaction) {
           return interaction.reply({ embeds: [createErrorEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? 'Matching song not found in queue!' : 'Không tìm thấy bài hát tương ứng trong hàng chờ!')], flags: 64 });
         }
 
-        const removed = queue.songs.splice(actualIdx, 1)[0];
-        queue._saveSessionState?.();
+        const removed = queue.removeSong(actualIdx);
         return interaction.reply({
-          embeds: [createSuccessEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `🗑️ Successfully removed track **#${pos}**: **${removed.title}** from queue.` : `🗑️ Đã xóa thành công bài số **${pos}**: **${removed.title}** khỏi hàng chờ.`)],
+          embeds: [createSuccessEmbed(settingsManager.get(interaction.guildId)?.language === 'en' ? `🗑️ Successfully removed track **#${pos}**: **${removed?.title || ''}** from queue.` : `🗑️ Đã xóa thành công bài số **${pos}**: **${removed?.title || ''}** khỏi hàng chờ.`)],
           flags: 64
         });
       }
@@ -362,8 +361,7 @@ async function handleInteractionCreate(client, interaction) {
           const target = userSongs[idx];
           const actualIdx = queue.songs.indexOf(target);
           if (actualIdx !== -1) {
-            queue.songs.splice(actualIdx, 1);
-            queue._saveSessionState?.();
+            queue.removeSong(actualIdx);
           }
           if (typeof queue.refreshNowPlayingCard === 'function') {
             queue.refreshNowPlayingCard();

@@ -8,8 +8,53 @@ const {
   isGarbageLyrics,
   isVietnameseTrack,
   hasVietnameseSyllablePattern,
-  VIETNAMESE_REGEX
+  VIETNAMESE_REGEX,
+  HANGUL_REGEX,
+  JAPANESE_CHAR_REGEX,
+  CHINESE_CHAR_REGEX,
+  VIRTUAL_GLOBAL_GROUPS_REGEX,
+  determinePreliminaryVocalLanguage,
+  extractRepresentativeSampleLines,
+  calculateTieBreakerBonus,
+  scoreSubtitleTrackWithHeuristic
 } = require('./lyricsTextUtils');
+
+/**
+ * Language Guard ASR 0ms:
+ * Đọc trực tiếp info.automatic_captions để lấy mã ASR gốc (vssId: 'a.en' / 'a.ko' / 'a.vi' / 'a.ja' / 'a.zh').
+ * Giọng hát bài hát là tiếng gì thì YouTube ASR sẽ ghi nhận qua vssId 'a.<lang>' (0ms, 0 request mạng thừa, không tải file phụ đề đếm ký tự).
+ */
+function detectAsrVocalLanguage(automaticCaptions) {
+  if (!automaticCaptions || typeof automaticCaptions !== 'object') return null;
+
+  // 1. Ưu tiên kiểm tra khóa yt-dlp có đuôi '-orig' (ví dụ: 'en-orig', 'ko-orig') biểu thị ngôn ngữ giọng hát gốc
+  for (const rawKey of Object.keys(automaticCaptions)) {
+    const key = String(rawKey || '').toLowerCase();
+    if (key.endsWith('-orig')) {
+      const baseLang = key.slice(0, -5);
+      if (baseLang === 'en' || baseLang.startsWith('en-') || baseLang.startsWith('en_')) return 'en';
+      if (baseLang === 'ko' || baseLang.startsWith('ko-') || baseLang.startsWith('ko_')) return 'ko';
+      if (baseLang === 'vi' || baseLang.startsWith('vi-') || baseLang.startsWith('vi_')) return 'vi';
+      if (baseLang === 'ja' || baseLang.startsWith('ja-') || baseLang.startsWith('ja_')) return 'ja';
+      if (baseLang === 'zh' || baseLang.startsWith('zh-') || baseLang.startsWith('zh_')) return 'zh';
+      return baseLang.split(/[-_]/)[0];
+    }
+  }
+
+  // 2. Đối chiếu qua vssId 'a.<lang>' của từng track
+  for (const [key, val] of Object.entries(automaticCaptions)) {
+    const trackArr = Array.isArray(val) ? val : [val];
+    for (const t of trackArr) {
+      const vssId = String(t?.vssId || '').toLowerCase();
+      if (vssId === 'a.en' || vssId.startsWith('a.en')) return 'en';
+      if (vssId === 'a.ko' || vssId.startsWith('a.ko')) return 'ko';
+      if (vssId === 'a.vi' || vssId.startsWith('a.vi')) return 'vi';
+      if (vssId === 'a.ja' || vssId.startsWith('a.ja')) return 'ja';
+      if (vssId === 'a.zh' || vssId.startsWith('a.zh')) return 'zh';
+    }
+  }
+  return null;
+}
 
 // Bộ đệm RAM lưu sẵn danh sách phụ đề CC trích xuất từ yt-dlp lúc tải bài
 const youtubeSubtitlesMetaCache = new Map();
@@ -443,6 +488,13 @@ async function fetchYtdlpInfo(url) {
 }
 
 function resolveTrackLanguageRegion(context = {}, appleMeta = null) {
+  const rawCombined = `${context.rawTitle || ''} ${context.videoTitle || ''} ${context.artist || ''} ${context.uploader || ''}`.trim();
+
+  // Nhóm ảo toàn cầu (K/DA, Riot Games) luôn là INTL
+  if (VIRTUAL_GLOBAL_GROUPS_REGEX.test(rawCombined)) {
+    return 'INTL';
+  }
+
   if (appleMeta && appleMeta.region) return appleMeta.region;
   try {
     const { detectTrackRegion } = require('../../utils/musicExtractor');
@@ -467,6 +519,7 @@ function getRankedSubtitleTracks(subsMap, context = {}, appleMeta = null, allowA
   const isKR = region === 'KR';
   const isJP = region === 'JP';
   const isCN = region === 'CN';
+  const prelimVocal = determinePreliminaryVocalLanguage(context.rawTitle || context.videoTitle || context.title || '', context.artist || context.uploader || '', region);
 
   const scored = entries.map(([key, trackArr]) => {
     const track = trackArr[0];
@@ -490,7 +543,35 @@ function getRankedSubtitleTracks(subsMap, context = {}, appleMeta = null, allowA
     const isViLang = langCode === 'vi' || langCode.startsWith('vi-') || langCode.startsWith('vi_') || kLow === 'vi' || kLow.startsWith('vi-') || kLow.startsWith('vi_');
     const isViName = /tiếng việt|vietnamese|việt|viet|vietsub/i.test(nameLow);
 
-    if (isVN) {
+    // Language Guard ASR 0ms: Nếu YouTube ASR đã nhận diện ngôn ngữ giọng hát thật
+    if (context.youtubeAsrLang) {
+      const asr = context.youtubeAsrLang;
+      if (asr === 'en') {
+        if (isViLang || isViName) score -= 999;
+        else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 160;
+        else if (kLow.startsWith('und')) score += 30;
+        else score -= 100; // Phạt bản dịch ko, ja, zh khi vocal thật là tiếng Anh
+      } else if (asr === 'ko') {
+        if (isViLang || isViName) score -= 999;
+        else if (kLow.startsWith('ko') || langCode.startsWith('ko')) score += 160;
+        else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 40;
+        else if (kLow.startsWith('und')) score += 30;
+        else score -= 60;
+      } else if (asr === 'vi') {
+        if (isViLang || isViName) score += 160;
+        else score -= 150;
+      } else if (asr === 'ja') {
+        if (isViLang || isViName) score -= 999;
+        else if (kLow.startsWith('ja') || langCode.startsWith('ja')) score += 160;
+        else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 40;
+        else score -= 60;
+      } else if (asr === 'zh') {
+        if (isViLang || isViName) score -= 999;
+        else if (kLow.startsWith('zh') || langCode.startsWith('zh')) score += 160;
+        else if (kLow.startsWith('en') || langCode.startsWith('en')) score += 40;
+        else score -= 60;
+      }
+    } else if (isVN) {
       if (isViLang && !isAsr) {
         score += 150;
       } else if (isViLang) {
@@ -535,6 +616,14 @@ function getRankedSubtitleTracks(subsMap, context = {}, appleMeta = null, allowA
         score -= 50;
       }
     }
+
+    // Tích hợp scoreSubtitleTrackWithHeuristic (bao gồm cả Tie-Breaker bonus)
+    const trackObj = {
+      ...track,
+      baseScore: score,
+      languageCode: langCode
+    };
+    score = scoreSubtitleTrackWithHeuristic(trackObj, prelimVocal, context);
 
     return { key, trackArr, score };
   });
@@ -859,11 +948,14 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
     }
     if (!info) return null;
 
+    const asrVocalLang = detectAsrVocalLanguage(info?.automatic_captions);
+
     const context = {
       rawTitle,
       artist,
       videoTitle: info?.title || '',
-      uploader: info?.uploader || info?.channel || ''
+      uploader: info?.uploader || info?.channel || '',
+      youtubeAsrLang: asrVocalLang
     };
 
     const region = resolveTrackLanguageRegion(context, appleMeta);
@@ -882,7 +974,20 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
       const minLines = 5;
       if (syncedLyrics.length < minLines) return null;
       const sampleText = plainLines.slice(0, 25).join(' ');
-      if (isVN) {
+
+      // 1. Language Guard ASR 0ms: Nếu YouTube ASR xác định rõ ngôn ngữ vocal thật của video
+      if (asrVocalLang === 'en') {
+        if (VIETNAMESE_REGEX.test(sampleText)) return null;
+        if (/[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF]/.test(sampleText)) {
+          return null; // Giọng hát là tiếng Anh, loại bỏ phụ đề dịch sang tiếng Hàn/Nhật/Trung
+        }
+      } else if (asrVocalLang === 'ko') {
+        if (VIETNAMESE_REGEX.test(sampleText)) return null;
+      } else if (asrVocalLang === 'vi') {
+        const hasVnAccents = VIETNAMESE_REGEX.test(sampleText);
+        const hasVnSyllables = typeof hasVietnameseSyllablePattern === 'function' && hasVietnameseSyllablePattern(sampleText);
+        if (!hasVnAccents && !hasVnSyllables) return null;
+      } else if (isVN) {
         const hasVnAccents = VIETNAMESE_REGEX.test(sampleText);
         if (!hasVnAccents) {
           const englishStopWords = /\b(the|and|you|that|with|have|this|from|they|will|would|there|their|what|about|which|when|make|like|time|just|know|take|people|into|year|your|good|some|could|them|other|than|then|now|look|only|come|over|think|also|back|after|use|two|how|our|work|first|well|way|even|new|want|because|any|these|give|day|most|us)\b/gi;
@@ -892,7 +997,35 @@ async function fetchYouTubeSubtitles(url, rawTitle = '', artist = '', trackKey =
         }
       } else {
         if (VIETNAMESE_REGEX.test(sampleText)) return null;
-        if (!isJP && !isKR && !isCN && /[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/.test(sampleText)) {
+
+        const prelim = determinePreliminaryVocalLanguage(rawTitle, artist, region);
+        if (prelim.vocalLang === 'en' && /[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF]/.test(sampleText)) {
+          return null;
+        }
+
+        // Trường hợp K-Pop tiêu đề Latinh (BTS - Dynamite vs BLACKPINK - How You Like That)
+        if (prelim.isAmbiguous && prelim.vocalLang === 'ambiguous_kr') {
+          // Áp dụng Intro Chant Bypass: trích xuất dòng 4-12 để kiểm định lời chính
+          const repText = extractRepresentativeSampleLines(plainLines);
+          HANGUL_REGEX.lastIndex = 0;
+          const hangulMatches = repText.match(HANGUL_REGEX) || [];
+          const hangulCount = hangulMatches.length;
+          const totalLetters = (repText.match(/[\p{L}]/gu) || []).length;
+          const latinCount = (repText.match(/[a-zA-Z]/g) || []).length;
+          const hangulRatio = totalLetters > 0 ? (hangulCount / totalLetters) : 0;
+          const latinRatio = totalLetters > 0 ? (latinCount / totalLetters) : 0;
+
+          // Nếu bài hát K-Pop nhưng hát tiếng Anh (hangul < 5% và latin >= 85%) -> Không lấy phụ đề tiếng Hàn
+          if (hangulRatio < 0.05 && latinRatio >= 0.85) {
+            HANGUL_REGEX.lastIndex = 0;
+            if (HANGUL_REGEX.test(sampleText)) {
+              HANGUL_REGEX.lastIndex = 0;
+              return null;
+            }
+          }
+        }
+
+        if (!isJP && !isKR && !isCN && /[\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF]/.test(sampleText)) {
           return null;
         }
       }
@@ -1082,6 +1215,7 @@ module.exports = {
   extractLyricsFromDescription,
   fetchYouTubeDescriptionLyrics,
   fetchOfficialSubtitlesViaYtdlp,
+  detectAsrVocalLanguage,
   fetchYouTubeSubtitles,
   detectYouTubeIntroOffset
 };

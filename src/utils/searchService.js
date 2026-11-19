@@ -131,7 +131,7 @@ initWorker();
 /**
  * Gửi yêu cầu tìm kiếm sang Worker Thread
  */
-function sendToWorker(query, limit, mode, locale = 'vi') {
+function sendToWorker(query, limit, mode, locale = 'vi', targetDurationSec = 0) {
   return new Promise((resolve) => {
     if (!worker) {
       initWorker();
@@ -157,7 +157,7 @@ function sendToWorker(query, limit, mode, locale = 'vi') {
     });
 
     try {
-      worker.postMessage({ id: taskId, query, limit, mode, locale });
+      worker.postMessage({ id: taskId, query, limit, mode, locale, targetDurationSec });
     } catch (e) {
       clearTimeout(timeout);
       pendingCallbacks.delete(taskId);
@@ -169,13 +169,23 @@ function sendToWorker(query, limit, mode, locale = 'vi') {
 /**
  * Hàm điều phối Tìm kiếm chính: Kiểm tra Cache -> Gộp Request -> Hàng đợi Concurrency -> Worker Thread
  */
-async function executeSearch(query, limit = 20, mode = 'official', locale = 'vi') {
+async function executeSearch(query, limit = 20, mode = 'official', targetDurationSecOrLocale = 0, maybeLocale = 'vi') {
   if (!query || typeof query !== 'string') return [];
   const cleanQuery = query.trim().slice(0, 150);
   if (cleanQuery.length < 2 || cleanQuery.startsWith('-')) return [];
 
-  const cacheKeyWithLocale = `${cleanQuery.toLowerCase()}|${mode}|${limit}|${locale}`;
-  const cacheKeyGeneric = `${cleanQuery.toLowerCase()}|${mode}|${limit}`;
+  let targetDurationSec = 0;
+  let locale = 'vi';
+  if (typeof targetDurationSecOrLocale === 'number') {
+    targetDurationSec = targetDurationSecOrLocale;
+    locale = maybeLocale || 'vi';
+  } else if (typeof targetDurationSecOrLocale === 'string') {
+    locale = targetDurationSecOrLocale;
+  }
+
+  const durKey = targetDurationSec > 0 ? `|dur:${targetDurationSec}` : '';
+  const cacheKeyWithLocale = `${cleanQuery.toLowerCase()}|${mode}|${limit}|${locale}${durKey}`;
+  const cacheKeyGeneric = `${cleanQuery.toLowerCase()}|${mode}|${limit}${durKey}`;
 
   // 1. Kiểm tra RAM Cache (0ms)
   const cached = getCachedResults(cacheKeyWithLocale) || getCachedResults(cacheKeyGeneric);
@@ -195,7 +205,7 @@ async function executeSearch(query, limit = 20, mode = 'official', locale = 'vi'
   // 3. Thực thi qua Concurrency Limiter & Worker Thread
   const searchPromise = (async () => {
     try {
-      const results = await enqueueSearch(() => sendToWorker(cleanQuery, limit, mode, locale));
+      const results = await enqueueSearch(() => sendToWorker(cleanQuery, limit, mode, locale, targetDurationSec));
       if (Array.isArray(results) && results.length > 0) {
         setCachedResults(cacheKeyWithLocale, results);
         setCachedResults(cacheKeyGeneric, results);

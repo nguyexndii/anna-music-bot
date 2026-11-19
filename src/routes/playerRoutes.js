@@ -35,6 +35,37 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
     }
   });
 
+  // Helper kiểm tra và xác thực kênh Voice đã khóa (lockedVoiceChannelId)
+  async function checkLockedVoice(guildSettings, userVoice, guild, botMember) {
+    if (guildSettings?.lockedVoiceChannelId) {
+      if (userVoice.id !== guildSettings.lockedVoiceChannelId) {
+        return {
+          allowed: false,
+          status: 400,
+          error: `Máy chủ đã khóa kênh Voice! Vui lòng tham gia kênh <#${guildSettings.lockedVoiceChannelId}> để phát nhạc.`
+        };
+      }
+      const targetChannel = guild.channels.cache.get(guildSettings.lockedVoiceChannelId) || await guild.channels.fetch(guildSettings.lockedVoiceChannelId).catch(() => null);
+      if (!targetChannel || !targetChannel.isVoiceBased || !targetChannel.isVoiceBased()) {
+        return {
+          allowed: false,
+          status: 400,
+          error: 'Kênh voice đã khóa không còn tồn tại, vui lòng dùng /lockvoice để đặt lại.'
+        };
+      }
+      const permissions = targetChannel.permissionsFor(botMember || client.user);
+      if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
+        return {
+          allowed: false,
+          status: 403,
+          error: 'Bot không có quyền vào kênh voice đã khóa, vui lòng liên hệ admin.'
+        };
+      }
+      return { allowed: true, targetChannel };
+    }
+    return { allowed: true, targetChannel: userVoice };
+  }
+
   // 2. Helper format/serialize trạng thái player và endpoint /api/player (Telemetry & Uptime)
   function formatQueueState(queue, guild) {
     const sessionUptimeSec = queue?.voiceSessionStartTime
@@ -55,7 +86,7 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
     };
   }
 
-  router.get('/player', auth.requireAuth, async (req, res) => {
+  router.get('/player', auth.requireAuth, auth.requireSameGuild, async (req, res) => {
     const guildId = req.query.guildId || req.user?.guildId;
     if (!guildId) {
       return res.status(400).json({ success: false, error: 'Thiếu guildId' });
@@ -144,35 +175,14 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
     }
 
     // Nếu máy chủ đã khóa kênh Voice cố định (lockedVoiceChannelId)
-    if (guildSettings.lockedVoiceChannelId) {
-      if (userVoice.id !== guildSettings.lockedVoiceChannelId) {
-        return res.status(400).json({
-          success: false,
-          error: `Máy chủ đã khóa kênh Voice! Vui lòng tham gia kênh <#${guildSettings.lockedVoiceChannelId}> để phát nhạc.`
-        });
-      }
-
-      const targetChannel = guild.channels.cache.get(guildSettings.lockedVoiceChannelId) || await guild.channels.fetch(guildSettings.lockedVoiceChannelId).catch(() => null);
-      if (!targetChannel || !targetChannel.isVoiceBased || !targetChannel.isVoiceBased()) {
-        return res.status(400).json({
-          success: false,
-          error: 'Kênh voice đã khóa không còn tồn tại, vui lòng dùng /lockvoice để đặt lại.'
-        });
-      }
-
-      const permissions = targetChannel.permissionsFor(botMember || client.user);
-      if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
-        return res.status(403).json({
-          success: false,
-          error: 'Bot không có quyền vào kênh voice đã khóa, vui lòng liên hệ admin.'
-        });
-      }
-
-      voiceChannel = targetChannel;
-    } else {
-      // Nếu không khóa: sử dụng kênh Voice mà User đang ngồi
-      voiceChannel = userVoice;
+    const lockCheck = await checkLockedVoice(guildSettings, userVoice, guild, botMember);
+    if (!lockCheck.allowed) {
+      return res.status(lockCheck.status).json({
+        success: false,
+        error: lockCheck.error
+      });
     }
+    voiceChannel = lockCheck.targetChannel || userVoice;
 
     let isLockHeld = false;
     try {
@@ -714,6 +724,11 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
               return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi phát bài hát!' });
             }
             const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
+            const lockCheck = await checkLockedVoice(guildSettings, userVoice, req.guild, botMember);
+            if (!lockCheck.allowed) {
+              return res.status(lockCheck.status).json({ success: false, error: lockCheck.error });
+            }
+            const voiceChannel = lockCheck.targetChannel || userVoice;
             let textChannel = null;
             if (guildSettings.musicChannelId) {
               const ch = req.guild.channels.cache.get(guildSettings.musicChannelId);
@@ -724,7 +739,7 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
             if (!textChannel) {
               textChannel = req.guild.channels.cache.find(c => c.isTextBased?.() && c.permissionsFor(botMember || client.user)?.has(['ViewChannel', 'SendMessages'])) || null;
             }
-            targetQueue = client.musicManager.getOrCreate(req.guild, textChannel, userVoice);
+            targetQueue = client.musicManager.getOrCreate(req.guild, textChannel, voiceChannel);
           }
 
           let ok = false;
@@ -779,6 +794,13 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
           if (!userVoice) {
             return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi phát bài hát!' });
           }
+          const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
+          if (!queue) {
+            const lockCheck = await checkLockedVoice(guildSettings, userVoice, req.guild, botMember);
+            if (!lockCheck.allowed) {
+              return res.status(lockCheck.status).json({ success: false, error: lockCheck.error });
+            }
+          }
           const favorites = await favoriteManager.getFavorites(user.userId);
           if (!favorites || favorites.length === 0) {
             return res.status(400).json({
@@ -786,7 +808,6 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
               error: 'Bạn chưa có bài hát nào trong danh sách Yêu thích ❤️'
             });
           }
-          const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
           let textChannel = queue?.textChannel;
           if (!textChannel) {
             if (guildSettings.musicChannelId) {
@@ -833,6 +854,13 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
           if (!userVoice) {
             return res.status(400).json({ success: false, error: 'Bạn phải tham gia vào một kênh Voice trong Discord trước khi phát bài hát!' });
           }
+          const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
+          if (!queue) {
+            const lockCheck = await checkLockedVoice(guildSettings, userVoice, req.guild, botMember);
+            if (!lockCheck.allowed) {
+              return res.status(lockCheck.status).json({ success: false, error: lockCheck.error });
+            }
+          }
           const playlistId = value?.playlistId || value;
           if (!playlistId) {
             return res.status(400).json({ success: false, error: 'Thiếu playlistId cần phát' });
@@ -849,7 +877,6 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
             });
           }
 
-          const botMember = req.guild.members.me || await req.guild.members.fetch(client.user.id).catch(() => null);
           let textChannel = queue?.textChannel;
           if (!textChannel) {
             if (guildSettings.musicChannelId) {
@@ -1089,7 +1116,7 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
               .filter(n => !isNaN(n) && n >= 0 && n < (queue?.songs?.length || 0))
               .sort((a, b) => b - a);
             for (const idx of sortedIndices) {
-              queue.songs.splice(idx, 1);
+              queue.removeSong(idx);
             }
             resultMessage = `Đã xóa ${sortedIndices.length} bài hát khỏi hàng chờ`;
           } else {
@@ -1103,8 +1130,8 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
                   error: 'Bạn chỉ có quyền xóa các bài hát do chính mình yêu cầu khi phòng có từ 2 người trở lên!'
                 });
               }
-              const removed = queue.songs.splice(idx, 1)[0];
-              resultMessage = `Đã xóa "${removed.title}" khỏi hàng chờ`;
+              const removed = queue.removeSong(idx);
+              resultMessage = `Đã xóa "${removed?.title || 'bài hát'}" khỏi hàng chờ`;
             }
           }
           queue?._saveSessionState?.();

@@ -282,7 +282,7 @@ class VoiceConnectionManager {
         if (this.queue.mode247) {
           const humanCount = this.getHumanMemberCount();
           if (humanCount === 0) {
-            console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, đưa bot về chế độ 24/7 Sleep Mode (0% CPU)...`);
+            console.log(`[MusicQueue 24/7] Đã qua 1 phút phòng trống, duy trì phát nhạc nền Lofi 24/7 nhẹ nhàng...`);
             this.queue.songs = this.queue.getUserSongs();
             this.queue.isQueueOnHold = true;
             this.queue.prefetchedSong = null;
@@ -291,21 +291,25 @@ class VoiceConnectionManager {
               this.queue.preloadedResource = null;
               this.queue.preloadedSongUrl = null;
             }
-            this.queue.currentSong = null;
-            if (this.queue.currentResource) {
-              this.queue._cleanupResource(this.queue.currentResource);
-              this.queue.currentResource = null;
-            }
             this.queue.loopMode = 'off';
-            this.queue.player.stop(true);
             const lang = settingsManager.get(this.guild.id)?.language;
-            setVoiceChannelStatus(this.voiceChannel, lang === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
+            setVoiceChannelStatus(this.voiceChannel, lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio');
             await sessionManager.saveSession(this.guild.id, {
               voiceChannelId: this.voiceChannel.id,
               textChannelId: this.queue.textChannel?.id,
               mode247: true,
               status: 'idle_247'
             });
+
+            // Duy trì luồng âm thanh Lofi 24/7, tuyệt đối không stop player làm tắt ngắt kết nối UDP
+            if (!this.queue.isCurrentSongLofi()) {
+              if (this.queue.currentResource) {
+                this.queue._cleanupResource(this.queue.currentResource);
+                this.queue.currentResource = null;
+              }
+              this.queue.currentSong = null;
+              await this.queue._play247BackgroundLofi();
+            }
           }
         }
       }, 60000);

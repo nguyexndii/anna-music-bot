@@ -117,7 +117,7 @@ function evaluateVariantPenalty(rawTitle, normTitle, normArtist, rawQuery, normQ
 /**
  * Thuật toán chấm điểm và xếp hạng bài hát thông minh (Smart Vietnamese Music Ranking)
  */
-function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
+function rankAndFilterTracks(tracks, rawQuery, mode = 'official', targetDurationSec = 0) {
   if (!Array.isArray(tracks) || tracks.length === 0) return [];
   const safeRawQuery = String(rawQuery || '');
   const normQuery = normalizeVi(safeRawQuery);
@@ -223,8 +223,25 @@ function rankAndFilterTracks(tracks, rawQuery, mode = 'official') {
       }
     }
 
-    // 6. Điểm Thời Lượng Chuẩn Âm Nhạc (1p30s – 7p)
-    if (sec >= 90 && sec <= 420) {
+    // 6. Điểm Thời Lượng Chuẩn Âm Nhạc (1p30s – 7p) hoặc Khớp thời lượng mục tiêu
+    if (targetDurationSec > 0 && sec > 0) {
+      const diff = Math.abs(sec - targetDurationSec);
+      if (diff <= 5) {
+        score += 300;
+      } else if (diff <= 15) {
+        score += 120;
+      } else if (diff <= 45) {
+        // diff <= 45: giữ nguyên điểm chuẩn (0)
+      } else if (diff <= 120) {
+        score -= 150;
+      } else {
+        score -= 600;
+      }
+
+      if (targetDurationSec <= 600 && sec > 900) {
+        score -= 1000;
+      }
+    } else if (sec >= 90 && sec <= 420) {
       score += 20;
     } else if (sec > 900 && !isQueryAskingLong) {
       score -= 35;
@@ -398,7 +415,7 @@ async function searchWithYtSearch(query) {
 
 if (parentPort) {
   parentPort.on('message', async (task) => {
-    const { id, query, limit = 20, mode = 'official', locale = 'vi' } = task;
+    const { id, query, limit = 20, mode = 'official', locale = 'vi', targetDurationSec = 0 } = task;
     try {
       const rawCacheKey = `${(query || '').toLowerCase().trim()}|${locale}`;
       let rawTracks = getCachedRawTracks(rawCacheKey);
@@ -448,8 +465,8 @@ if (parentPort) {
         parentPort.postMessage({ id, results: [], alternateResults: [], alternateMode: mode === 'official' ? 'all' : 'official' });
         return;
       }
-      const rankedOfficial = rankAndFilterTracks(rawTracks, query, 'official').slice(0, Math.min(limit, 30));
-      const rankedAll = rankAndFilterTracks(rawTracks, query, 'all').slice(0, Math.min(limit, 30));
+      const rankedOfficial = rankAndFilterTracks(rawTracks, query, 'official', targetDurationSec).slice(0, Math.min(limit, 30));
+      const rankedAll = rankAndFilterTracks(rawTracks, query, 'all', targetDurationSec).slice(0, Math.min(limit, 30));
       const isOfficial = mode === 'official';
       const results = isOfficial ? rankedOfficial : rankedAll;
       const alternateResults = isOfficial ? rankedAll : rankedOfficial;

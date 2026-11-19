@@ -60,13 +60,34 @@ class PrioritySemaphore {
     this.low = [];
   }
 
-  async acquire(priority = 'high') {
+  async acquire(priority = 'high', signal = null) {
+    if (signal?.aborted) {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
     if (this.current < this.limit) {
       this.current++;
       return;
     }
-    return new Promise((resolve) => {
-      const entry = { resolve };
+    return new Promise((resolve, reject) => {
+      let abortHandler = null;
+      const entry = { resolve, reject, signal, abortHandler };
+      if (signal) {
+        abortHandler = () => {
+          const hIdx = this.high.indexOf(entry);
+          if (hIdx !== -1) this.high.splice(hIdx, 1);
+          const lIdx = this.low.indexOf(entry);
+          if (lIdx !== -1) this.low.splice(lIdx, 1);
+          signal.removeEventListener('abort', abortHandler);
+          const err = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        entry.abortHandler = abortHandler;
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
       if (priority === 'high') {
         this.high.push(entry);
       } else {
@@ -78,19 +99,30 @@ class PrioritySemaphore {
   release() {
     this.current--;
     if (this.current < 0) this.current = 0;
-    if (this.high.length > 0) {
-      this.current++;
+    while (this.high.length > 0) {
       const next = this.high.shift();
-      next.resolve();
-    } else if (this.low.length > 0) {
+      if (next.abortHandler && next.signal) {
+        next.signal.removeEventListener('abort', next.abortHandler);
+      }
+      if (next.signal?.aborted) continue;
       this.current++;
-      const next = this.low.shift();
       next.resolve();
+      return;
+    }
+    while (this.low.length > 0) {
+      const next = this.low.shift();
+      if (next.abortHandler && next.signal) {
+        next.signal.removeEventListener('abort', next.abortHandler);
+      }
+      if (next.signal?.aborted) continue;
+      this.current++;
+      next.resolve();
+      return;
     }
   }
 
-  async run(taskFn, priority = 'high') {
-    await this.acquire(priority);
+  async run(taskFn, priority = 'high', signal = null) {
+    await this.acquire(priority, signal);
     try {
       return await taskFn();
     } finally {

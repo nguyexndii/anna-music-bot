@@ -120,6 +120,12 @@ function inferRegionFromAppleItem(item) {
 
   const isVnArtist = KNOWN_VN_ARTISTS_REGEX.test(normArtist) || KNOWN_VN_ARTISTS_REGEX.test(artistName);
 
+  // 0. Nhóm ảo toàn cầu (K/DA, Riot Games...) luôn là INTL (ngăn genre K-Pop của Apple Music làm sai lệch)
+  const VIRTUAL_GLOBAL_GROUPS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|true\s*damage|pentakill|heartsteel)\b/i;
+  if (VIRTUAL_GLOBAL_GROUPS_REGEX.test(combined) || VIRTUAL_GLOBAL_GROUPS_REGEX.test(artistName)) {
+    return 'INTL';
+  }
+
   // 1. Nhận diện K-Pop / Hàn Quốc (KR) TRƯỚC (chặn ROSÉ bị dính dấu É tiếng Việt)
   if (!isVnArtist && (genre.includes('k-pop') || genre.includes('korean') || HANGUL_REGEX.test(combined) || KPOP_ARTISTS_REGEX.test(artistName) || KPOP_ARTISTS_REGEX.test(combined))) {
     return 'KR';

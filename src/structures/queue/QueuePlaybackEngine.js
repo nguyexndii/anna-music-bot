@@ -331,7 +331,8 @@ class QueuePlaybackEngine {
       if (!nextTrack.url || isSpotify || (!nextTrack.url.startsWith('http') && nextTrack.searchQuery)) {
         try {
           const searchTarget = nextTrack.searchQuery || nextTrack.title;
-          const searchRes = await searchTrack(searchTarget);
+          const expSec = nextTrack.spotifyDurationSec || (nextTrack.durationMs ? Math.round(nextTrack.durationMs / 1000) : (nextTrack.duration ? parseDurationToSeconds(nextTrack.duration) : 0));
+          const searchRes = await searchTrack(searchTarget, expSec);
           if (searchRes && searchRes.length > 0 && searchRes[0].url) {
             nextTrack.url = searchRes[0].url;
             if (searchRes[0].duration && !nextTrack.duration) nextTrack.duration = searchRes[0].duration;
@@ -688,6 +689,11 @@ class QueuePlaybackEngine {
   async playNext() {
     if (this.queue._isPlayingNext) return;
     this.queue._isPlayingNext = true;
+    const playEpoch = ++this.queue._playbackEpoch;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
     this.queue.skipVotes.clear();
     this.queue.prefetchedSong = null;
     this.queue.autoplayPool = [];
@@ -831,6 +837,13 @@ class QueuePlaybackEngine {
           this.queue.preloadedSongUrl = null;
         }
         resource = await createResource(this.currentSong, 0, initialSeekSeconds, { priority: 'high' });
+      }
+
+      // Task 2.3 & Task 3.1: Chặn Ghost Playback & Epoch Guard
+      if (this.queue.isStopped || this.queue.isDestroyed || this.queue._playbackEpoch !== playEpoch) {
+        if (resource) this._cleanupResource(resource);
+        this.queue._isPlayingNext = false;
+        return;
       }
 
       if (this.queue._isPreemptingLofi && (this.currentSong?.is247 || this.currentSong?.requestedBy === 'Auto (24/7)') && this.songs.length > 0) {
@@ -1139,21 +1152,15 @@ class QueuePlaybackEngine {
 
     if (humanCount === 0 && this.queue.mode247) {
       this.queue.isQueueOnHold = true;
-      this.queue.prefetchedSong = null;
-      if (this.queue.preloadedResource) {
-        this._cleanupResource(this.queue.preloadedResource);
-        this.queue.preloadedResource = null;
-        this.queue.preloadedSongUrl = null;
+      if (wasLofiTrack && isFailedTrack) {
+        setTimeout(() => {
+          if (this.queue.mode247 && !this.currentSong && !this.queue.isDestroyed) {
+            this._play247BackgroundLofi();
+          }
+        }, 5000);
+        return;
       }
-      if (this.currentResource) {
-        this._cleanupResource(this.currentResource);
-        this.currentResource = null;
-      }
-      this.currentSong = null;
-      if (this.player) this.player.stop();
-      const lang = settingsManager.get(this.guild.id)?.language;
-      setVoiceChannelStatus(activeChannel, lang === 'en' ? '♾️ 24/7 Idle Mode' : '♾️ 24/7 Chờ phát nhạc');
-      console.log(`[MusicQueue 24/7] Phòng trống (${this.guild.name}) - Đưa bot về chế độ 24/7 Sleep Mode (0% CPU)`);
+      await this._play247BackgroundLofi();
       return;
     }
 
@@ -1370,7 +1377,7 @@ class QueuePlaybackEngine {
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         const recentHistory = lofiHistoryManager.getHistory(this.guild.id);
-        if (this.songs.length > 0 || this.currentSong || !this.queue.mode247) {
+        if ((!this.queue.isQueueOnHold && this.songs.length > 0) || this.currentSong || !this.queue.mode247) {
           this.queue._is247Loading = false;
           return;
         }
@@ -1391,7 +1398,7 @@ class QueuePlaybackEngine {
 
         const results = await searchTrack(query);
 
-        if (this.songs.length > 0 || this.currentSong || !this.queue.mode247) {
+        if ((!this.queue.isQueueOnHold && this.songs.length > 0) || this.currentSong || !this.queue.mode247) {
           this.queue._is247Loading = false;
           return;
         }
@@ -1456,17 +1463,17 @@ class QueuePlaybackEngine {
 
       console.warn(`[24/7 Lofi Background] Chưa tìm được bài Lofi phù hợp cho máy chủ ${this.guild.name}, thử lại sau 4 giây...`);
       setTimeout(() => {
-        if (this.queue.mode247 && !this.currentSong && !this.queue.isDestroyed && this.songs.length === 0) {
+        if (this.queue.mode247 && !this.currentSong && !this.queue.isDestroyed && (this.queue.isQueueOnHold || this.songs.length === 0)) {
           this._play247BackgroundLofi();
         }
       }, 4000);
     } catch (e) {
       console.warn('[24/7 Lofi Background Error]:', e.message);
-      if (!this.queue.isDestroyed && this.queue.mode247 && !this.currentSong && this.songs.length === 0) {
+      if (!this.queue.isDestroyed && this.queue.mode247 && !this.currentSong && (this.queue.isQueueOnHold || this.songs.length === 0)) {
         this.queue._lofiRetryCount = (this.queue._lofiRetryCount || 0) + 1;
         const delay = Math.min(3000 + (this.queue._lofiRetryCount * 1000), 10000);
         setTimeout(() => {
-          if (this.queue.mode247 && !this.currentSong && !this.queue.isDestroyed && this.songs.length === 0) {
+          if (this.queue.mode247 && !this.currentSong && !this.queue.isDestroyed && (this.queue.isQueueOnHold || this.songs.length === 0)) {
             this._play247BackgroundLofi();
           }
         }, delay);
@@ -1532,6 +1539,14 @@ class QueuePlaybackEngine {
       throw new Error('Không có bài hát nào đang phát để tua');
     }
 
+    const seekEpoch = ++this.queue._playbackEpoch;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
+    const abortController = new AbortController();
+    this.queue._seekAbortController = abortController;
+
     const seekSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
     console.log(`[MusicQueue Seek] Tua bài "${this.currentSong.title}" đến ${seekSeconds}s tại máy chủ ${this.guild.name}`);
 
@@ -1543,36 +1558,54 @@ class QueuePlaybackEngine {
       this.queue.preloadedSongUrl = null;
     }
 
-    const resource = await createResource(this.currentSong, 0, seekSeconds, { priority: 'high' });
+    try {
+      const resource = await createResource(this.currentSong, 0, seekSeconds, { priority: 'high', signal: abortController.signal });
 
-    if (this.currentResource) {
-      this._cleanupResource(this.currentResource);
-    }
-    this.currentResource = resource;
-    if (resource.volume) {
-      resource.volume.setVolume(this.queue.volume / 100);
-    }
+      if (this.queue._playbackEpoch !== seekEpoch || this.queue.isDestroyed || this.queue.isStopped) {
+        if (resource) this._cleanupResource(resource);
+        return seekSeconds;
+      }
 
-    this.currentSong.startTime = Date.now() - (seekSeconds * 1000);
-    this.currentSong.seekPosition = seekSeconds;
-    this.queue.paused = false;
-    if (this.queue.hasSyncedLyrics) {
-      this.queue.currentLyricIndex = -1;
-      this.queue.cardRenderer.scheduleNextLyricUpdate(this.currentSong);
-    }
+      const oldResource = this.currentResource;
+      this.currentResource = resource;
+      if (resource.volume) {
+        resource.volume.setVolume(this.queue.volume / 100);
+      }
 
-    if (this.queue.connection) {
-      this.queue.connection.subscribe(this.player);
-    }
+      this.currentSong.startTime = Date.now() - (seekSeconds * 1000);
+      this.currentSong.seekPosition = seekSeconds;
+      this.queue.paused = false;
+      if (this.queue.hasSyncedLyrics) {
+        this.queue.currentLyricIndex = -1;
+        this.queue.cardRenderer.scheduleNextLyricUpdate(this.currentSong);
+      }
 
-    this.player.play(resource);
-    this.schedulePreload();
-    if (!this.queue.hasSyncedLyrics) {
-      this.queue.cardRenderer.refreshNowPlayingCard();
-      this.queue.cardRenderer.scheduleProgressBarUpdate(this.currentSong);
+      if (this.queue.connection) {
+        this.queue.connection.subscribe(this.player);
+      }
+
+      this.player.play(resource);
+      if (oldResource) {
+        this._cleanupResource(oldResource);
+      }
+      this.schedulePreload();
+      if (!this.queue.hasSyncedLyrics) {
+        this.queue.cardRenderer.refreshNowPlayingCard();
+        this.queue.cardRenderer.scheduleProgressBarUpdate(this.currentSong);
+      }
+      this.scheduleCrossfade();
+      return seekSeconds;
+    } catch (err) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || abortController.signal.aborted) {
+        console.log(`[MusicQueue Seek] Thao tác tua bài bị hủy (AbortError) tại ${this.guild.name}`);
+        return seekSeconds;
+      }
+      throw err;
+    } finally {
+      if (this.queue._seekAbortController === abortController) {
+        this.queue._seekAbortController = null;
+      }
     }
-    this.scheduleCrossfade();
-    return seekSeconds;
   }
 
   shuffle() {
@@ -1672,6 +1705,11 @@ class QueuePlaybackEngine {
       return false;
     }
     this.queue._lastSkipTime = now;
+    this.queue._playbackEpoch = (this.queue._playbackEpoch || 0) + 1;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
 
     this.queue.paused = false;
     try { this.player.unpause(); } catch (e) {}
@@ -1706,6 +1744,12 @@ class QueuePlaybackEngine {
     if (!this.queue.previousSongs || this.queue.previousSongs.length === 0) return false;
     const prevSong = this.queue.previousSongs.pop();
     if (!prevSong) return false;
+
+    this.queue._playbackEpoch++;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
 
     this.queue.paused = false;
     try { this.player.unpause(); } catch (e) {}
@@ -1764,6 +1808,12 @@ class QueuePlaybackEngine {
   }
 
   async playTrackNow(song, requestUser = null) {
+    this.queue._playbackEpoch++;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
+
     this.queue.voiceManager.clear247IdleTimer();
     this.queue.autoplayPool = [];
     this.queue.prefetchedSong = null;
@@ -1855,6 +1905,11 @@ class QueuePlaybackEngine {
   }
 
   stop() {
+    this.queue._playbackEpoch = (this.queue._playbackEpoch || 0) + 1;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
     this.queue.isStopped = true;
     this.queue._pendingButtonAction = null;
     this.queue._isProcessingAction = false;
@@ -1933,6 +1988,12 @@ class QueuePlaybackEngine {
   }
 
   async switchTo247Lofi() {
+    this.queue._playbackEpoch++;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
+
     const isCurrentLofi = Boolean(this.currentSong && (this.currentSong.is247 || this.currentSong.requestedBy === 'Auto (24/7)'));
     if (isCurrentLofi && this.queue.isPlaying && !this.queue.isPaused && (!this.songs || this.songs.length === 0)) {
       return {
@@ -2016,6 +2077,12 @@ class QueuePlaybackEngine {
   }
 
   async toggleLofiMode() {
+    this.queue._playbackEpoch++;
+    if (this.queue._seekAbortController) {
+      try { this.queue._seekAbortController.abort(); } catch (e) {}
+      this.queue._seekAbortController = null;
+    }
+
     const now = Date.now();
     if (this.queue._toggleLofiLock && (now - this.queue._toggleLofiLock < 1500)) {
       return {

@@ -25,6 +25,7 @@ const YT_LOCALIZATION_NOISE_REGEX = /\b(mv\s*chính\s*thức|video\s*chính\s*th
 const VN_ARTISTS_NORM_REGEX = /\b(hngle|ari|quang\s*hung\s*masterd|quang\s*hung|masterd|lil\s*z\s*poet|lil\s*z|son\s*tung|m\s*tp|mtp|hieuthuhai|hurrykng|manbo|negav|gerdnang|rpt\s*mck|mck|ngher|lope\s*pham|tlinh|wren\s*evans|mono|grey\s*d|den\s*vau|vu\s*cat\s*tuong|madihu|bich\s*phuong|hoa\s*minzy|erik|duc\s*phuc|quan\s*a\s*p|quan\s*ap|noo\s*phuoc\s*thinh|dong\s*nhi|ong\s*cao\s*thang|toc\s*tien|binz|soobin|soobin\s*hoang\s*son|rhymastic|justatee|karik|suboi|b\s*ray|bray|amee|hoang\s*dung|chillies|ca\s*hoi\s*hoang|ngot\s*band|da\s*lab|dalab|phan\s*manh\s*quynh|ha\s*anh\s*tuan|my\s*tam|ho\s*ngoc\s*ha|le\s*quyen|trung\s*quan|bui\s*anh\s*tuan|huong\s*tram|chi\s*pu|van\s*mai\s*huong|jsol|hoang\s*duyen|hua\s*kim\s*tuyen|kewtiie|gill|wxrdie|low\s*g|obito|shiki|vstra|tang\s*duy\s*tan|dat\s*g|du\s*uyen|k\s*icm|kicm|trinh\s*dinh\s*quang|mr\s*siro|only\s*c|onlyc|lou\s*hoang|miu\s*le|suni\s*ha\s*linh|lyly|anh\s*tu|dinh\s*dung|acv\s*music|phao|double2t|24k\s*right|rhyder|captain\s*boy|duong\s*domic|phap\s*kieu|jun\s*pham|isaac|st\s*son\s*thach|bui\s*cong\s*nam|kay\s*tran|datkaa|changg|thinh\s*suy|winno|ronboogz|wean|touliver|slimv|masew|hoaprox|2pillz|wokeup|machiot|marzuz|vu\s*phung\s*tien|phuong\s*ly|phuong\s*my\s*chi|dtap|hoang\s*thuy\s*linh|truc\s*nhan|tien\s*tien|tien\s*cookie|bui\s*truong\s*linh|buitruonglinh|dangrangto|52hz|rio|coldzy|16\s*typh|nguyen\s*tran\s*trung\s*quan|dick|umie|droppy|haisam|khanh\s*phuong|ung\s*hoang\s*phuc|lam\s*chan\s*huy|chau\s*khai\s*phong|chu\s*bin|ho\s*quang\s*hieu|bao\s*anh|bui\s*lan\s*huong|nguyen\s*ha|lan\s*nha|le\s*hieu|bang\s*kieu|tuan\s*hung|dan\s*truong|cam\s*ly|quang\s*le|nhu\s*quynh|ca\s*si\s*vu|hoang\s*thai\s*vu)\b/i;
 
 // Từ điển Nghệ sĩ Quốc tế / K-Pop / J-Pop / C-Pop
+const VIRTUAL_GLOBAL_GROUPS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|valorant|arcane|pentakill|true\s*damage|heartsteel)\b/i;
 const INTL_ARTISTS_REGEX = /\b(olivia\s*rodrigo|beyonce|beyoncé|bruno\s*mars|taylor\s*swift|the\s*weeknd|alan\s*walker|ed\s*sheeran|ariana\s*grande|billie\s*eilish|justin\s*bieber|post\s*malone|dua\s*lipa|charlie\s*puth|shawn\s*mendes|sabrina\s*carpenter|lana\s*del\s*rey|adele|rihanna|katy\s*perry|lady\s*gaga|maroon\s*5|imagine\s*dragons|coldplay|onerepublic|chainsmokers|linkin\s*park|eminem|drake|kendrick\s*lamar|travis\s*scott|sza|doja\s*cat|billy\s*joel|one\s*direction|k\/da|kda|riot\s*games|league\s*of\s*legends|valorant|arcane|pentakill|true\s*damage|heartsteel|miyeon|soyeon|sophie\s*powers|mimi\s*webb|madison\s*beer|vevo)\b/i;
 const KPOP_ARTISTS_REGEX = /\b(rosé|rose|illit|aespa|g\s*i\s*dle|gidle|\(?g\)?-?i-dle|blackpink|bts|newjeans|ive|le\s*sserafim|twice|itzy|nmixx|babymonster|kiss\s*of\s*life|stray\s*kids|seventeen|txt|enhypen|exo|bigbang|g\s*dragon|taeyang|iu|taeyeon|jungkook|jimin|lisa|jennie|jisoo|psy|yg\s*entertainment|hybe|smtown|jyp)\b/i;
 const JPOP_ARTISTS_REGEX = /\b(yoasobi|ayase|ado|kenshi\s*yonezu|fujii\s*kaze|radwimps|aimer|official\s*hige\s*dandism|king\s*gnu|vaundy|imase|hikaru\s*utada|yorushika|zutomayo|creepy\s*nuts|mrs\s*green\s*apple)\b/i;
@@ -152,7 +153,17 @@ function detectTrackRegion(title = '', artist = '') {
   const normCombined = normalizeSearchText(cleanCombined);
   const normArtist = normalizeSearchText(cleanArtist);
 
-  // Bước 1: Kiểm tra chữ Hàn (Hangul) / Nhật (Kana) / Trung (Hanzi) TRƯỚC TIÊN
+  // Bước 0: Nhận diện nhóm ảo toàn cầu (K/DA, Riot Games) TRƯỚC TIÊN -> Luôn trả về 'INTL'
+  if (
+    VIRTUAL_GLOBAL_GROUPS_REGEX.test(cleanCombined) ||
+    VIRTUAL_GLOBAL_GROUPS_REGEX.test(rawCombined) ||
+    VIRTUAL_GLOBAL_GROUPS_REGEX.test(normArtist) ||
+    VIRTUAL_GLOBAL_GROUPS_REGEX.test(normCombined)
+  ) {
+    return 'INTL';
+  }
+
+  // Bước 1: Kiểm tra chữ Hàn (Hangul) / Nhật (Kana) / Trung (Hanzi)
   if (HANGUL_REGEX.test(rawCombined)) return 'KR';
   if (KANA_REGEX.test(rawCombined)) return 'JP';
   if (HANZI_REGEX.test(rawCombined)) {

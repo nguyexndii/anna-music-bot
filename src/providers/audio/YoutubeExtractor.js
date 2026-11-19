@@ -364,6 +364,11 @@ function isTrackInHistory(track, guildId, playedList, limit = 25) {
 function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 0, options = {}) {
   const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
+    if (options?.signal?.aborted) {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      return reject(err);
+    }
     const ffmpegArgs = [
       '-reconnect', '1',
       '-reconnect_streamed', '1',
@@ -395,6 +400,26 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     });
     registerProcess(ffmpegProcess);
 
+    let abortListener = null;
+    const cleanupSignal = () => {
+      if (abortListener && options?.signal) {
+        try { options.signal.removeEventListener('abort', abortListener); } catch (e) {}
+        abortListener = null;
+      }
+    };
+
+    if (options?.signal) {
+      abortListener = () => {
+        cleanupSignal();
+        killProcess(ffmpegProcess);
+        try { passThroughStream.destroy(); } catch (e) {}
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      options.signal.addEventListener('abort', abortListener, { once: true });
+    }
+
     if (process.platform === 'linux' && ffmpegProcess.pid) {
       try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 15 : 0); } catch (e) {}
     }
@@ -407,23 +432,27 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 
     ffmpegProcess.stdin?.on('error', () => {});
     ffmpegProcess.on('error', (err) => {
+      cleanupSignal();
       if (err.code !== 'EPIPE') console.error('[FFmpeg Direct Error]:', err.message);
     });
 
     let firstChunkReceived = false;
     const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
+      cleanupSignal();
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream Error]:', err.message);
       }
     });
     passThroughStream.on('close', () => {
+      cleanupSignal();
       killProcess(ffmpegProcess);
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
+        cleanupSignal();
         killProcess(ffmpegProcess);
         reject(new Error('Quá thời gian chờ âm thanh từ Direct Stream (Timeout 12s)'));
       }
@@ -432,11 +461,13 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;
       clearTimeout(safetyTimeout);
+      cleanupSignal();
       const resource = createAudioResource(passThroughStream, {
         inputType: StreamType.Raw,
         inlineVolume: true
       });
       resource.destroy = () => {
+        cleanupSignal();
         try { passThroughStream.destroy(); } catch (e) {}
         killProcess(ffmpegProcess);
       };
@@ -445,6 +476,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 
     ffmpegProcess.on('close', (code) => {
       clearTimeout(safetyTimeout);
+      cleanupSignal();
       if (!firstChunkReceived) {
         killProcess(ffmpegProcess);
         const lastErr = ffmpegStderr.slice(-200).trim();
@@ -462,6 +494,11 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
 function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, options = {}) {
   const isLowPriority = (options?.priority === 'low');
   return new Promise((resolve, reject) => {
+    if (options?.signal?.aborted) {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      return reject(err);
+    }
     const ffmpegArgs = [
       '-loglevel', 'error'
     ];
@@ -489,6 +526,26 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
     });
     registerProcess(ffmpegProcess);
 
+    let abortListener = null;
+    const cleanupSignal = () => {
+      if (abortListener && options?.signal) {
+        try { options.signal.removeEventListener('abort', abortListener); } catch (e) {}
+        abortListener = null;
+      }
+    };
+
+    if (options?.signal) {
+      abortListener = () => {
+        cleanupSignal();
+        killProcess(ffmpegProcess);
+        try { passThroughStream.destroy(); } catch (e) {}
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      options.signal.addEventListener('abort', abortListener, { once: true });
+    }
+
     if (process.platform === 'linux' && ffmpegProcess.pid) {
       try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 15 : 0); } catch (e) {}
     }
@@ -501,23 +558,27 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
 
     ffmpegProcess.stdin?.on('error', () => {});
     ffmpegProcess.on('error', (err) => {
+      cleanupSignal();
       if (err.code !== 'EPIPE') console.error('[FFmpeg File Direct Error]:', err.message);
     });
 
     let firstChunkReceived = false;
     const passThroughStream = new PassThrough({ highWaterMark: 1 << 19 });
     passThroughStream.on('error', (err) => {
+      cleanupSignal();
       if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
         console.warn('[PassThroughStream File Error]:', err.message);
       }
     });
     passThroughStream.on('close', () => {
+      cleanupSignal();
       killProcess(ffmpegProcess);
     });
     ffmpegProcess.stdout.pipe(passThroughStream);
 
     const safetyTimeout = setTimeout(() => {
       if (!firstChunkReceived) {
+        cleanupSignal();
         killProcess(ffmpegProcess);
         reject(new Error('Quá thời gian chờ âm thanh từ SSD Cache File (Timeout 15s)'));
       }
@@ -526,11 +587,13 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;
       clearTimeout(safetyTimeout);
+      cleanupSignal();
       const resource = createAudioResource(passThroughStream, {
         inputType: StreamType.Raw,
         inlineVolume: true
       });
       resource.destroy = () => {
+        cleanupSignal();
         try { passThroughStream.destroy(); } catch (e) {}
         killProcess(ffmpegProcess);
       };
@@ -539,6 +602,7 @@ function createDirectFileStream(filePath, seekSeconds = 0, playDurationSec = 0, 
 
     ffmpegProcess.on('close', (code) => {
       clearTimeout(safetyTimeout);
+      cleanupSignal();
       if (!firstChunkReceived) {
         killProcess(ffmpegProcess);
         const lastErr = ffmpegStderr.slice(-200).trim();
@@ -571,6 +635,11 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
   }
 
   return new Promise((resolve, reject) => {
+    if (options?.signal?.aborted) {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      return reject(err);
+    }
     const ytdlpOptions = {
       output: '-',
       format: 'bestaudio/best',
@@ -669,6 +738,21 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     });
     registerProcess(ffmpegProcess);
 
+    let abortListener = null;
+    if (options?.signal) {
+      abortListener = () => {
+        try { passThroughStream.destroy(); } catch (e) {}
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ffmpegProcess);
+        killProcess(ytdlpStreamProcess);
+        cacheOptions?.onAbort?.();
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      options.signal.addEventListener('abort', abortListener, { once: true });
+    }
+
     if (process.platform === 'linux' && ffmpegProcess.pid) {
       try { os.setPriority(ffmpegProcess.pid, isLowPriority ? 15 : 0); } catch (e) {}
     }
@@ -743,13 +827,16 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
         killProcess(ffmpegProcess);
         killProcess(ytdlpStreamProcess);
         cacheOptions?.onAbort?.();
-        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 14s)'));
+        reject(new Error('Quá thời gian chờ âm thanh từ nguồn này (Timeout 36s)'));
       }
-    }, 14000);
+    }, 36000);
 
     ffmpegProcess.stdout.once('data', () => {
       firstChunkReceived = true;
       clearTimeout(safetyTimeout);
+      if (abortListener && options?.signal) {
+        options.signal.removeEventListener('abort', abortListener);
+      }
 
       const resource = createAudioResource(passThroughStream, {
         inputType: StreamType.Raw,
@@ -757,6 +844,9 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       });
 
       resource.destroy = () => {
+        if (abortListener && options?.signal) {
+          options.signal.removeEventListener('abort', abortListener);
+        }
         try { passThroughStream.destroy(); } catch (e) {}
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);
@@ -769,6 +859,9 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     ffmpegProcess.on('close', (code) => {
       clearTimeout(safetyTimeout);
+      if (abortListener && options?.signal) {
+        options.signal.removeEventListener('abort', abortListener);
+      }
       if (!firstChunkReceived) {
         try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
         killProcess(ffmpegProcess);

@@ -27,23 +27,90 @@ async function handleVoiceStateUpdate(client, oldState, newState) {
       await clearVoiceChannelStatus(oldState.channel).catch(() => {});
     }
     if (queue) {
-      if (queue._manualLeave || !queue.mode247) {
+      if (queue._manualLeave) {
         queue.destroy();
-      } else if (queue.mode247 && !queue.isDestroyed && !queue._manualLeave) {
-        // Watchdog: Nếu đang ở chế độ 24/7 mà bot bị ngắt ra khỏi phòng, tự vào lại sau 1.5s
-        setTimeout(async () => {
-          if (queue.mode247 && !queue.isDestroyed && !queue._manualLeave) {
-            const me = guild.members.me;
-            if (!me?.voice?.channelId && queue.voiceChannel) {
-              console.log(`[24/7 Voice Watchdog] Bot không có trong phòng tại ${guild.name}, tự động kết nối lại...`);
-              try {
-                await queue.connect();
-              } catch (e) {
-                console.warn('[24/7 Voice Watchdog Reconnect Failed]:', e.message);
+      } else if (queue.mode247 && !queue.isDestroyed) {
+        // Watchdog: Tự động Rejoin lũy tiến vô hạn khi mất kết nối (2s, 5s, 10s...)
+        if (!queue._watchdogRejoining) {
+          queue._watchdogRejoining = true;
+          const retryDelays = [2000, 5000, 10000, 15000, 30000];
+          let attempt = 0;
+
+          const attemptRejoin = async () => {
+            if (!queue.mode247 || queue.isDestroyed || queue._manualLeave) {
+              queue._watchdogRejoining = false;
+              return;
+            }
+
+            // Dừng retry nếu kênh thoại không còn tồn tại hoặc thiếu quyền
+            const targetChannel = queue.voiceChannel?.id ? guild.channels.cache.get(queue.voiceChannel.id) : null;
+            if (!targetChannel) {
+              console.warn(`[24/7 Voice Watchdog] Kênh thoại không còn tồn tại tại máy chủ ${guild.name}. Dừng Watchdog.`);
+              queue._watchdogRejoining = false;
+              queue.destroy();
+              return;
+            }
+
+            if (targetChannel.permissionsFor && client.user) {
+              const perms = targetChannel.permissionsFor(client.user);
+              if (perms && (!perms.has('Connect') || !perms.has('Speak') || !perms.has('ViewChannel'))) {
+                console.warn(`[24/7 Voice Watchdog] Bot thiếu quyền kết nối kênh thoại ${targetChannel.name} tại ${guild.name}. Dừng Watchdog.`);
+                queue._watchdogRejoining = false;
+                queue.destroy();
+                return;
               }
             }
+
+            const me = guild.members.me;
+            if (me?.voice?.channelId) {
+              console.log(`[24/7 Voice Watchdog] Bot đã kết nối lại phòng Voice tại ${guild.name}. Kết thúc Watchdog.`);
+              queue._watchdogRejoining = false;
+              if (!queue.currentSong && (queue.isQueueOnHold || !queue.songs || queue.songs.length === 0)) {
+                if (typeof queue._play247BackgroundLofi === 'function') {
+                  queue._play247BackgroundLofi().catch(() => {});
+                }
+              }
+              return;
+            }
+
+            console.log(`[24/7 Voice Watchdog] Thử kết nối lại lần ${attempt + 1} vào phòng ${queue.voiceChannel?.name || 'Voice'} tại ${guild.name}...`);
+            try {
+              await queue.connect();
+              const meAfter = guild.members.me;
+              if (meAfter?.voice?.channelId) {
+                console.log(`[24/7 Voice Watchdog] Kết nối lại thành công tại ${guild.name}!`);
+                queue._watchdogRejoining = false;
+                if (!queue.currentSong && (queue.isQueueOnHold || !queue.songs || queue.songs.length === 0)) {
+                  if (typeof queue._play247BackgroundLofi === 'function') {
+                    queue._play247BackgroundLofi().catch(() => {});
+                  }
+                }
+                return;
+              }
+            } catch (e) {
+              console.warn(`[24/7 Voice Watchdog Reconnect Failed (Lần ${attempt + 1})]:`, e.message);
+              if (e.code === 50013 || e.code === 10003 || /permission|access denied|missing access/i.test(e.message)) {
+                console.warn(`[24/7 Voice Watchdog] Không thể kết nối do lỗi quyền hoặc kênh bị xóa tại ${guild.name}. Dừng Watchdog.`);
+                queue._watchdogRejoining = false;
+                queue.destroy();
+                return;
+              }
+            }
+
+            const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)];
+            attempt++;
+            setTimeout(attemptRejoin, delay);
+          };
+
+          setTimeout(attemptRejoin, 2000);
+        }
+      } else if (!queue.mode247 && !queue.isDestroyed) {
+        // H-04: Đợi 5 giây xem có phải Discord đang chuyển vùng Voice Server tạm thời hay không
+        setTimeout(() => {
+          if (!queue.isDestroyed && !queue._manualLeave && !guild.members.me?.voice?.channelId) {
+            queue.destroy();
           }
-        }, 1500);
+        }, 5000);
       }
     }
     return;

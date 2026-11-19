@@ -136,20 +136,20 @@ startServer(serverPort);
 // 5. Xử lý lỗi an toàn
 client.on('error', (err) => {
   console.error('[Discord Client Error]', err);
-  logAction('CLIENT_ERROR', { guildId: '1389834422773219338', error: err.message || String(err) });
+  logAction('CLIENT_ERROR', { error: err.message || String(err) });
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[Unhandled Rejection]', reason);
   const errMsg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
   if (errMsg.includes('EPIPE') || errMsg.includes('ECONNRESET')) return;
-  logAction('SYSTEM_ERROR', { guildId: '1389834422773219338', error: errMsg.slice(0, 500) });
+  logAction('SYSTEM_ERROR', { error: errMsg.slice(0, 500) });
 });
 
 process.on('uncaughtException', (err) => {
   if (err.code === 'EPIPE' || err.code === 'ECONNRESET') return;
   console.error('[Uncaught Exception]', err);
-  logAction('SYSTEM_ERROR', { guildId: '1389834422773219338', error: (err.stack || err.message || String(err)).slice(0, 500) });
+  logAction('SYSTEM_ERROR', { error: (err.stack || err.message || String(err)).slice(0, 500) });
 });
 
 // 6. Dừng an toàn hệ thống (Graceful Shutdown)

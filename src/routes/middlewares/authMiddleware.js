@@ -253,7 +253,7 @@ function createAuthMiddleware(client) {
 
   // Middleware ngăn chặn IDOR & Xác thực thành viên máy chủ theo thời gian thực
   const requireGuildMember = async (req, res, next) => {
-    const targetGuildId = req.params.guildId;
+    const targetGuildId = req.params.guildId || req.query.guildId || req.body?.guildId;
     const user = req.user;
     if (!targetGuildId || !user) {
       return res.status(401).json({ success: false, error: 'Chưa xác thực hoặc thiếu ID máy chủ' });

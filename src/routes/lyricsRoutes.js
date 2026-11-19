@@ -1,5 +1,5 @@
 const express = require('express');
-const { getLyrics, saveLyricOffset } = require('../utils/lyricsHelper');
+const { getLyrics, saveLyricOffset, reportLyricCacheIssue } = require('../utils/lyricsHelper');
 const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission, isStrictAdmin } = require('../utils/permissionHelper');
 
@@ -102,6 +102,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
         autoOffsetMs: activeAutoOffsetMs,
         userSavedOffsetMs: (queue && queue.currentSong === currentTrack && typeof queue.userLyricOffsetMs === 'number') ? queue.userLyricOffsetMs : (lyricsData?.userSavedOffsetMs || 0),
         trackKey: lyricsData?.trackKey || null,
+        songFingerprint: lyricsData?.songFingerprint || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: activeSyncedLyrics,
         synced: !!activeSyncedLyrics,
@@ -195,6 +196,7 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
         autoOffsetMs: activeAutoOffsetMs,
         userSavedOffsetMs: (callerQueue && callerQueue.currentSong === currentTrack && typeof callerQueue.userLyricOffsetMs === 'number') ? callerQueue.userLyricOffsetMs : (lyricsData?.userSavedOffsetMs || 0),
         trackKey: lyricsData?.trackKey || null,
+        songFingerprint: lyricsData?.songFingerprint || null,
         lyrics: hasLyrics ? lyricsData.lyrics : null,
         syncedLyrics: activeSyncedLyrics,
         synced: !!activeSyncedLyrics,
@@ -401,6 +403,31 @@ module.exports = function createLyricsRoutes(client, auth, routeState) {
       }
     });
   });
+
+  // 6. Báo lỗi lời bài hát (Anti-DoS Invalidation với Rate Limiter: tối đa 3 report / 10 phút / user)
+  const reportLimiter = new Map();
+
+  const handleReport = async (req, res) => {
+    const { songFingerprint } = req.body;
+    const userId = req.user?.userId;
+    if (!songFingerprint || !userId) {
+      return res.status(400).json({ success: false, error: 'Thiếu songFingerprint hoặc userId' });
+    }
+
+    const now = Date.now();
+    const userReports = (reportLimiter.get(userId) || []).filter(ts => now - ts < 10 * 60 * 1000);
+    if (userReports.length >= 3) {
+      return res.status(429).json({ success: false, error: 'Bạn đã báo lỗi quá nhiều lần, vui lòng thử lại sau 10 phút' });
+    }
+    userReports.push(now);
+    reportLimiter.set(userId, userReports);
+
+    const result = await reportLyricCacheIssue(songFingerprint, userId);
+    return res.json(result);
+  };
+
+  router.post('/lyrics/report', auth.requireAuth, handleReport);
+  router.post('/guilds/:guildId/lyrics/report', auth.requireAuth, auth.requireSameGuild, handleReport);
 
   return router;
 };

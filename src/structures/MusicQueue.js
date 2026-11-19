@@ -85,6 +85,8 @@ class MusicQueue {
     this._isProcessingAction = false;
     this._pendingButtonAction = null;
     this.skipVotes = new Set();
+    this._playbackEpoch = 0;
+    this._seekAbortController = null;
 
     // Khởi tạo 3 Sub-Managers chuyên trách
     this.voiceManager = new VoiceConnectionManager(this);
@@ -443,6 +445,11 @@ class MusicQueue {
   // DESTROY WORKFLOW
   // ═══════════════════════════════════════════════════════════════════════════
   destroy() {
+    this._playbackEpoch = (this._playbackEpoch || 0) + 1;
+    if (this._seekAbortController) {
+      try { this._seekAbortController.abort(); } catch (e) {}
+      this._seekAbortController = null;
+    }
     this.isDestroyed = true;
     this.isStopped = true;
     this._pendingButtonAction = null;

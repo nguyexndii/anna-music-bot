@@ -90,6 +90,10 @@ function cleanTitle(str) {
 const TECHNICAL_PAREN_REGEX = /^(?:official(?:\s+(?:music\s+)?video|\s+mv|\s+audio|\s+lyric(?:s)?)?|mv|audio|video|lyrics?|remix|live(?:\s+session)?|prod\.?(?:\s+by\s+[\w\d_]+)?|(?:feat\.?|ft\.?)\b.*?|beat|karaoke|4k|hd|mp3|full(?:\s+audio|\s+mv)?|teaser|trailer|acoustic(?:\s+version)?|cover|.*?\b(?:ep|album|the album|mini album|single|ost|soundtrack|vol\.?\s*\d+|tập\s*\d+|version|ver|bản\s+thu|cd\s*\d+|tape|vinyl)\b.*?)$/i;
 
 const VIETNAMESE_REGEX = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+const HANGUL_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/g;
+const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF]/;
+const CHINESE_CHAR_REGEX = /[\u4E00-\u9FFF]/;
+const VIRTUAL_GLOBAL_GROUPS_REGEX = /\b(k\/da|kda|riot\s*games|league\s*of\s*legends|true\s*damage|pentakill|heartsteel)\b/i;
 const CJK_SCRIPT_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/;
 
 // Danh sách nghệ sĩ / nhóm nhạc / hãng game quốc tế phổ biến
@@ -727,10 +731,274 @@ function isVietnameseTrack(contextOrTitle = {}, maybeArtist = '') {
   });
 }
 
+/**
+ * Trích xuất nhãn biến thể âm nhạc TRƯỚC KHI làm sạch tiêu đề
+ * Nhận diện toàn diện: remix, lofi, mashup, nonstop, bootleg, acoustic, live, speedup, slowed, instrumental, cover
+ */
+function detectVariantTag(rawTitle = '') {
+  if (!rawTitle || typeof rawTitle !== 'string') return 'original';
+  const t = rawTitle.toLowerCase();
+  if (/\b(lofi|lo-fi|chill|chill\s*ver|chill\s*mix)\b/i.test(t)) return 'lofi';
+  if (/\b(remix|mix|club\s*edit|extended\s*mix|vip\s*mix|vinahouse|vinahey)\b/i.test(t)) return 'remix';
+  if (/\b(mashup|mash\s*up)\b/i.test(t)) return 'mashup';
+  if (/\b(nonstop|non-stop|vinahouse\s*nonstop)\b/i.test(t)) return 'nonstop';
+  if (/\b(bootleg|boot\s*leg)\b/i.test(t)) return 'bootleg';
+  if (/\b(acoustic|unplugged|piano\s*ver|guitar\s*ver)\b/i.test(t)) return 'acoustic';
+  if (/\b(live|concert|tour|recorded\s*live|performance)\b/i.test(t)) return 'live';
+  if (/\b(speed\s*up|sped\s*up|nightcore|fast\s*ver)\b/i.test(t)) return 'speedup';
+  if (/\b(slowed|reverb|slowed\s*(\+|and)\s*reverb|slowed\s*down)\b/i.test(t)) return 'slowed';
+  if (/\b(instrumental|karaoke\s*ver|beat|minus\s*one)\b/i.test(t)) return 'instrumental';
+  if (/\b(cover|covered\s*by)\b/i.test(t)) return 'cover';
+  return 'original';
+}
+
+/**
+ * Sinh chuỗi băm chuỗi an toàn ngắn (Fowler–Noll–Vo 32-bit hash)
+ */
+function simpleStringHash(str = '') {
+  let hash = 0x811c9dc5;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Sinh khóa Fingerprint chuẩn hóa đa nhân tố
+ * - Khung 4s cho bản gốc (dung sai intro/outro nhỏ giữa YouTube và Spotify)
+ * - Khung 2s cho bản biến thể (chống va chạm giữa các bản remix/lofi khác nhau)
+ * - Fallback băm an toàn từ rawTitle/videoId nếu normTitle bị xóa rỗng bởi cleanTitle
+ */
+function generateMultiFactorFingerprint(title = '', artist = '', durationSec = 0, rawId = '') {
+  const variantTag = detectVariantTag(title);
+  let normTitle = normalizeStr(cleanTitle(title));
+
+  // Fallback chống va chạm khi tiêu đề bị cleanTitle xóa rỗng (ví dụ video chỉ có "[Official Music Video]")
+  if (!normTitle) {
+    normTitle = normalizeStr(title);
+  }
+  if (!normTitle) {
+    normTitle = rawId ? `raw_${rawId}` : `h_${simpleStringHash(title || 'untitled')}`;
+  }
+
+  const normArtist = normalizeStr(cleanArtistName(artist)) || 'unknown';
+  const step = variantTag === 'original' ? 4 : 2;
+  const numDur = Number(durationSec) || 0;
+  const durationBucket = numDur > 0 ? Math.round(numDur / step) * step : 0;
+
+  return `fp_${normTitle}__${normArtist}__${variantTag}__${durationBucket}`;
+}
+
+/**
+ * LỚP 1: Phân loại sơ bộ ngôn ngữ ca từ dựa trên Metadata, Tiêu đề và Vùng nghệ sĩ
+ * Hỗ trợ nhận diện toàn diện: Quốc tế, K-Pop, J-Pop, C-Pop và V-Pop
+ */
+function determinePreliminaryVocalLanguage(title = '', artist = '', artistRegion = 'INTL') {
+  const normCombined = `${title} ${artist}`.toLowerCase();
+
+  // Quy tắc ưu tiên 1: Nhóm ảo toàn cầu thuộc Riot Games mặc định hát tiếng Anh
+  if (VIRTUAL_GLOBAL_GROUPS_REGEX.test(normCombined)) {
+    return { vocalLang: 'en', isAmbiguous: false };
+  }
+
+  // Quy tắc ưu tiên 2: Có chứa ký tự Hangul rõ ràng trong tiêu đề hoặc nghệ sĩ
+  HANGUL_REGEX.lastIndex = 0;
+  if (HANGUL_REGEX.test(title) || (HANGUL_REGEX.lastIndex = 0, HANGUL_REGEX.test(artist))) {
+    HANGUL_REGEX.lastIndex = 0;
+    return { vocalLang: 'ko', isAmbiguous: false };
+  }
+
+  // Quy tắc ưu tiên 3: Có chứa ký tự Hiragana hoặc Katakana tiếng Nhật
+  if (JAPANESE_CHAR_REGEX.test(title) || JAPANESE_CHAR_REGEX.test(artist)) {
+    return { vocalLang: 'ja', isAmbiguous: false };
+  }
+
+  // Quy tắc ưu tiên 4: Có dấu tiếng Việt rõ ràng hoặc nghệ sĩ có vùng VI
+  if (VIETNAMESE_REGEX.test(title) || VIETNAMESE_REGEX.test(artist) || artistRegion === 'VI') {
+    return { vocalLang: 'vi', isAmbiguous: false };
+  }
+
+  // Quy tắc ưu tiên 5: Có Hán tự CJK tiếng Trung (khi không chứa Kana tiếng Nhật)
+  if (CHINESE_CHAR_REGEX.test(title) || CHINESE_CHAR_REGEX.test(artist)) {
+    return { vocalLang: 'zh', isAmbiguous: false };
+  }
+
+  // Quy tắc ưu tiên 6: Nghệ sĩ Đông Á nhưng tiêu đề hoàn toàn là chữ Latinh -> Cần thẩm định Lớp 2
+  if (artistRegion === 'KR') {
+    return { vocalLang: 'ambiguous_kr', isAmbiguous: true };
+  }
+  if (artistRegion === 'JP') {
+    return { vocalLang: 'ambiguous_jp', isAmbiguous: true };
+  }
+  if (artistRegion === 'CN' || artistRegion === 'TW' || artistRegion === 'HK') {
+    return { vocalLang: 'ambiguous_zh', isAmbiguous: true };
+  }
+
+  return { vocalLang: 'en', isAmbiguous: false };
+}
+
+/**
+ * Trích xuất mẫu phụ đề đại diện với Cơ chế Intro Chant Bypass
+ * Bỏ qua 3 dòng mở đầu để tránh các khẩu hiệu/intro chant tiếng Anh phổ biến trong K-Pop
+ * (ví dụ: "BLACKPINK in your area / Yeah yeah yeah / Ha how you like that...")
+ * Lấy mẫu kiểm định từ dòng thứ 4 đến dòng thứ 12 để tiếp cận lời bài hát chính xác
+ */
+function extractRepresentativeSampleLines(lines = []) {
+  if (!Array.isArray(lines) || lines.length === 0) return '';
+  if (lines.length <= 5) {
+    return lines.map(l => (typeof l === 'string' ? l : l.text || '')).join(' ');
+  }
+  const sampleSlice = lines.slice(3, 12);
+  return sampleSlice.map(l => (typeof l === 'string' ? l : l.text || '')).join(' ');
+}
+
+/**
+ * Thuật toán Phân định Hòa điểm (Tie-Breaker Bonus)
+ * Giải quyết triệt để trường hợp ca khúc K-Pop hát tiếng Anh (như BTS - Dynamite) khi cả track EN và KO đều đạt 210 điểm
+ */
+function calculateTieBreakerBonus(track, context = {}) {
+  let bonus = 0;
+  const trackName = String(track?.name || track?.trackName || '').toLowerCase();
+  const vssId = String(track?.vssId || '').toLowerCase();
+  const kind = String(track?.kind || '').toLowerCase();
+  const langCode = String(track?.languageCode || track?.langCode || '').toLowerCase();
+
+  // 1. Phạt nặng track có nhãn bản dịch do người dùng hoặc cộng đồng đóng góp
+  const isTranslation = /\b(?:translation|translated|caption|sub|vietsub|engsub)\b/i.test(trackName) ||
+    /(?:tiếng việt|한국어\s*번역|日本語\s*訳)/i.test(trackName);
+  if (isTranslation) {
+    bonus -= 60;
+  }
+
+  // 2. Thưởng track mang nhãn nguyên bản / chính thức
+  const isOriginal = /\b(?:original|official|auto-generated)\b/i.test(trackName) ||
+    /(?:한국어\s*\(원본\)|english\s*\(original\))/i.test(trackName);
+  if (isOriginal) {
+    bonus += 25;
+  }
+
+  // 3. Ưu tiên track kind: 'standard' / isOfficial thay vì ASR hoặc translation
+  if (kind === 'standard' || track?.isOfficial) {
+    bonus += 20;
+  }
+  if (kind === 'asr' || vssId.startsWith('a.')) {
+    bonus -= 15;
+  }
+
+  // 4. Đối chiếu tín hiệu Nhận diện Giọng nói YouTube ASR (Audio Speech Recognition)
+  if (context.youtubeAsrLang) {
+    if (langCode.startsWith(context.youtubeAsrLang)) {
+      bonus += 35;
+    }
+  }
+
+  // 5. Đối chiếu Siêu dữ liệu từ LRCLIB Studio Match
+  if (context.lrclibVocalLang) {
+    if (langCode.startsWith(context.lrclibVocalLang)) {
+      bonus += 40;
+    }
+  }
+
+  return bonus;
+}
+
+/**
+ * LỚP 2: Thẩm định thực nghiệm qua mẫu ca từ (Subtitle Sample Heuristic) & Phân định Hòa điểm
+ * Áp dụng Intro Chant Bypass và tính toán tỷ lệ ký tự Hangul (mở rộng Jamo), Kana, CJK, Latinh
+ */
+function scoreSubtitleTrackWithHeuristic(track, prelimVocal = {}, context = {}) {
+  let score = track.baseScore || track.score || 0;
+  const langCode = String(track?.languageCode || track?.langCode || '').toLowerCase();
+  const isKoreanTrack = langCode.startsWith('ko');
+  const isEnglishTrack = langCode.startsWith('en');
+  const isJapaneseTrack = langCode.startsWith('ja');
+  const isChineseTrack = langCode.startsWith('zh');
+
+  const sampleText = track.representativeText || 
+    (Array.isArray(track.sampleLines) ? extractRepresentativeSampleLines(track.sampleLines) : (track.sampleText || ''));
+
+  const totalLetters = (sampleText.match(/[\p{L}]/gu) || []).length;
+  const hangulLetters = (sampleText.match(/[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/g) || []).length;
+  const kanaLetters = (sampleText.match(/[\u3040-\u309F\u30A0-\u30FF]/g) || []).length;
+  const cjkLetters = (sampleText.match(/[\u4E00-\u9FFF]/g) || []).length;
+  const latinLetters = (sampleText.match(/[a-zA-Z]/g) || []).length;
+
+  const hangulRatio = totalLetters > 0 ? (hangulLetters / totalLetters) : 0;
+  const kanaRatio = totalLetters > 0 ? (kanaLetters / totalLetters) : 0;
+  const cjkRatio = totalLetters > 0 ? (cjkLetters / totalLetters) : 0;
+  const latinRatio = totalLetters > 0 ? (latinLetters / totalLetters) : 0;
+
+  if (prelimVocal.isAmbiguous && prelimVocal.vocalLang === 'ambiguous_kr') {
+    if (hangulRatio >= 0.25) {
+      if (isKoreanTrack) {
+        score += 160;
+      } else if (isEnglishTrack) {
+        score += 40;
+      } else {
+        score -= 50;
+      }
+    } else if (hangulRatio < 0.05 && latinRatio >= 0.85) {
+      if (isEnglishTrack) {
+        score += 160;
+      } else if (isKoreanTrack) {
+        score -= 100;
+      }
+    }
+  }
+
+  if (prelimVocal.isAmbiguous && prelimVocal.vocalLang === 'ambiguous_jp') {
+    if (kanaRatio >= 0.15 || (cjkLetters > 0 && kanaRatio >= 0.08)) {
+      if (isJapaneseTrack) {
+        score += 160;
+      } else if (isEnglishTrack) {
+        score += 40;
+      } else {
+        score -= 50;
+      }
+    } else if (kanaRatio < 0.03 && latinRatio >= 0.85) {
+      if (isEnglishTrack) {
+        score += 160;
+      } else if (isJapaneseTrack) {
+        score -= 100;
+      }
+    }
+  }
+
+  if (prelimVocal.isAmbiguous && prelimVocal.vocalLang === 'ambiguous_zh') {
+    if (cjkRatio >= 0.25) {
+      if (isChineseTrack) {
+        score += 160;
+      } else if (isEnglishTrack) {
+        score += 40;
+      } else {
+        score -= 50;
+      }
+    } else if (cjkRatio < 0.05 && latinRatio >= 0.85) {
+      if (isEnglishTrack) {
+        score += 160;
+      } else if (isChineseTrack) {
+        score -= 100;
+      }
+    }
+  }
+
+  score += calculateTieBreakerBonus(track, context);
+  return score;
+}
+
 module.exports = {
   isGarbageLyrics,
   normalizeStr,
   detectVariantTrack,
+  detectVariantTag,
+  simpleStringHash,
+  generateMultiFactorFingerprint,
+  determinePreliminaryVocalLanguage,
+  extractRepresentativeSampleLines,
+  calculateTieBreakerBonus,
+  scoreSubtitleTrackWithHeuristic,
   extractOriginalSongTitle,
   cleanTitle,
   cleanArtistName,
@@ -750,7 +1018,11 @@ module.exports = {
   stripVietnameseBoilerplate,
   TECHNICAL_PAREN_REGEX,
   VIETNAMESE_REGEX,
+  HANGUL_REGEX,
+  JAPANESE_CHAR_REGEX,
+  CHINESE_CHAR_REGEX,
   CJK_SCRIPT_REGEX,
+  VIRTUAL_GLOBAL_GROUPS_REGEX,
   KNOWN_INTL_ARTISTS_REGEX,
   KNOWN_VN_ARTISTS_NORM_REGEX,
   VN_ACCENTLESS_SYLLABLES_REGEX,

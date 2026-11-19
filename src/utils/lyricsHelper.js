@@ -6,6 +6,9 @@ const {
   isGarbageLyrics,
   normalizeStr,
   detectVariantTrack,
+  detectVariantTag,
+  simpleStringHash,
+  generateMultiFactorFingerprint,
   cleanTitle,
   cleanArtistName,
   generateSearchVariants,
@@ -55,6 +58,11 @@ const inFlightLyrics = new Map();
 let LyricOffset = null;
 try {
   LyricOffset = require('../database/models/LyricOffset');
+} catch (e) {}
+
+let LyricCache = null;
+try {
+  LyricCache = require('../database/models/LyricCache');
 } catch (e) {}
 
 const lyricOffsetsMemoryCache = new Map();
@@ -138,10 +146,15 @@ function getCachedLyrics(key) {
   if (!key) return null;
   const item = lyricsMemoryCache.get(key);
   if (!item) return null;
-  const ttl = item.data?.notFound ? (10 * 60 * 1000) : (3600 * 1000);
+  // Giảm Negative Cache RAM xuống 30s (khi không tìm thấy lời)
+  const ttl = item.data?.notFound ? (30 * 1000) : (3600 * 1000);
   if (Date.now() - item.ts > ttl) {
     lyricsMemoryCache.delete(key);
     return null;
+  }
+  if (item.data && !item.data.notFound) {
+    if (item.data.autoOffsetMs === undefined) item.data.autoOffsetMs = 0;
+    if (item.data.isRemixOrDurationMismatch === undefined) item.data.isRemixOrDurationMismatch = false;
   }
   return item.data;
 }
@@ -153,6 +166,112 @@ function setCachedLyrics(key, data) {
     lyricsMemoryCache.delete(firstKey);
   }
   lyricsMemoryCache.set(key, { data, ts: Date.now() });
+}
+
+/**
+ * Tra cứu bộ nhớ đệm vĩnh viễn trên MongoDB Atlas
+ */
+async function getPersistentLyricCache(songFingerprint, lookupKeys = []) {
+  if (!LyricCache) return null;
+  try {
+    const mongoose = require('mongoose');
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) return null;
+
+    let doc = await LyricCache.findOne({ songFingerprint }).lean();
+    if (!doc && Array.isArray(lookupKeys) && lookupKeys.length > 0) {
+      doc = await LyricCache.findOne({ lookupKeys: { $in: lookupKeys } }).sort({ qualityScore: -1 }).lean();
+    }
+    return doc;
+  } catch (err) {
+    console.error('[LyricCache Read Error]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Lưu bộ nhớ đệm vĩnh viễn trên MongoDB Atlas với Multi-Factor Fingerprint
+ */
+async function savePersistentLyricCache(data, songFingerprint, lookupKeys = []) {
+  if (!LyricCache || !data || !songFingerprint || data.notFound) return;
+  try {
+    const mongoose = require('mongoose');
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) return;
+
+    const payload = {
+      songFingerprint,
+      title: data.title || '',
+      artist: data.artist || '',
+      variantTag: detectVariantTag(data.title || ''),
+      durationSec: Math.round(Number(data.duration) || 0),
+      type: (Array.isArray(data.syncedLyrics) && data.syncedLyrics.length > 0) ? 'synced' : (data.isLofi ? 'instrumental' : 'plain'),
+      lyrics: data.lyrics || '',
+      syncedLyrics: Array.isArray(data.syncedLyrics) ? data.syncedLyrics : [],
+      source: data.source || 'lrclib',
+      qualityScore: data.qualityScore || ((Array.isArray(data.syncedLyrics) && data.syncedLyrics.length > 0) ? 85 : 50),
+      language: data.language || 'unknown',
+      autoOffsetMs: Number(data.autoOffsetMs) || 0,
+      isRemixOrDurationMismatch: Boolean(data.isRemixOrDurationMismatch)
+    };
+
+    const validLookupKeys = Array.isArray(lookupKeys) ? lookupKeys.filter(Boolean) : [];
+
+    await LyricCache.findOneAndUpdate(
+      { songFingerprint },
+      {
+        $set: payload,
+        $addToSet: { lookupKeys: { $each: validLookupKeys } }
+      },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('[LyricCache Write Error]:', err.message);
+  }
+}
+
+/**
+ * Báo lỗi & Hủy Cache chống DoS: Yêu cầu ít nhất 3 user IDs khác nhau báo lỗi
+ */
+async function reportLyricCacheIssue(songFingerprint, userId) {
+  if (!songFingerprint || !userId) return { success: false, reason: 'INVALID_PARAMS' };
+
+  const deleteRamCache = (fp, extraKeys = []) => {
+    lyricsMemoryCache.delete(fp);
+    for (const [key, val] of lyricsMemoryCache.entries()) {
+      if (val?.data?.songFingerprint === fp || (Array.isArray(extraKeys) && extraKeys.includes(key))) {
+        lyricsMemoryCache.delete(key);
+      }
+    }
+  };
+
+  deleteRamCache(songFingerprint);
+
+  if (!LyricCache) return { success: false, reason: 'NO_DB' };
+  try {
+    const mongoose = require('mongoose');
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+      return { success: false, reason: 'DB_DISCONNECTED' };
+    }
+
+    const doc = await LyricCache.findOneAndUpdate(
+      { songFingerprint },
+      { $addToSet: { reportedBy: String(userId) } },
+      { new: true }
+    );
+
+    if (!doc) return { success: false, reason: 'NOT_FOUND' };
+
+    const uniqueReporters = new Set(doc.reportedBy || []).size;
+    if (uniqueReporters >= 3) {
+      await LyricCache.deleteOne({ _id: doc._id });
+      deleteRamCache(songFingerprint, doc.lookupKeys);
+      console.log(`[LyricCache] Đã xóa cache cho "${doc.title}" sau khi nhận đủ 3 báo lỗi từ 3 người dùng khác nhau.`);
+      return { success: true, invalidated: true, uniqueReporters };
+    }
+
+    return { success: true, invalidated: false, uniqueReporters };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
 }
 
 /**
@@ -275,6 +394,10 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
   const trackRegion = resolveTrackLanguageRegion({ rawTitle, artist }, appleMeta);
   const activeLayers = getDynamicLyricsLayers(lyricsLayers, trackRegion);
 
+  let targetDurationSec = durationMs ? durationMs / 1000 : 0;
+  const rawVideoId = isYouTube ? extractVideoId(normalizedUrl) : null;
+  let songFingerprint = generateMultiFactorFingerprint(rawTitle, artist, targetDurationSec, rawVideoId);
+
   const cached = getCachedLyrics(cacheKey);
   if (cached) {
     if (cached.notFound) return cached;
@@ -288,6 +411,9 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
       return {
         ...cached,
         trackKey,
+        songFingerprint: cached.songFingerprint || songFingerprint,
+        autoOffsetMs: (cached.autoOffsetMs !== undefined) ? cached.autoOffsetMs : 0,
+        isRemixOrDurationMismatch: Boolean(cached.isRemixOrDurationMismatch),
         userSavedOffsetMs: (userSavedOffsetMs !== undefined && userSavedOffsetMs !== null) ? userSavedOffsetMs : (cached.userSavedOffsetMs || 0)
       };
     }
@@ -302,231 +428,122 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
       lyrics: 'Bản nhạc Lofi tự động không lời ☕',
       syncedLyrics: null,
       trackKey,
+      songFingerprint,
+      autoOffsetMs: 0,
+      isRemixOrDurationMismatch: false,
       userSavedOffsetMs: 0
     };
     setCachedLyrics(cacheKey, lofiResult);
     return lofiResult;
   }
 
-  let targetDurationSec = durationMs ? durationMs / 1000 : 0;
-
   if (isYouTube && normalizedUrl) {
     try {
       const ytInfo = await fetchYtdlpInfo(normalizedUrl);
       if (ytInfo && ytInfo.duration > 0) {
         targetDurationSec = ytInfo.duration;
+        songFingerprint = generateMultiFactorFingerprint(rawTitle, artist, targetDurationSec, rawVideoId);
       }
     } catch (e) {}
   }
 
-  let plainFallback = null;
-  let fallbackRecord = null;
-  let fallbackResult = null;
+  const variantTag = detectVariantTag(rawTitle);
+  const isVariant = variantTag !== 'original';
+  const lookupKeys = [
+    rawVideoId ? `yt:${rawVideoId}` : null,
+    trackKey,
+    !isVariant ? fallbackKey : null
+  ].filter(Boolean);
 
-  // 1. Ưu tiên chất lượng tuyệt đối: Đợi YouTube CC Subtitles trước
-  if (activeLayers.includes('youtube_cc') && isYouTube && normalizedUrl) {
-    try {
-      const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs, appleMeta);
-      if (ytSubResult?.syncedLyrics && ytSubResult.syncedLyrics.length >= 3) {
-        setCachedLyrics(cacheKey, ytSubResult);
-        lyricsEvents.emit('lyricsFound', {
-          url: normalizedUrl || targetUrl,
-          cacheKey,
-          trackKey,
-          lyricsData: ytSubResult
+  // GIAI ĐOẠN 0: Tra cứu MongoDB Persistent Cache (0ms - 5ms)
+  const persistentDoc = await getPersistentLyricCache(songFingerprint, lookupKeys);
+  if (persistentDoc) {
+    if (persistentDoc.type === 'synced' && persistentDoc.qualityScore >= 80 && !isGarbageLyrics(persistentDoc.lyrics)) {
+      const res = {
+        title: persistentDoc.title || rawTitle,
+        artist: persistentDoc.artist || artist,
+        lyrics: persistentDoc.lyrics,
+        syncedLyrics: persistentDoc.syncedLyrics,
+        duration: persistentDoc.durationSec,
+        trackKey,
+        songFingerprint: persistentDoc.songFingerprint || songFingerprint,
+        autoOffsetMs: persistentDoc.autoOffsetMs || 0,
+        isRemixOrDurationMismatch: Boolean(persistentDoc.isRemixOrDurationMismatch),
+        userSavedOffsetMs: (userSavedOffsetMs !== undefined && userSavedOffsetMs !== null) ? userSavedOffsetMs : 0,
+        source: persistentDoc.source || 'lrclib',
+        qualityScore: persistentDoc.qualityScore,
+        isOfficialCc: persistentDoc.source === 'youtube_cc'
+      };
+      setCachedLyrics(cacheKey, res);
+      return res;
+    }
+
+    if (persistentDoc.type === 'plain' || persistentDoc.qualityScore < 70) {
+      const plainRes = {
+        title: persistentDoc.title || rawTitle,
+        artist: persistentDoc.artist || artist,
+        lyrics: persistentDoc.lyrics,
+        syncedLyrics: null,
+        duration: persistentDoc.durationSec,
+        trackKey,
+        songFingerprint: persistentDoc.songFingerprint || songFingerprint,
+        autoOffsetMs: persistentDoc.autoOffsetMs || 0,
+        isRemixOrDurationMismatch: Boolean(persistentDoc.isRemixOrDurationMismatch),
+        userSavedOffsetMs: userSavedOffsetMs || 0,
+        source: persistentDoc.source || 'youtube_description',
+        qualityScore: persistentDoc.qualityScore || 50
+      };
+      setCachedLyrics(cacheKey, plainRes);
+
+      // Cooldown 24h Smart Upgrade
+      const UPGRADE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+      const lastAttempt = persistentDoc.lastUpgradeAttemptAt ? new Date(persistentDoc.lastUpgradeAttemptAt).getTime() : 0;
+      const shouldAttempt = !persistentDoc.lastUpgradeAttemptAt || (Date.now() - lastAttempt > UPGRADE_COOLDOWN_MS);
+
+      if (shouldAttempt && LyricCache) {
+        LyricCache.updateOne({ _id: persistentDoc._id }, { $set: { lastUpgradeAttemptAt: new Date() } }).catch(() => {});
+        setImmediate(async () => {
+          try {
+            const upgraded = await executeParallelWaterfallSearch({
+              rawTitle, artist, targetDurationSec, targetUrl, normalizedUrl, cacheKey, trackKey, userSavedOffsetMs,
+              activeLayers: ['lrclib', 'youtube_cc', 'zingmp3'], appleMeta, isYouTube, requireSyncedOnly: true
+            });
+            if (upgraded && Array.isArray(upgraded.syncedLyrics) && upgraded.syncedLyrics.length >= 3) {
+              await savePersistentLyricCache(upgraded, songFingerprint, lookupKeys);
+              setCachedLyrics(cacheKey, upgraded);
+              lyricsEvents.emit('lyricsFound', {
+                url: normalizedUrl || targetUrl,
+                cacheKey,
+                trackKey,
+                lyricsData: upgraded
+              });
+            }
+          } catch (e) {}
         });
-        return ytSubResult;
       }
-    } catch (ytSubErr) {}
-  }
-
-  // 2. Đua song song có trọng số cho các nguồn dự phòng còn lại
-  const candidates = [];
-  let hasTopPriorityPerfectWinner = false;
-  let firstCandidateTimestamp = 0;
-  const racePromises = [];
-
-  const getLayerPriority = (layerName) => {
-    const idx = activeLayers.indexOf(layerName);
-    return idx !== -1 ? idx : 999;
-  };
-
-  const topRemainingLayer = activeLayers.find(l => l !== 'youtube_cc') || activeLayers[0];
-
-  const recordCandidate = (layerName, res) => {
-    if (!res || !Array.isArray(res.syncedLyrics) || res.syncedLyrics.length < 3) return;
-    const quality = evaluateLyricsQuality(res.syncedLyrics);
-    const candidate = {
-      source: layerName,
-      priority: getLayerPriority(layerName),
-      result: res,
-      quality
-    };
-    candidates.push(candidate);
-    if (!firstCandidateTimestamp) {
-      firstCandidateTimestamp = Date.now();
+      return plainRes;
     }
-
-    if (layerName === topRemainingLayer && !candidate.quality.hasAbnormalGap) {
-      hasTopPriorityPerfectWinner = true;
-    }
-  };
-
-  // Tầng 2: Zing MP3
-  if (activeLayers.includes('zingmp3')) {
-    racePromises.push((async () => {
-      try {
-        const zingResult = await fetchZingMp3Lyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, trackKey, userSavedOffsetMs, appleMeta);
-        if (zingResult?.syncedLyrics) {
-          recordCandidate('zingmp3', zingResult);
-        } else if (zingResult?.lyrics && !plainFallback) {
-          plainFallback = zingResult;
-        }
-      } catch (zingErr) {}
-    })());
   }
 
-  // Tầng 3: LRCLIB
-  if (activeLayers.includes('lrclib')) {
-    racePromises.push((async () => {
-      try {
-        const lrclibRes = await fetchLrclibLyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, cacheKey, trackKey, userSavedOffsetMs, appleMeta);
-        if (lrclibRes?.exactSynced?.syncedLyrics) {
-          recordCandidate('lrclib', lrclibRes.exactSynced);
-        }
-        if (!plainFallback && lrclibRes?.plainFallback) {
-          plainFallback = lrclibRes.plainFallback;
-        }
-        if (!fallbackRecord && lrclibRes?.fallbackRecord) {
-          fallbackRecord = lrclibRes.fallbackRecord;
-        }
-      } catch (lrclibErr) {}
-    })());
-  }
+  // GIAI ĐOẠN 1: PARALLEL WATERFALL QUALITY LADDER (Ngắt mạch sớm < 400ms & Grace Window 800ms)
+  const winner = await executeParallelWaterfallSearch({
+    rawTitle, artist, targetDurationSec, targetUrl, normalizedUrl, cacheKey, trackKey, userSavedOffsetMs,
+    activeLayers, appleMeta, isYouTube, requireSyncedOnly: false
+  });
 
-  // Tầng 4: SyncedLyrics Python Microservice (Staggered 300ms)
-  if (activeLayers.includes('syncedlyrics')) {
-    racePromises.push((async () => {
-      await new Promise(r => setTimeout(r, 300));
-      if (hasTopPriorityPerfectWinner) return;
-
-      try {
-        const fbRes = await fetchLyricsFallback(rawTitle, artist, targetDurationSec * 1000);
-        if (fbRes?.syncedLyrics) {
-          fbRes.trackKey = trackKey;
-          fbRes.userSavedOffsetMs = userSavedOffsetMs || 0;
-          if (isYouTube && normalizedUrl) {
-            try {
-              fbRes.autoOffsetMs = await detectYouTubeIntroOffset(normalizedUrl, fbRes.syncedLyrics, targetDurationSec, Number(fbRes.duration || 0));
-            } catch (e) {}
-          }
-          recordCandidate('syncedlyrics', fbRes);
-        } else if (fbRes?.lyrics && !fallbackResult) {
-          fallbackResult = fbRes;
-        }
-      } catch (fbErr) {}
-    })());
-  }
-
-  await Promise.race([
-    new Promise(resolve => {
-      const interval = setInterval(() => {
-        if (hasTopPriorityPerfectWinner) {
-          clearInterval(interval);
-          return resolve();
-        }
-
-        if (candidates.length > 0) {
-          const elapsedSinceFirst = Date.now() - firstCandidateTimestamp;
-          const hasFlawlessCandidate = candidates.some(c => !c.quality.hasAbnormalGap);
-
-          if (hasFlawlessCandidate && elapsedSinceFirst >= 650) {
-            clearInterval(interval);
-            return resolve();
-          }
-
-          if (!hasFlawlessCandidate && elapsedSinceFirst >= 1200) {
-            clearInterval(interval);
-            return resolve();
-          }
-        }
-      }, 30);
-
-      const maxTimeoutMs = (activeLayers.includes('youtube_cc') && isYouTube) ? 4500 : 3500;
-      setTimeout(() => {
-        clearInterval(interval);
-        resolve();
-      }, maxTimeoutMs);
-    }),
-    Promise.allSettled(racePromises)
-  ]);
-
-  const syncedWinner = pickBestLyricsCandidate(candidates);
-
-  if (syncedWinner) {
-    setCachedLyrics(cacheKey, syncedWinner);
+  if (winner) {
+    winner.songFingerprint = songFingerprint;
+    if (winner.autoOffsetMs === undefined) winner.autoOffsetMs = 0;
+    if (winner.isRemixOrDurationMismatch === undefined) winner.isRemixOrDurationMismatch = false;
+    await savePersistentLyricCache(winner, songFingerprint, lookupKeys);
+    setCachedLyrics(cacheKey, winner);
     lyricsEvents.emit('lyricsFound', {
       url: normalizedUrl || targetUrl,
       cacheKey,
       trackKey,
-      lyricsData: syncedWinner
+      lyricsData: winner
     });
-    return syncedWinner;
-  }
-
-  if (fallbackRecord && fallbackRecord.syncedLyrics) {
-    const isActualRemixMismatch = detectVariantTrack(rawTitle);
-    const fallbackRes = await buildLrclibResult(fallbackRecord, rawTitle, artist, normalizedUrl || targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, isActualRemixMismatch);
-    if (fallbackRes) setCachedLyrics(cacheKey, fallbackRes);
-    return fallbackRes;
-  }
-
-  // Tầng dự phòng cuối: Trích xuất lời từ Description YouTube
-  if (isYouTube && normalizedUrl) {
-    try {
-      const descLyrics = await fetchYouTubeDescriptionLyrics(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
-      if (descLyrics && descLyrics.lyrics && descLyrics.lyrics.length >= 50) {
-        setCachedLyrics(cacheKey, descLyrics);
-        return descLyrics;
-      }
-    } catch (descErr) {}
-  } else if (!isYouTube) {
-    try {
-      const searchQuery = `${cleanTitle(rawTitle)} ${cleanArtistName(artist)}`.trim();
-      if (searchQuery) {
-        const { executeSearch } = require('./searchService');
-        const sRes = await executeSearch(searchQuery, 1, 'official');
-        const topVideo = sRes?.[0];
-        if (topVideo && topVideo.url) {
-          const ccRes = await fetchYouTubeSubtitles(topVideo.url, rawTitle, artist, trackKey, userSavedOffsetMs);
-          if (ccRes && ccRes.syncedLyrics && ccRes.syncedLyrics.length >= 5) {
-            setCachedLyrics(cacheKey, ccRes);
-            return ccRes;
-          }
-          const descRes = await fetchYouTubeDescriptionLyrics(topVideo.url, rawTitle, artist, trackKey, userSavedOffsetMs);
-          if (descRes && descRes.lyrics && descRes.lyrics.length >= 50) {
-            setCachedLyrics(cacheKey, descRes);
-            return descRes;
-          }
-        }
-      }
-    } catch (ytSearchErr) {}
-  }
-
-  if (fallbackRecord) {
-    const isActualRemixMismatch = detectVariantTrack(rawTitle);
-    return await buildLrclibResult(fallbackRecord, rawTitle, artist, normalizedUrl || targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, isActualRemixMismatch);
-  }
-
-  if (fallbackResult && fallbackResult.lyrics) {
-    fallbackResult.trackKey = trackKey;
-    fallbackResult.userSavedOffsetMs = userSavedOffsetMs || 0;
-    setCachedLyrics(cacheKey, fallbackResult);
-    return fallbackResult;
-  }
-  if (plainFallback) {
-    setCachedLyrics(cacheKey, plainFallback);
-    return plainFallback;
+    return winner;
   }
 
   const notFoundResult = {
@@ -536,10 +553,246 @@ async function _executeFetchLyrics(rawTitle, artist, durationMs, targetUrl, norm
     syncedLyrics: null,
     notFound: true,
     trackKey,
+    songFingerprint,
+    autoOffsetMs: 0,
+    isRemixOrDurationMismatch: false,
     userSavedOffsetMs: 0
   };
   setCachedLyrics(cacheKey, notFoundResult);
   return notFoundResult;
+}
+
+/**
+ * Động cơ Thác nước Song song (Parallel Waterfall Quality Ladder):
+ * Kích hoạt đồng thời các provider, ngắt mạch sớm < 400ms khi tìm thấy bản synced Tier 1 chuẩn,
+ * và mở Grace Window 800ms khi Tier 3 (YouTube Description) về đích trước.
+ */
+async function executeParallelWaterfallSearch({
+  rawTitle,
+  artist,
+  targetDurationSec,
+  targetUrl,
+  normalizedUrl,
+  cacheKey,
+  trackKey,
+  userSavedOffsetMs,
+  activeLayers,
+  appleMeta,
+  isYouTube,
+  requireSyncedOnly = false
+}) {
+  const candidates = [];
+  let plainFallback = null;
+  let fallbackRecord = null;
+  let fallbackResult = null;
+
+  const getLayerPriority = (layerName) => {
+    const idx = activeLayers.indexOf(layerName);
+    return idx !== -1 ? idx : 999;
+  };
+
+  const isTier1 = (src) => ['youtube_cc', 'lrclib', 'zingmp3'].includes(src);
+
+  return new Promise((resolve) => {
+    let isResolved = false;
+    let graceTimer = null;
+
+    const safeResolve = (winner) => {
+      if (isResolved) return;
+      isResolved = true;
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+      resolve(winner);
+    };
+
+    const checkShortCircuit = (candidate) => {
+      if (!candidate || !candidate.result?.syncedLyrics) return false;
+      // Ngắt mạch sớm < 400ms: Nguồn Tier 1 có synced lyrics chuẩn (không thủng đoạn)
+      if (isTier1(candidate.source) && !candidate.quality.hasAbnormalGap && candidate.quality.count >= 4) {
+        // Chỉ ngắt mạch ngay lập tức nếu đây là nguồn có độ ưu tiên cao nhất (#1 trong activeLayers, ví dụ youtube_cc xếp đầu)
+        if (candidate.priority === 0) {
+          candidate.result.qualityScore = 95;
+          safeResolve(candidate.result);
+          return true;
+        }
+
+        // Nếu nguồn thấp hơn về trước, không được ngắt mạch làm hỏng nguồn ưu tiên cao hơn (như youtube_cc)
+        // Mở Grace Window 600ms chờ nguồn ưu tiên cao hơn về đích
+        if (!graceTimer) {
+          graceTimer = setTimeout(() => {
+            if (!isResolved) {
+              const winner = pickBestLyricsCandidate(candidates) || plainFallback;
+              if (winner) safeResolve(winner);
+            }
+          }, 600);
+        }
+      }
+      return false;
+    };
+
+    const onTier3Arrival = (descResult) => {
+      if (isResolved) return;
+      if (requireSyncedOnly) return;
+      plainFallback = descResult;
+
+      // Nếu đã có candidate synced bất kỳ -> không cần mở Grace Window cho plain
+      if (candidates.length > 0) return;
+
+      // Mở Grace Window 800ms chờ Tier 1
+      if (!graceTimer) {
+        graceTimer = setTimeout(() => {
+          if (!isResolved) {
+            const winner = pickBestLyricsCandidate(candidates) || plainFallback;
+            safeResolve(winner);
+          }
+        }, 800);
+      }
+    };
+
+    const taskPromises = [];
+
+    // TẦNG 1: YouTube CC
+    if (activeLayers.includes('youtube_cc') && isYouTube && normalizedUrl) {
+      taskPromises.push((async () => {
+        try {
+          const ytSubResult = await fetchYouTubeSubtitles(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs, appleMeta);
+          if (ytSubResult?.syncedLyrics && ytSubResult.syncedLyrics.length >= 3) {
+            const quality = evaluateLyricsQuality(ytSubResult.syncedLyrics);
+            const cand = { source: 'youtube_cc', priority: getLayerPriority('youtube_cc'), result: ytSubResult, quality };
+            candidates.push(cand);
+            if (checkShortCircuit(cand)) return;
+          }
+        } catch (e) {}
+      })());
+    }
+
+    // TẦNG 1: LRCLIB
+    if (activeLayers.includes('lrclib')) {
+      taskPromises.push((async () => {
+        try {
+          const lrclibRes = await fetchLrclibLyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, cacheKey, trackKey, userSavedOffsetMs, appleMeta);
+          if (lrclibRes?.exactSynced?.syncedLyrics) {
+            const quality = evaluateLyricsQuality(lrclibRes.exactSynced.syncedLyrics);
+            const cand = { source: 'lrclib', priority: getLayerPriority('lrclib'), result: lrclibRes.exactSynced, quality };
+            candidates.push(cand);
+            if (checkShortCircuit(cand)) return;
+          }
+          if (!plainFallback && lrclibRes?.plainFallback) plainFallback = lrclibRes.plainFallback;
+          if (!fallbackRecord && lrclibRes?.fallbackRecord) fallbackRecord = lrclibRes.fallbackRecord;
+        } catch (e) {}
+      })());
+    }
+
+    // TẦNG 1: Zing MP3
+    if (activeLayers.includes('zingmp3')) {
+      taskPromises.push((async () => {
+        try {
+          const zingResult = await fetchZingMp3Lyrics(rawTitle, artist, targetDurationSec, normalizedUrl || targetUrl, trackKey, userSavedOffsetMs, appleMeta);
+          if (zingResult?.syncedLyrics) {
+            const quality = evaluateLyricsQuality(zingResult.syncedLyrics);
+            const cand = { source: 'zingmp3', priority: getLayerPriority('zingmp3'), result: zingResult, quality };
+            candidates.push(cand);
+            if (checkShortCircuit(cand)) return;
+          } else if (zingResult?.lyrics && !plainFallback) {
+            plainFallback = zingResult;
+          }
+        } catch (e) {}
+      })());
+    }
+
+    // TẦNG 2: SyncedLyrics Python Microservice (trễ 250ms)
+    if (activeLayers.includes('syncedlyrics')) {
+      taskPromises.push((async () => {
+        await new Promise(r => setTimeout(r, 250));
+        if (isResolved) return;
+        try {
+          const fbRes = await fetchLyricsFallback(rawTitle, artist, targetDurationSec * 1000);
+          if (fbRes?.syncedLyrics) {
+            fbRes.trackKey = trackKey;
+            fbRes.userSavedOffsetMs = userSavedOffsetMs || 0;
+            if (isYouTube && normalizedUrl) {
+              try {
+                fbRes.autoOffsetMs = await detectYouTubeIntroOffset(normalizedUrl, fbRes.syncedLyrics, targetDurationSec, Number(fbRes.duration || 0));
+              } catch (e) {}
+            }
+            const quality = evaluateLyricsQuality(fbRes.syncedLyrics);
+            const cand = { source: 'syncedlyrics', priority: getLayerPriority('syncedlyrics'), result: fbRes, quality };
+            candidates.push(cand);
+            if (checkShortCircuit(cand)) return;
+          } else if (fbRes?.lyrics && !fallbackResult) {
+            fallbackResult = fbRes;
+          }
+        } catch (e) {}
+      })());
+    }
+
+    // TẦNG 3: YouTube Description
+    if (!requireSyncedOnly) {
+      if (isYouTube && normalizedUrl) {
+        taskPromises.push((async () => {
+          try {
+            const descLyrics = await fetchYouTubeDescriptionLyrics(normalizedUrl, rawTitle, artist, trackKey, userSavedOffsetMs);
+            if (descLyrics && descLyrics.lyrics && descLyrics.lyrics.length >= 50) {
+              onTier3Arrival(descLyrics);
+            }
+          } catch (e) {}
+        })());
+      } else if (!isYouTube) {
+        taskPromises.push((async () => {
+          try {
+            const searchQuery = `${cleanTitle(rawTitle)} ${cleanArtistName(artist)}`.trim();
+            if (searchQuery) {
+              const { executeSearch } = require('./searchService');
+              const sRes = await executeSearch(searchQuery, 1, 'official');
+              const topVideo = sRes?.[0];
+              if (topVideo?.url) {
+                const ccRes = await fetchYouTubeSubtitles(topVideo.url, rawTitle, artist, trackKey, userSavedOffsetMs);
+                if (ccRes?.syncedLyrics && ccRes.syncedLyrics.length >= 5) {
+                  const quality = evaluateLyricsQuality(ccRes.syncedLyrics);
+                  const cand = { source: 'youtube_cc', priority: getLayerPriority('youtube_cc'), result: ccRes, quality };
+                  candidates.push(cand);
+                  if (checkShortCircuit(cand)) return;
+                }
+                const descRes = await fetchYouTubeDescriptionLyrics(topVideo.url, rawTitle, artist, trackKey, userSavedOffsetMs);
+                if (descRes && descRes.lyrics && descRes.lyrics.length >= 50) {
+                  onTier3Arrival(descRes);
+                }
+              }
+            }
+          } catch (e) {}
+        })());
+      }
+    }
+
+    // Khi tất cả hoàn tất
+    Promise.allSettled(taskPromises).then(async () => {
+      if (isResolved) return;
+      const winner = pickBestLyricsCandidate(candidates);
+      if (winner) return safeResolve(winner);
+
+      if (fallbackRecord && fallbackRecord.syncedLyrics) {
+        const isActualRemixMismatch = detectVariantTrack(rawTitle);
+        const fallbackRes = await buildLrclibResult(fallbackRecord, rawTitle, artist, normalizedUrl || targetUrl, targetDurationSec, cacheKey, trackKey, userSavedOffsetMs, isActualRemixMismatch);
+        if (fallbackRes) return safeResolve(fallbackRes);
+      }
+      if (!requireSyncedOnly) {
+        if (plainFallback) return safeResolve(plainFallback);
+        if (fallbackResult) return safeResolve(fallbackResult);
+      }
+      safeResolve(null);
+    });
+
+    // Timeout trần an toàn
+    const maxTimeoutMs = (activeLayers.includes('youtube_cc') && isYouTube) ? 4000 : 3200;
+    setTimeout(() => {
+      if (!isResolved) {
+        const winner = pickBestLyricsCandidate(candidates) || plainFallback || fallbackResult || null;
+        safeResolve(winner);
+      }
+    }, maxTimeoutMs);
+  });
 }
 
 function prefetchLyrics(rawTitle, artist = '', durationMs = 0, targetUrl = null, lyricsLayers = null) {
@@ -592,5 +845,10 @@ module.exports = {
   detectYouTubeIntroOffset,
   evaluateLyricsQuality,
   pickBestLyricsCandidate,
-  getDynamicLyricsLayers
+  getDynamicLyricsLayers,
+  executeParallelWaterfallSearch,
+  getPersistentLyricCache,
+  savePersistentLyricCache,
+  reportLyricCacheIssue,
+  generateMultiFactorFingerprint
 };
