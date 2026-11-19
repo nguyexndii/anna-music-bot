@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { generateWebToken } = require('../utils/tokenHelper');
 const { registerWebSession } = require('../utils/webSessionManager');
 const { getActiveTunnelUrl } = require('../utils/statusNotifier');
-const { createErrorEmbed, CUSTOM_EMOJIS } = require('../utils/embed');
+const { createErrorEmbed, CUSTOM_EMOJIS, EMOJI_TAG } = require('../utils/embed');
 const { isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const settingsManager = require('../structures/SettingsManager');
 const { createContext } = require('../utils/commandHelper');
@@ -78,7 +78,7 @@ module.exports = {
           components: [
             {
               type: 10,
-              content: isEn ? `### Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${guild.name}**.` : `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
+              content: isEn ? `### ${EMOJI_TAG.web} Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${guild.name}**.` : `### ${EMOJI_TAG.web} Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${guild.name}**.`
             }
           ],
           accessory: {
@@ -88,7 +88,7 @@ module.exports = {
         },
         {
           type: 10,
-          content: isEn ? `🔊 **Voice Channel:** <#${userVoice.id}>\n🔑 **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `🔊 **Kênh Voice:** <#${userVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
+          content: isEn ? `${EMOJI_TAG.volumeHigh} **Voice Channel:** <#${userVoice.id}>\n${EMOJI_TAG.padlock} **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `${EMOJI_TAG.volumeHigh} **Kênh Voice:** <#${userVoice.id}>\n${EMOJI_TAG.padlock} **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
         },
         {
           type: 1,

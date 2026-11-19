@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
 const { hasMusicPermission } = require('../utils/permissionHelper');
-const { createSuccessEmbed, createErrorEmbed } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed, EMOJI_TAG } = require('../utils/embed');
 const { createContext } = require('../utils/commandHelper');
 const { t } = require('../utils/i18n');
 
@@ -50,7 +50,7 @@ module.exports = {
 
     const level = ctx.options.getInteger('level');
     if (level === null && (!args || args.length === 0)) {
-      return ctx.reply({ embeds: [createSuccessEmbed(`🔊 ${t(guildId, 'player.volume_set', { volume: queue.volume })}`)] });
+      return ctx.reply({ embeds: [createSuccessEmbed(`${EMOJI_TAG.volumeHigh} ${t(guildId, 'player.volume_set', { volume: queue.volume })}`)] });
     }
 
     const vol = level !== null ? level : parseInt(args[0], 10);

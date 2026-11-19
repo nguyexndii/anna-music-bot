@@ -64,8 +64,8 @@ function createHelpMenu(activeTab = 'music', isAdmin = false, isEn = false) {
         `**/leave** — Cho bot rời khỏi kênh thoại`
       ].join('\n'),
       footer: isEnglish
-        ? '💡 Tip: Short aliases like /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h are supported!'
-        : '💡 Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h'
+        ? `${EMOJI_TAG.ai} Tip: Short aliases like /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h are supported!`
+        : `${EMOJI_TAG.ai} Mẹo: Bạn có thể dùng lệnh tắt nhanh như /p, /s, /fs, /q, /np, /vol, /fav, /ly, /mv, /h`
     },
     queue: {
       title: isEnglish

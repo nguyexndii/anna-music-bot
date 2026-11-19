@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed, createErrorEmbed, createMusicControls, createEmbed, CUSTOM_EMOJIS } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed, createMusicControls, createEmbed, CUSTOM_EMOJIS, EMOJI_TAG } = require('../utils/embed');
 const { hasMusicPermission, isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
 const { t } = require('../utils/i18n');
@@ -56,8 +56,8 @@ module.exports = {
             {
               type: 10,
               content: isEn
-                ? `### Connected to Voice\nBot joined <#${voiceChannel.id}> successfully.`
-                : `### Đã Kết Nối Voice\nBot đã tham gia phòng <#${voiceChannel.id}> thành công.`
+                ? `### ${EMOJI_TAG.micActive} Connected to Voice\nBot joined <#${voiceChannel.id}> successfully.`
+                : `### ${EMOJI_TAG.micActive} Đã Kết Nối Voice\nBot đã tham gia phòng <#${voiceChannel.id}> thành công.`
             }
           ],
           accessory: {
@@ -68,8 +68,8 @@ module.exports = {
         {
           type: 10,
           content: isEn
-            ? `Click **Add Song** below or type \`/play <name or url>\` to play music.`
-            : `Bấm nút **Thêm bài** bên dưới hoặc gõ \`/play <tên bài hoặc link>\` để phát nhạc.`
+            ? `${EMOJI_TAG.musicNote} Click **Add Song** below or type \`/play <name or url>\` to play music.`
+            : `${EMOJI_TAG.musicNote} Bấm nút **Thêm bài** bên dưới hoặc gõ \`/play <tên bài hoặc link>\` để phát nhạc.`
         },
         {
           type: 1,
@@ -79,21 +79,21 @@ module.exports = {
               style: 1,
               custom_id: 'btn_add_song',
               label: isEn ? 'Add Song' : 'Thêm bài',
-              emoji: CUSTOM_EMOJIS?.add || { name: '➕' }
+              emoji: CUSTOM_EMOJIS.add
             },
             {
               type: 2,
               style: 2,
               custom_id: 'btn_queue',
               label: isEn ? 'Queue' : 'Hàng chờ',
-              emoji: CUSTOM_EMOJIS?.queue || { name: '📜' }
+              emoji: CUSTOM_EMOJIS.queue
             },
             {
               type: 2,
               style: 2,
               custom_id: 'btn_web_player',
               label: 'Web Player',
-              emoji: CUSTOM_EMOJIS?.web || { name: '🌐' }
+              emoji: CUSTOM_EMOJIS.web
             }
           ]
         }

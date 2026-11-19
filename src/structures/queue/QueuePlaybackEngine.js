@@ -1,5 +1,5 @@
 const os = require('os');
-const { AudioPlayerStatus } = require('@discordjs/voice');
+const { AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const {
   createResource,
   searchTrack,
@@ -955,8 +955,20 @@ class QueuePlaybackEngine {
         resource.volume.setVolume(this.queue.volume / 100);
       }
 
-      if (conn) {
-        conn.subscribe(this.player);
+      const activeConn = this.queue.connection || conn;
+      if (activeConn && activeConn.state.status !== VoiceConnectionStatus.Destroyed) {
+        if (activeConn.state.status !== VoiceConnectionStatus.Ready) {
+          try {
+            await entersState(activeConn, VoiceConnectionStatus.Ready, 5000);
+          } catch (readyErr) {
+            console.warn('[Playback Guard] Chờ VoiceConnection Ready thất bại:', readyErr.message);
+          }
+        }
+        try {
+          activeConn.subscribe(this.player);
+        } catch (subErr) {
+          console.warn('[Playback Guard] Lỗi subscribe VoiceConnection:', subErr.message);
+        }
       }
 
       this.player.play(resource);

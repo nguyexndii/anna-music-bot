@@ -845,7 +845,7 @@ async function handleInteractionCreate(client, interaction) {
               components: [
                 {
                   type: 10,
-                  content: isEn ? `### Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${interaction.guild.name}**.` : `### Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.`
+                  content: isEn ? `### ${EMOJI_TAG.web} Web Player Controller — Anna Music\nClick the button below to open music controller interface for **${interaction.guild.name}**.` : `### ${EMOJI_TAG.web} Bảng Điều Khiển Web Player — Anna Music\nNhấn nút bên dưới để mở giao diện điều khiển nhạc cho máy chủ **${interaction.guild.name}**.`
                 }
               ],
               accessory: {
@@ -855,7 +855,7 @@ async function handleInteractionCreate(client, interaction) {
             },
             {
               type: 10,
-              content: isEn ? `🔊 **Voice Channel:** <#${memberVoice.id}>\n🔑 **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `🔊 **Kênh Voice:** <#${memberVoice.id}>\n🔑 **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
+              content: isEn ? `${EMOJI_TAG.volumeHigh} **Voice Channel:** <#${memberVoice.id}>\n${EMOJI_TAG.padlock} **Connection PIN:** \`${pin}\` *(valid for 2 minutes)*` : `${EMOJI_TAG.volumeHigh} **Kênh Voice:** <#${memberVoice.id}>\n${EMOJI_TAG.padlock} **Mã PIN Kết Nối:** \`${pin}\` *(hiệu lực 2 phút)*`
             },
             {
               type: 1,

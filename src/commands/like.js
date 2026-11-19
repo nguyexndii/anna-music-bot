@@ -222,7 +222,7 @@ module.exports = {
             components: [
               {
                 type: 10,
-                content: isEn ? '### Liked Songs Collection — ' + userName + '\nYour favorites list is currently empty!\n\n💡 **How to add songs:**\n• Click **Favorite** button on player card while listening\n• Or use: `/like add <song_name>`' : '### Danh Sách Bài Hát Yêu Thích — ' + userName + '\nDanh sách yêu thích của bạn hiện đang trống!\n\n💡 **Cách thêm bài hát:**\n• Bấm nút **Favorite** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/like add <tên bài hát>`'
+                content: isEn ? '### Liked Songs Collection — ' + userName + '\nYour favorites list is currently empty!\n\n' + EMOJI_TAG.musicNote + ' **How to add songs:**\n• Click **Favorite** button on player card while listening\n• Or use: `/like add <song_name>`' : '### Danh Sách Bài Hát Yêu Thích — ' + userName + '\nDanh sách yêu thích của bạn hiện đang trống!\n\n' + EMOJI_TAG.musicNote + ' **Cách thêm bài hát:**\n• Bấm nút **Favorite** trên bảng điều khiển khi đang phát bài bất kỳ\n• Hoặc dùng lệnh: `/like add <tên bài hát>`'
               }
             ],
             accessory: {
@@ -247,7 +247,7 @@ module.exports = {
       descLines.push(isEn ? '\n*...and **' + (favorites.length - 15) + ' more songs** in your collection.*\n' : '\n*...và còn **' + (favorites.length - 15) + ' bài hát** khác trong danh sách.*\n');
     }
 
-    descLines.push(isEn ? '\n💡 *Click the button below to play your entire collection in Voice.*' : '\n💡 *Bấm nút bên dưới để phát toàn bộ danh sách vào phòng Voice.*');
+    descLines.push(isEn ? '\n' + EMOJI_TAG.musicNote + ' *Click the button below to play your entire collection in Voice.*' : '\n' + EMOJI_TAG.musicNote + ' *Bấm nút bên dưới để phát toàn bộ danh sách vào phòng Voice.*');
 
     const containerComponents = [
       {
