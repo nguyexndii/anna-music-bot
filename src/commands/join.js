@@ -48,7 +48,7 @@ module.exports = {
 
     const joinContainer = {
       type: 17,
-      accent_color: 0x2B7FFF,
+      accent_color: 0x2B2D31,
       components: [
         {
           type: 9,
@@ -56,8 +56,8 @@ module.exports = {
             {
               type: 10,
               content: isEn
-                ? `### 🎙️ Joined Voice Channel\nBot successfully joined <#${voiceChannel.id}>!`
-                : `### 🎙️ Đã Tham Gia Kênh Voice\nBot đã kết nối vào phòng <#${voiceChannel.id}> thành công!`
+                ? `### Connected to Voice\nBot joined <#${voiceChannel.id}> successfully.`
+                : `### Đã Kết Nối Voice\nBot đã tham gia phòng <#${voiceChannel.id}> thành công.`
             }
           ],
           accessory: {
@@ -68,8 +68,8 @@ module.exports = {
         {
           type: 10,
           content: isEn
-            ? `💡 **How to play music:**\n• Click **\`➕ Add Song\`** button below\n• Or type \`/play <song name or link>\``
-            : `💡 **Cách phát nhạc:**\n• Bấm nút **\`➕ Thêm bài\`** bên dưới\n• Hoặc gõ lệnh \`/play <tên bài hoặc link>\``
+            ? `Click **Add Song** below or type \`/play <name or url>\` to play music.`
+            : `Bấm nút **Thêm bài** bên dưới hoặc gõ \`/play <tên bài hoặc link>\` để phát nhạc.`
         },
         {
           type: 1,
@@ -90,7 +90,7 @@ module.exports = {
             },
             {
               type: 2,
-              style: 3,
+              style: 2,
               custom_id: 'btn_web_player',
               label: 'Web Player',
               emoji: CUSTOM_EMOJIS?.web || { name: '🌐' }
