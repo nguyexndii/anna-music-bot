@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const musicManager = require('../structures/MusicManager');
 const settingsManager = require('../structures/SettingsManager');
-const { createSuccessEmbed, createErrorEmbed, createMusicControls, createEmbed } = require('../utils/embed');
+const { createSuccessEmbed, createErrorEmbed, createMusicControls, createEmbed, CUSTOM_EMOJIS } = require('../utils/embed');
 const { hasMusicPermission, isAllowedVoiceChannel } = require('../utils/permissionHelper');
 const { createContext } = require('../utils/commandHelper');
 const { t } = require('../utils/i18n');
@@ -45,14 +45,61 @@ module.exports = {
     await queue.connect();
 
     const isEn = settingsManager.get(guildId)?.language === 'en';
-    const title = isEn ? '🎙️ Joined Voice Channel' : '🎙️ Đã Tham Gia Kênh Voice';
-    const desc = isEn
-      ? `Bot successfully joined <#${voiceChannel.id}>!\n\n💡 **How to play music:**\n• Click **\`➕ Add Song\`** button below\n• Or type \`/play <song name or link>\``
-      : `Bot đã kết nối vào phòng <#${voiceChannel.id}> thành công!\n\n💡 **Cách phát nhạc:**\n• Bấm nút **\`➕ Thêm bài\`** bên dưới\n• Hoặc gõ lệnh \`/play <tên bài hoặc link>\``;
 
-    const embed = createEmbed(title, desc);
-    const controls = createMusicControls(queue);
+    const joinContainer = {
+      type: 17,
+      accent_color: 0x2B7FFF,
+      components: [
+        {
+          type: 9,
+          components: [
+            {
+              type: 10,
+              content: isEn
+                ? `### 🎙️ Joined Voice Channel\nBot successfully joined <#${voiceChannel.id}>!`
+                : `### 🎙️ Đã Tham Gia Kênh Voice\nBot đã kết nối vào phòng <#${voiceChannel.id}> thành công!`
+            }
+          ],
+          accessory: {
+            type: 11,
+            media: { url: ctx.client.user.displayAvatarURL() }
+          }
+        },
+        {
+          type: 10,
+          content: isEn
+            ? `💡 **How to play music:**\n• Click **\`➕ Add Song\`** button below\n• Or type \`/play <song name or link>\``
+            : `💡 **Cách phát nhạc:**\n• Bấm nút **\`➕ Thêm bài\`** bên dưới\n• Hoặc gõ lệnh \`/play <tên bài hoặc link>\``
+        },
+        {
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 1,
+              custom_id: 'btn_add_song',
+              label: isEn ? 'Add Song' : 'Thêm bài',
+              emoji: CUSTOM_EMOJIS?.add || { name: '➕' }
+            },
+            {
+              type: 2,
+              style: 2,
+              custom_id: 'btn_queue',
+              label: isEn ? 'Queue' : 'Hàng chờ',
+              emoji: CUSTOM_EMOJIS?.queue || { name: '📜' }
+            },
+            {
+              type: 2,
+              style: 3,
+              custom_id: 'btn_web_player',
+              label: 'Web Player',
+              emoji: CUSTOM_EMOJIS?.web || { name: '🌐' }
+            }
+          ]
+        }
+      ]
+    };
 
-    return ctx.reply({ embeds: [embed], components: controls });
+    return ctx.reply({ components: [joinContainer], flags: 32768 });
   }
 };

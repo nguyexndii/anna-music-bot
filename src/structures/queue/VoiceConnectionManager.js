@@ -301,14 +301,22 @@ class VoiceConnectionManager {
               status: 'idle_247'
             });
 
-            // Duy trì luồng âm thanh Lofi 24/7, tuyệt đối không stop player làm tắt ngắt kết nối UDP
+            // Duy trì luồng âm thanh Lofi 24/7, gọi stop(true) trước khi cleanupResource để chống ERR_STREAM_PREMATURE_CLOSE
             if (!this.queue.isCurrentSongLofi()) {
-              if (this.queue.currentResource) {
-                this.queue._cleanupResource(this.queue.currentResource);
-                this.queue.currentResource = null;
+              this.queue._switchingTo247 = true;
+              try {
+                if (this.queue.player) {
+                  this.queue.player.stop(true);
+                }
+                if (this.queue.currentResource) {
+                  this.queue._cleanupResource(this.queue.currentResource);
+                  this.queue.currentResource = null;
+                }
+                this.queue.currentSong = null;
+                await this.queue._play247BackgroundLofi();
+              } finally {
+                this.queue._switchingTo247 = false;
               }
-              this.queue.currentSong = null;
-              await this.queue._play247BackgroundLofi();
             }
           }
         }

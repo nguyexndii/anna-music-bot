@@ -3,6 +3,118 @@ const spotifyUrlInfo = require('spotify-url-info')(fetch);
 
 const DEFAULT_FALLBACK_THUMB = 'https://anna-music-bot-ui.pages.dev/default-playlist.jpg';
 
+const SPOTIFY_URL_REGEX = /(?:open\.)?spotify\.com\/(?:intl-[a-z-]+\/)?(track|playlist|album)\/([a-zA-Z0-9]+)/i;
+const SPOTIFY_URI_REGEX = /^spotify:(track|playlist|album):([a-zA-Z0-9]+)$/i;
+
+/**
+ * Chuẩn hóa URL Spotify: loại bỏ mã vùng /intl-vi/ hoặc /intl-[a-z-]+/
+ * @param {string} url
+ * @returns {string}
+ */
+function normalizeSpotifyUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  let clean = url.trim();
+  clean = clean.replace(/spotify\.com\/intl-[a-z-]+\//i, 'spotify.com/');
+  return clean;
+}
+
+/**
+ * Phân tích URL hoặc URI Spotify thành đối tượng chứa type (track/playlist/album) và id
+ * @param {string} url
+ * @returns {{ type: 'track'|'playlist'|'album', id: string } | null}
+ */
+function parseSpotifyUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const uriMatch = url.match(SPOTIFY_URI_REGEX);
+  if (uriMatch) {
+    return { type: uriMatch[1].toLowerCase(), id: uriMatch[2] };
+  }
+  const urlMatch = url.match(SPOTIFY_URL_REGEX);
+  if (urlMatch) {
+    return { type: urlMatch[1].toLowerCase(), id: urlMatch[2] };
+  }
+  return null;
+}
+
+/**
+ * Phân tích và trích xuất metadata từ Spotify URL/URI (tên bài, nghệ sĩ, thời lượng, thumbnail)
+ * @param {string} rawUrl
+ * @returns {Promise<{ title: string, artist: string, durationSec: number, durationMs: number, thumbnail: string|null, url: string, type: string } | null>}
+ */
+async function parseSpotifyMetadata(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const parsed = parseSpotifyUrl(rawUrl);
+  const normalizedUrl = normalizeSpotifyUrl(rawUrl);
+
+  if (parsed?.type === 'track') {
+    const trackId = parsed.id;
+    let trackName = '';
+    let artistName = '';
+    let durationMs = 0;
+    let thumbnail = null;
+
+    // 1. Thử trích xuất qua spotify-url-info với URL đã chuẩn hóa (bỏ /intl-*)
+    try {
+      const data = await spotifyUrlInfo.getData(normalizedUrl);
+      if (data && (data.name || data.title)) {
+        trackName = (data.name || data.title || '').trim();
+        artistName = data.artists?.map(a => a.name).join(', ') || data.artists?.[0]?.name || data.artist || '';
+        durationMs = data.duration_ms || data.duration || 0;
+        thumbnail = data.coverArt?.sources?.[0]?.url || null;
+      }
+    } catch (e) {}
+
+    // 2. Fallback qua Spotify oEmbed
+    if (!trackName && trackId) {
+      try {
+        const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+        if (oRes.ok) {
+          const oData = await oRes.json();
+          trackName = (oData.title || '').trim();
+          artistName = (oData.author_name || '').trim();
+          thumbnail = oData.thumbnail_url || null;
+        }
+      } catch (e) {}
+    }
+
+    // 3. Fallback qua Spotify Web API chính thức nếu có Token
+    if (!trackName && trackId) {
+      try {
+        const token = await getSpotifyApiToken();
+        if (token) {
+          const apiRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            trackName = (apiData.name || '').trim();
+            artistName = apiData.artists?.map(a => a.name).join(', ') || '';
+            durationMs = apiData.duration_ms || 0;
+            thumbnail = apiData.album?.images?.[0]?.url || null;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (trackName) {
+      const durationSec = durationMs ? Math.round(durationMs / 1000) : 0;
+      return {
+        type: 'track',
+        id: trackId,
+        title: trackName,
+        artist: artistName,
+        durationSec,
+        durationMs,
+        thumbnail,
+        url: `https://open.spotify.com/track/${trackId}`
+      };
+    }
+    return null;
+  }
+
+  return null;
+}
+
 /**
  * Định dạng mili-giây sang MM:SS
  */
@@ -151,6 +263,11 @@ async function enrichSpotifyTracksWithThumbnails(tracks, defaultCover) {
 module.exports = {
   formatMs,
   DEFAULT_FALLBACK_THUMB,
+  SPOTIFY_URL_REGEX,
+  SPOTIFY_URI_REGEX,
+  normalizeSpotifyUrl,
+  parseSpotifyUrl,
+  parseSpotifyMetadata,
   spotifyUrlInfo,
   getSpotifyApiToken,
   fetchSpotifyPlaylistFull,

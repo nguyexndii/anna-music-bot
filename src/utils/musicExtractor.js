@@ -93,6 +93,11 @@ const {
 const {
   formatMs,
   DEFAULT_FALLBACK_THUMB,
+  SPOTIFY_URL_REGEX,
+  SPOTIFY_URI_REGEX,
+  normalizeSpotifyUrl,
+  parseSpotifyUrl,
+  parseSpotifyMetadata,
   spotifyUrlInfo,
   getSpotifyApiToken,
   fetchSpotifyPlaylistFull,
@@ -178,8 +183,18 @@ async function searchTrack(query, targetDurationSec = 0) {
 
     query = cleanQuery;
 
+    // Chuẩn hóa và nhận diện đường dẫn / URI Spotify
+    const isSpotify = cleanQuery.includes('spotify.com') || cleanQuery.startsWith('spotify:') || SPOTIFY_URL_REGEX.test(cleanQuery) || SPOTIFY_URI_REGEX.test(cleanQuery);
+    let spotifyInfo = null;
+    if (isSpotify) {
+      cleanQuery = normalizeSpotifyUrl(cleanQuery);
+      query = cleanQuery;
+      spotifyInfo = parseSpotifyUrl(cleanQuery);
+    }
+
     // 1. Xử lý Playlist / Album Spotify (Giới hạn tối đa 100 bài)
-    if (cleanQuery.includes('spotify.com/playlist/') || cleanQuery.includes('spotify.com/album/')) {
+    const isSpotifyPlaylist = (spotifyInfo && (spotifyInfo.type === 'playlist' || spotifyInfo.type === 'album')) || cleanQuery.includes('spotify.com/playlist/') || cleanQuery.includes('spotify.com/album/');
+    if (isSpotifyPlaylist) {
       try {
         let defaultCover = null;
         let playlistTitle = null;
@@ -230,32 +245,21 @@ async function searchTrack(query, targetDurationSec = 0) {
     }
 
     // 2. Xử lý Single Track Spotify
-    if (cleanQuery.includes('spotify.com/track/')) {
+    const isSpotifyTrack = (spotifyInfo && spotifyInfo.type === 'track') || cleanQuery.includes('spotify.com/track/');
+    if (isSpotifyTrack) {
       try {
-        let trackThumb = null;
-        const trackId = cleanQuery.split('/track/')[1]?.split('?')[0];
-        if (trackId) {
-          try {
-            const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
-            if (oRes.ok) {
-              const oData = await oRes.json();
-              trackThumb = oData.thumbnail_url;
-            }
-          } catch (e) {}
-        }
-
-        const trackData = await spotifyUrlInfo.getData(cleanQuery);
-        if (trackData && trackData.name) {
-          const artistName = trackData.artists?.[0]?.name || trackData.artist || '';
-          const title = artistName ? `${trackData.name} - ${artistName}` : trackData.name;
-          const spotifyDurSec = trackData.duration ? Math.round(trackData.duration / 1000) : (trackData.duration_ms ? Math.round(trackData.duration_ms / 1000) : 0);
+        const parsedMeta = await parseSpotifyMetadata(cleanQuery);
+        if (parsedMeta && parsedMeta.title) {
+          const artistName = parsedMeta.artist || '';
+          const title = artistName && !parsedMeta.title.includes(artistName) ? `${parsedMeta.title} - ${artistName}` : parsedMeta.title;
+          const spotifyDurSec = parsedMeta.durationSec || 0;
           let results = await searchTrack(title, spotifyDurSec);
           if (!results || results.length === 0) {
             results = await searchTrack(`${title} Audio`, spotifyDurSec);
           }
           if (results && results.length > 0) {
-            if (trackThumb) {
-              results[0].thumbnail = trackThumb;
+            if (parsedMeta.thumbnail) {
+              results[0].thumbnail = parsedMeta.thumbnail;
             }
             results[0].source = 'spotify';
             results[0].spotifyDurationSec = spotifyDurSec;
@@ -265,6 +269,12 @@ async function searchTrack(query, targetDurationSec = 0) {
       } catch (spTrackErr) {
         console.warn('[Spotify Track extraction error]:', spTrackErr.message);
       }
+    }
+
+    // Chốt chặn: Nếu link là spotify.com mà không trích xuất được metadata, trả về null và báo lỗi rõ ràng, tuyệt đối không để rơi xuống Step 5 (Direct Audio Stream / Live stream).
+    if (isSpotify) {
+      console.warn(`[SpotifyExtractor Guard] Không thể trích xuất metadata từ link Spotify: "${cleanQuery}". Đã chặn rơi xuống Step 5 Direct Stream.`);
+      return null;
     }
 
     // 3. Xử lý Playlist YouTube (Giới hạn tối đa 100 bài)

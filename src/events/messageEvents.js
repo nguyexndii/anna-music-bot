@@ -1,15 +1,45 @@
 const settingsManager = require('../structures/SettingsManager');
+const musicManager = require('../structures/MusicManager');
 const { logAction } = require('../utils/debugLogger');
 const { isAllowedGuild } = require('./guildEvents');
 
 /**
  * Ghi log tin nhắn của người dùng trong kênh voice / kênh âm nhạc hoặc có đính kèm
+ * Đồng thời tự động repost Now Playing Card xuống đáy khi có cuộc hội thoại người dùng
  * @param {import('discord.js').Client} client
  * @param {import('discord.js').Message} message
  */
 async function handleMessageCreate(client, message) {
   if (message.author.bot || !message.guild) return;
   if (!isAllowedGuild(message.guild.id, message.author.id)) return;
+
+  // Tự động đẩy thẻ Now Playing xuống đáy khi người dùng chat trong kênh text âm nhạc (>= 2-3 tin nhắn, debounce 4s, cooldown 15s)
+  try {
+    const queue = musicManager.get(message.guild.id);
+    if (queue && queue.textChannel && queue.textChannel.id === message.channel.id && queue.currentSong && !queue.isStopped) {
+      const is247Lofi = Boolean(queue.currentSong?.requestedBy === 'Auto (24/7)' || queue.currentSong?.is247);
+      if (!is247Lofi) {
+        queue._chatMsgCount = (queue._chatMsgCount || 0) + 1;
+        const now = Date.now();
+        const lastRepostTime = queue._lastChatRepostTime || 0;
+        const cooldownMs = 15000; // Cooldown 15s giữa các lần repost thẻ
+
+        if (queue._chatMsgCount >= 2 && (now - lastRepostTime >= cooldownMs)) {
+          if (queue._chatRepostDebounceTimer) {
+            clearTimeout(queue._chatRepostDebounceTimer);
+          }
+          queue._chatRepostDebounceTimer = setTimeout(async () => {
+            queue._chatRepostDebounceTimer = null;
+            queue._chatMsgCount = 0;
+            queue._lastChatRepostTime = Date.now();
+            if (typeof queue.repostNowPlayingCardToBottom === 'function') {
+              await queue.repostNowPlayingCardToBottom().catch(() => {});
+            }
+          }, 4000); // Debounce 4s
+        }
+      }
+    }
+  } catch (e) {}
 
   const isVoiceText = message.channel.isVoiceBased?.() || message.channel.type === 2;
   const guildSettings = settingsManager.get(message.guild.id);

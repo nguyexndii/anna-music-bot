@@ -91,6 +91,57 @@ class DiscordCardRenderer {
     this.queue._lastProgressEditTime = 0;
     this.queue._lastRenderedLyricIdx = -1;
     this.queue._lastRenderedChunkIdx = -1;
+    this.queue._cardRecreateCount = 0;
+  }
+
+  /**
+   * Xử lý khi gặp lỗi Discord 10008 (Unknown Message do thẻ Now Playing bị bot khác hoặc người dùng xóa)
+   * Chỉ hủy timer cũ, giữ nguyên cachedSyncedLyrics, giới hạn tối đa 2 lần tái tạo thẻ mới kèm cooldown 3s.
+   * @param {object} [song]
+   */
+  _handleUnknownMessage(song) {
+    if (this.queue.liveLyricsTimer) {
+      clearTimeout(this.queue.liveLyricsTimer);
+      this.queue.liveLyricsTimer = null;
+    }
+    this.queue.nowPlayingMessage = null;
+
+    if (this.queue.isDestroyed || this.queue.isStopped || !this.queue.currentSong || (song && this.queue.currentSong !== song)) {
+      return;
+    }
+
+    const now = Date.now();
+    const recreateCount = this.queue._cardRecreateCount || 0;
+    const lastRecreateTime = this.queue._lastCardRecreateTime || 0;
+
+    if (recreateCount < 2 && (now - lastRecreateTime >= 3000)) {
+      this.queue._cardRecreateCount = recreateCount + 1;
+      this.queue._lastCardRecreateTime = now;
+
+      setTimeout(async () => {
+        if (this.queue.isDestroyed || this.queue.isStopped || !this.queue.currentSong || (song && this.queue.currentSong !== song)) {
+          return;
+        }
+        if (!this.queue.textChannel) return;
+
+        try {
+          const currentTrack = this.queue.currentSong;
+          const cardPayload = createNowPlayingCard(currentTrack, this.queue);
+          const newMsg = await this.queue.textChannel.send(cardPayload);
+          this.queue.nowPlayingMessage = newMsg;
+          this.queue._lastRenderedChunkIdx = -1;
+          this.queue._lastLyricsEditTime = 0;
+
+          if (this.queue.hasSyncedLyrics && this.queue.cachedSyncedLyrics) {
+            this.scheduleNextLyricUpdate(currentTrack);
+          } else {
+            this.scheduleProgressBarUpdate(currentTrack);
+          }
+        } catch (recreateErr) {
+          console.warn('[DiscordCardRenderer] Lỗi khi tái tạo thẻ Now Playing sau mã 10008:', recreateErr.message);
+        }
+      }, 3000);
+    }
   }
 
   schedulePrefetchLyrics(delayMs = 2000) {
@@ -269,8 +320,7 @@ class DiscordCardRenderer {
         const cardPayload = createNowPlayingCard(this.queue.currentSong, this.queue);
         await this.queue.nowPlayingMessage.edit(cardPayload).catch(editErr => {
           if (editErr?.code === 10008) {
-            this.clearLiveLyrics();
-            this.queue.nowPlayingMessage = null;
+            this._handleUnknownMessage(song);
           }
         });
       }
@@ -368,8 +418,7 @@ class DiscordCardRenderer {
             const cardPayload = createNowPlayingCard(this.queue.currentSong, this.queue);
             await this.queue.nowPlayingMessage.edit(cardPayload).catch(editErr => {
               if (editErr?.code === 10008) {
-                this.clearLiveLyrics();
-                this.queue.nowPlayingMessage = null;
+                this._handleUnknownMessage(song);
               }
             });
           } else {
@@ -407,11 +456,19 @@ class DiscordCardRenderer {
         const isV2 = this.queue.nowPlayingMessage.components?.[0]?.type === 17 || this.queue.nowPlayingMessage.flags?.has?.(32768);
         if (isV2) {
           const cardPayload = createNowPlayingCard(this.queue.currentSong, this.queue);
-          await this.queue.nowPlayingMessage.edit(cardPayload).catch(() => {});
+          await this.queue.nowPlayingMessage.edit(cardPayload).catch(editErr => {
+            if (editErr?.code === 10008) {
+              this._handleUnknownMessage(this.queue.currentSong);
+            }
+          });
         } else {
           const embed = createNowPlayingEmbed(this.queue.currentSong, this.queue);
           const controls = createMusicControls(this.queue);
-          await this.queue.nowPlayingMessage.edit({ embeds: [embed], components: controls }).catch(() => {});
+          await this.queue.nowPlayingMessage.edit({ embeds: [embed], components: controls }).catch(editErr => {
+            if (editErr?.code === 10008) {
+              this._handleUnknownMessage(this.queue.currentSong);
+            }
+          });
         }
       } catch (e) {}
     }, 600);

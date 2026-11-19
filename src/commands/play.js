@@ -77,6 +77,18 @@ module.exports = {
     let query = ctx.isInteraction ? (ctx.options.getString('song') || ctx.options.getString('query')) : args.join(' ');
     query = query ? query.trim() : '';
 
+    // Giải mã urlref:<hash> từ Autocomplete nếu URL bị cắt ngắn do vượt quá 100 ký tự
+    if (query.startsWith('urlref:')) {
+      const cached = global._autocompleteUrlMap?.get(query);
+      if (cached) {
+        if (typeof cached === 'string') {
+          query = cached;
+        } else if (cached.url && (!cached.expiresAt || cached.expiresAt > Date.now())) {
+          query = cached.url;
+        }
+      }
+    }
+
     if (!query) {
       // Nếu đang phát bài hát: Hiển thị ngay bảng điều khiển Now Playing đầy đủ
       if (queue.currentSong) {

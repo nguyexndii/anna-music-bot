@@ -126,7 +126,7 @@ async function saveLyricOffset(trackKey, offsetMs, title = '', artist = '') {
     await LyricOffset.findOneAndUpdate(
       { trackKey },
       { offsetMs: numOffset, title: title || '', artist: artist || '', updatedAt: new Date() },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     const count = await LyricOffset.countDocuments();
@@ -221,7 +221,7 @@ async function savePersistentLyricCache(data, songFingerprint, lookupKeys = []) 
         $set: payload,
         $addToSet: { lookupKeys: { $each: validLookupKeys } }
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   } catch (err) {
     console.error('[LyricCache Write Error]:', err.message);
@@ -255,7 +255,7 @@ async function reportLyricCacheIssue(songFingerprint, userId) {
     const doc = await LyricCache.findOneAndUpdate(
       { songFingerprint },
       { $addToSet: { reportedBy: String(userId) } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!doc) return { success: false, reason: 'NOT_FOUND' };

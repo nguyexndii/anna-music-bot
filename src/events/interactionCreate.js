@@ -46,6 +46,30 @@ function signTunnelUrl(url, secret) {
   return crypto.createHmac('sha256', secret).update(url.trim().replace(/\/$/, '')).digest('hex');
 }
 
+/**
+ * Làm sạch các tham số theo dõi / rác khỏi URL bài hát (si, pp, feature, utm_*)
+ * @param {string} rawUrl
+ * @returns {string}
+ */
+function cleanTrackUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    const toDelete = [];
+    for (const key of parsed.searchParams.keys()) {
+      const lower = key.toLowerCase();
+      if (lower === 'si' || lower === 'pp' || lower === 'feature' || lower.startsWith('utm_')) {
+        toDelete.push(key);
+      }
+    }
+    for (const key of toDelete) {
+      parsed.searchParams.delete(key);
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 const buttonCooldownMap = new Map(); // Chống spam click nút bấm Discord (Next, Pause, v.v.)
 
 /**
@@ -74,8 +98,38 @@ async function handleInteractionCreate(client, interaction) {
         const focusedOption = interaction.options.getFocused(true);
         if (focusedOption.name === 'song') {
           const query = focusedOption.value?.trim();
-          if (!query || query.length < 2 || query.startsWith('http')) {
+          if (!query || query.length < 2) {
             return interaction.respond([]).catch(() => {});
+          }
+
+          // Xử lý Autocomplete cho URL (Làm sạch tham số rác và ánh xạ URL > 100 ký tự)
+          if (query.startsWith('http')) {
+            const cleanUrl = cleanTrackUrl(query);
+            if (cleanUrl.length > 100) {
+              const hash = crypto.createHash('md5').update(cleanUrl).digest('hex');
+              const refKey = `urlref:${hash}`;
+              if (!global._autocompleteUrlMap) {
+                global._autocompleteUrlMap = new Map();
+              }
+              global._autocompleteUrlMap.set(refKey, {
+                url: cleanUrl,
+                expiresAt: Date.now() + 5 * 60 * 1000
+              });
+              const cleanupTimer = setTimeout(() => {
+                global._autocompleteUrlMap?.delete(refKey);
+              }, 5 * 60 * 1000);
+              if (cleanupTimer.unref) cleanupTimer.unref();
+
+              return interaction.respond([{
+                name: refKey,
+                value: refKey
+              }]).catch(() => {});
+            } else {
+              return interaction.respond([{
+                name: cleanUrl,
+                value: cleanUrl
+              }]).catch(() => {});
+            }
           }
           try {
             const { searchMultipleTracks } = require('../utils/musicExtractor');

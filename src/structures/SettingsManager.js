@@ -178,7 +178,7 @@ class SettingsManager {
     GuildSettings.findOneAndUpdate(
       { guildId },
       { $set: { guildId, ...updated } },
-      { upsert: true, setDefaultsOnInsert: true }
+      { upsert: true, setDefaultsOnInsert: true, returnDocument: 'after' }
     ).catch(err => {
       console.warn(`[SettingsManager] Lỗi lưu MongoDB Guild ${guildId}:`, err.message);
     });
@@ -193,7 +193,7 @@ class SettingsManager {
     GuildSettings.findOneAndReplace(
       { guildId },
       { guildId, ...DEFAULT_GUILD_SETTINGS },
-      { upsert: true }
+      { upsert: true, returnDocument: 'after' }
     ).catch(err => {
       console.warn(`[SettingsManager] Lỗi reset MongoDB Guild ${guildId}:`, err.message);
     });

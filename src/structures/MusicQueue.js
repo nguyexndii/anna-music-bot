@@ -65,6 +65,9 @@ class MusicQueue {
     this._isPreemptingLofi = false;
     this._is247Loading = false;
     this.isQueueOnHold = false;
+    this.isStopped = false;
+    this.isDestroyed = false;
+    this._switchingTo247 = false;
     this._bufferingTimeout = null;
     this._lofiRetryCount = 0;
     this.sessionRegion = null;
@@ -135,6 +138,13 @@ class MusicQueue {
 
     this.player.on('error', (error) => {
       this.playbackEngine._clearBufferingWatchdog();
+
+      const isPrematureClose = error?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        Boolean(error?.message && error.message.toLowerCase().includes('premature close'));
+      if (isPrematureClose && (this._switchingTo247 || this.isStopped || this.isDestroyed)) {
+        return;
+      }
+
       console.error(`[AudioPlayer Error] Guild ${this.guild.name}:`, error);
       const is247Lofi = Boolean(this.currentSong?.requestedBy === 'Auto (24/7)' || this.currentSong?.is247);
 
@@ -489,11 +499,14 @@ class MusicQueue {
     this.voiceSessionStartTime = null;
     this.isQueueOnHold = false;
 
+    if (this.player) {
+      this.player.stop(true);
+    }
+
     if (this.currentResource) {
       this.playbackEngine._cleanupResource(this.currentResource);
       this.currentResource = null;
     }
-    this.player.stop(true);
     clearVoiceChannelStatus(this.voiceChannel);
 
     if (this.connection) {
