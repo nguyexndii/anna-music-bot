@@ -1032,8 +1032,9 @@ class QueuePlaybackEngine {
         });
       }
 
-      if (this.currentSong?.requestedBy === 'Auto (24/7)') {
-        setVoiceChannelStatus(this.queue.voiceChannel, '♾️ 24/7 Mode');
+      if (this.currentSong?.requestedBy === 'Auto (24/7)' || this.isCurrentSongLofi()) {
+        const lang = settingsManager.get(this.guild.id)?.language;
+        setVoiceChannelStatus(this.queue.voiceChannel, lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio');
       } else {
         const voiceTitle = (this.currentSong?.title || this.currentSong?.name || 'Đang phát nhạc').trim();
         setVoiceChannelStatus(this.queue.voiceChannel, `🎶 ${voiceTitle}`);
@@ -1400,7 +1401,9 @@ class QueuePlaybackEngine {
         this._cleanupResource(this.currentResource);
         this.currentResource = null;
       }
-      setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
+      const lang = settingsManager.get(this.guild.id)?.language;
+      const lofiStatusText = lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio';
+      setVoiceChannelStatus(activeChannel, lofiStatusText);
       await this._play247BackgroundLofi();
     } else {
       clearVoiceChannelStatus(activeChannel);
@@ -1414,7 +1417,8 @@ class QueuePlaybackEngine {
     if (!this.queue.mode247 || this.currentSong) return;
     try {
       this.queue._is247Loading = true;
-      setVoiceChannelStatus(this.queue.voiceChannel, '♾️ 24/7 Mode');
+      const lang = settingsManager.get(this.guild.id)?.language;
+      setVoiceChannelStatus(this.queue.voiceChannel, lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio');
 
       const LOFI_BLACKLIST_REGEX = /\b(ea7|phonk|trap|vinahouse|nonstop|remix|tiktok|shorts|short|karaoke|lyrics|lyric|vocal|vocals|with\s*vocals|singing|podcast|ft\.|feat\.|parody|meme|8d|nightcore|sped up|bass boosted|car music|sad edit|amv|gaming|workout|gym|rock|metal|rap|hiphop|vpop|khá\s*bảnh|kha\s*banh|mặt\s*lồn|chế|hài|bựa)\b/i;
 
@@ -2171,7 +2175,8 @@ class QueuePlaybackEngine {
 
       const activeChannel = this.queue.voiceManager.getVoiceChannel();
       if (activeChannel) {
-        setVoiceChannelStatus(activeChannel, '♾️ 24/7 Mode');
+        const lang = settingsManager.get(this.guild.id)?.language;
+        setVoiceChannelStatus(activeChannel, lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio');
       }
 
       await this._play247BackgroundLofi();

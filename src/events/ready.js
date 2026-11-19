@@ -75,12 +75,14 @@ async function handleReady(client) {
         await q.connect();
 
         if (session.mode247) {
+          const lang = settingsManager.get(guild.id)?.language;
+          const statusText = lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio';
           logAction('VOICE_STATUS_UPDATE', {
             source: 'ready.js/24x7-recovery',
             channelId: voiceChannel.id,
-            status: '24/7 Mode'
+            status: statusText
           });
-          setVoiceChannelStatus(voiceChannel, '♾️ 24/7 Mode');
+          setVoiceChannelStatus(voiceChannel, statusText);
         }
 
         // Khôi phục bài hát đang nghe dở và danh sách hàng chờ nếu có
