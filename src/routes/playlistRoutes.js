@@ -79,7 +79,8 @@ module.exports = function createPlaylistRoutes(client, auth, routeState) {
       const playlists = await userPlaylistManager.getUserPlaylists(req.user.userId);
       res.json({ success: true, playlists });
     } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
+      console.error('[API Get Playlists Error]:', err);
+      res.status(500).json({ success: false, error: 'Không thể nạp danh sách phát của bạn' });
     }
   });
 

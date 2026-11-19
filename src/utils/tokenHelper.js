@@ -223,15 +223,9 @@ function recordPinFailure(ip, inputPin) {
   const currentCount = (isLockExpired ? 0 : (current?.count || 0)) + 1;
 
   if (currentCount >= 5) {
-    // Khóa IP trong 5 phút
+    // Khóa IP kẻ tấn công trong 5 phút mà không làm ảnh hưởng tới các phiên hợp lệ của người dùng khác
     enforceMapLimit(failedPinAttempts, MAX_FAILED_IP_SIZE);
     failedPinAttempts.set(cleanIp, { count: currentCount, lockedUntil: now + 5 * 60 * 1000 });
-    // Nếu có dấu hiệu tấn công vét cạn, tự động tiêu hủy tất cả các mã PIN 1 lần (isOneTime) đang mở
-    for (const [k, v] of tokenStore.entries()) {
-      if (v && v.isOneTime) {
-        tokenStore.delete(k);
-      }
-    }
     return { locked: true, remainingMinutes: 5, remainingAttempts: 0 };
   }
 
