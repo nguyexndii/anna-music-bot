@@ -124,9 +124,9 @@ class UserPlaylistManager {
   }
 
   /**
-   * Cập nhật thông tin Playlist (Tên, mô tả)
+   * Cập nhật thông tin Playlist (Tên, mô tả, ảnh bìa)
    */
-  async updatePlaylist(userId, playlistId, { name, description }) {
+  async updatePlaylist(userId, playlistId, { name, description, thumbnail }) {
     if (!userId || !playlistId) throw new Error('Thiếu thông tin người dùng hoặc playlistId');
     const cleanName = name ? String(name).trim() : null;
     if (cleanName !== null && !cleanName) throw new Error('Tên playlist không được để trống');
@@ -142,6 +142,9 @@ class UserPlaylistManager {
 
       if (cleanName) pl.name = cleanName.slice(0, 80);
       if (typeof description === 'string') pl.description = description.trim().slice(0, 300);
+      if (thumbnail !== undefined) {
+        pl.thumbnail = thumbnail ? String(thumbnail).trim() : null;
+      }
       pl.updatedAt = new Date();
 
       await doc.save();
@@ -154,6 +157,9 @@ class UserPlaylistManager {
 
       if (cleanName) pl.name = cleanName.slice(0, 80);
       if (typeof description === 'string') pl.description = description.trim().slice(0, 300);
+      if (thumbnail !== undefined) {
+        pl.thumbnail = thumbnail ? String(thumbnail).trim() : null;
+      }
       pl.updatedAt = new Date();
 
       this.fallbackData.set(userId, list);

@@ -94,12 +94,24 @@ module.exports = function createPlaylistRoutes(client, auth, routeState) {
     }
   });
 
-  // 3. Cập nhật playlist (đổi tên / sửa mô tả)
+  // 3. Cập nhật playlist (đổi tên / sửa mô tả / đổi ảnh bìa)
   router.put('/playlists/me/:playlistId', auth.requireAuth, async (req, res) => {
     try {
       const { playlistId } = req.params;
-      const { name, description } = req.body;
-      const updated = await userPlaylistManager.updatePlaylist(req.user.userId, playlistId, { name, description });
+      const { name, description, thumbnail } = req.body;
+
+      // Sanitize thumbnail: cho phép URL hoặc Data URL (base64 image <= 500KB)
+      let cleanThumb = thumbnail;
+      if (typeof thumbnail === 'string') {
+        const trimmed = thumbnail.trim();
+        if (trimmed.startsWith('data:image/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          cleanThumb = trimmed.length <= 500000 ? trimmed : null;
+        } else if (trimmed === '') {
+          cleanThumb = null;
+        }
+      }
+
+      const updated = await userPlaylistManager.updatePlaylist(req.user.userId, playlistId, { name, description, thumbnail: cleanThumb });
       res.json({ success: true, playlist: updated, message: 'Đã cập nhật playlist thành công' });
     } catch (err) {
       res.status(400).json({ success: false, error: err.message });
