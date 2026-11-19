@@ -64,7 +64,9 @@ async function handleReady(client) {
       try {
         const guild = client.guilds.cache.get(session.guildId);
         if (!guild) continue;
-        const voiceChannel = guild.channels.cache.get(session.voiceChannelId);
+        const guildSettings = settingsManager.get(guild.id);
+        const targetVoiceId = guildSettings?.lockedVoiceChannelId || session.voiceChannelId;
+        const voiceChannel = guild.channels.cache.get(targetVoiceId);
         if (!voiceChannel || !voiceChannel.isVoiceBased()) continue;
         const textChannel = session.textChannelId ? guild.channels.cache.get(session.textChannelId) : null;
 
