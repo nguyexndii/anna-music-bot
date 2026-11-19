@@ -36,8 +36,15 @@ module.exports = function createPlayerRoutes(client, auth, routeState) {
   });
 
   // Helper kiểm tra và xác thực kênh Voice đã khóa (lockedVoiceChannelId)
-  async function checkLockedVoice(guildSettings, userVoice, guild, botMember) {
-    if (guildSettings?.lockedVoiceChannelId) {
+  async function checkLockedVoice(guildSettings, userVoice, guild, botMember, isAdmin = false) {
+    if (guildSettings?.lockedVoiceChannelId && !isAdmin) {
+      // Nếu bot đã ở trong một kênh voice và user đang ở cùng kênh voice đó thì luôn cho phép
+      const queue = client.musicManager ? client.musicManager.get(guild.id) : null;
+      const botVoiceId = queue?.voiceChannel?.id || queue?.voiceChannelId || guild.members.me?.voice?.channelId;
+      if (botVoiceId && userVoice.id === botVoiceId) {
+        return { allowed: true, targetChannel: userVoice };
+      }
+
       if (userVoice.id !== guildSettings.lockedVoiceChannelId) {
         return {
           allowed: false,

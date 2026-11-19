@@ -65,19 +65,35 @@ module.exports = function createGuildRoutes(client, auth, routeState) {
     }
 
     const member = guild.members.cache.get(user.userId) || await guild.members.fetch(user.userId).catch(() => null);
-    const userVoice = member?.voice?.channel;
+    const voiceState = guild.voiceStates?.cache?.get(user.userId);
+    const userVoiceChannelId = voiceState?.channelId || member?.voice?.channelId || null;
+    let userVoice = member?.voice?.channel || null;
+    if (!userVoice && userVoiceChannelId) {
+      userVoice = guild.channels.cache.get(userVoiceChannelId) || await guild.channels.fetch(userVoiceChannelId).catch(() => null);
+    }
+
     const queue = client.musicManager ? client.musicManager.get(user.guildId) : null;
-    const botVoice = queue?.voiceChannel || guild.members.me?.voice?.channel;
+    const botVoice = queue?.voiceChannel || guild.members.me?.voice?.channel || null;
+    const botVoiceChannelId = queue?.voiceChannel?.id || queue?.voiceChannelId || guild.members.me?.voice?.channelId || null;
     const guildSettings = settingsManager.get(user.guildId);
     const isAdmin = await auth.checkIsAdmin(user.guildId, user.userId);
     const isDJ = await auth.checkIsManager(user.guildId, user.userId);
 
     // Kiểm tra thực tế xem User có đang ngồi trong kênh Voice trên Discord hay không
-    const isInVoice = Boolean(userVoice);
-    const isLocked = Boolean(guildSettings.lockedVoiceChannelId);
-    const isSameVoice = isLocked 
-      ? Boolean(userVoice && userVoice.id === guildSettings.lockedVoiceChannelId)
-      : Boolean(userVoice && (!botVoice || userVoice.id === botVoice.id));
+    const isInVoice = Boolean(userVoiceChannelId);
+    let isSameVoice = false;
+    if (isInVoice) {
+      if (botVoiceChannelId) {
+        // Bot đã vào phòng thoại: Chỉ cần User và Bot ở cùng phòng là luôn ĐẠT (kể cả có lockedVoiceChannelId cũ)
+        isSameVoice = (userVoiceChannelId === botVoiceChannelId);
+      } else if (guildSettings.lockedVoiceChannelId) {
+        // Bot chưa vào phòng thoại và máy chủ có khóa phòng: User phải ở phòng khóa (hoặc là Admin)
+        isSameVoice = (userVoiceChannelId === guildSettings.lockedVoiceChannelId) || isAdmin;
+      } else {
+        // Bot chưa vào phòng thoại và máy chủ tự do: Bất kỳ phòng nào đều hợp lệ
+        isSameVoice = true;
+      }
+    }
 
     // Cấp Session Token 24 tiếng lưu vào thiết bị
     const sessionToken = user.sessionToken || createSessionToken(user, 24);
@@ -183,10 +199,16 @@ module.exports = function createGuildRoutes(client, auth, routeState) {
     const currentTrack = queue?.currentSong;
     const activeWebUsers = routeState.getActiveWebUsers(guildId);
 
-    const callerVoice = req.member?.voice?.channel;
+    const callerVoiceState = guild.voiceStates?.cache?.get(caller?.userId);
+    const callerVoiceChannelId = callerVoiceState?.channelId || req.member?.voice?.channelId || null;
+    let callerVoice = req.member?.voice?.channel || null;
+    if (!callerVoice && callerVoiceChannelId) {
+      callerVoice = guild.channels.cache.get(callerVoiceChannelId) || await guild.channels.fetch(callerVoiceChannelId).catch(() => null);
+    }
     const isCallerAdmin = await auth.checkIsAdmin(guildId, caller?.userId);
     const isCallerDJ = await auth.checkIsManager(guildId, caller?.userId);
-    const inSameVoice = Boolean(callerVoice && voiceChannel && callerVoice.id === voiceChannel.id);
+    const botVoiceId = voiceChannel?.id || queue?.voiceChannel?.id || guild.members.me?.voice?.channelId || null;
+    const inSameVoice = Boolean(callerVoiceChannelId && botVoiceId && callerVoiceChannelId === botVoiceId);
 
     return res.json({
       success: true,
@@ -203,7 +225,9 @@ module.exports = function createGuildRoutes(client, auth, routeState) {
         isAdmin: isCallerAdmin,
         isDJ: isCallerDJ,
         inSameVoice,
-        userId: caller?.userId
+        isInVoice: Boolean(callerVoiceChannelId),
+        userId: caller?.userId,
+        userVoice: callerVoice ? { id: callerVoice.id, name: callerVoice.name } : null
       },
       activeWebUsers,
       voiceMembers,
