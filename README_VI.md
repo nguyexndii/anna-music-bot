@@ -1,6 +1,6 @@
 <div align="center">
   <h1>ANNA MUSIC BOT &amp; WEB PLAYER</h1>
-  <p><b>Hệ Sinh Thái Phát Nhạc Discord Hiệu Năng Cao, Bảng Điều Khiển Web Vantage Monochrome và Bộ Máy Đồng Bộ Lời Bài Hát 4 Tầng</b></p>
+  <p><b>Hệ Sinh Thái Phát Nhạc Discord Hiệu Năng Cao, Kiến Trúc Module Hóa, Bảng Điều Khiển Web Vantage Monochrome và Bộ Máy Đồng Bộ Lời Bài Hát 4 Tầng</b></p>
   <p>
     <b>Tác giả: Diiexe</b> | 
     <a href="./README.md"><b>English Documentation</b></a> | 
@@ -12,7 +12,7 @@
 
 ## Mục Lục
 1. [Tổng Quan Dự Án](#tổng-quan-dự-án)
-2. [Kiến Trúc Kỹ Thuật](#kiến-trúc-kỹ-thuật)
+2. [Kiến Trúc Kỹ Thuật &amp; Sơ Đồ Cấu Trúc](#kiến-trúc-kỹ-thuật--sơ-đồ-cấu-trúc)
 3. [Các Năng Lực Nổi Bật](#các-năng-lực-nổi-bật)
 4. [Hệ Thống Lời Bài Hát Đồng Bộ 4 Tầng](#hệ-thống-lời-bài-hát-đồng-bộ-4-tầng)
 5. [Danh Sách Lệnh Discord (Slash Commands)](#danh-sách-lệnh-discord-slash-commands)
@@ -30,11 +30,13 @@
 
 Anna Music Bot là nền tảng phát nhạc trực tuyến chuyên dụng cho các cộng đồng máy chủ Discord, được xây dựng trên nền tảng Node.js 20 và Discord.js v14. Hệ thống cung cấp khả năng phát âm thanh độ trễ thấp, đồng bộ lời bài hát từng mili-giây, cơ chế lưu đệm âm thanh cục bộ trên ổ cứng SSD và bảng điều khiển trực quan qua giao diện web thời gian thực (Vantage Monochrome UI).
 
-Hệ thống được thiết kế và tinh chỉnh chuyên sâu cho môi trường máy chủ ảo VPS cấu hình 1 CPU Core, sử dụng kỹ thuật điều phối luồng âm thanh thông minh, cơ chế ngắt mạch an toàn (Circuit Breaker) và tính năng tải trước không độ trễ (0ms Preload) để loại bỏ hoàn toàn hiện tượng giật cục âm thanh.
+Hệ thống được thiết kế và tinh chỉnh chuyên sâu cho môi trường máy chủ ảo VPS cấu hình 1 CPU Core, sử dụng kỹ thuật điều phối luồng âm thanh thông minh, cơ chế ngắt mạch an toàn (Circuit Breaker), cơ chế bảo vệ kết nối thoại (Voice Readiness Guard) và tính năng tải trước không độ trễ (0ms Preload) để loại bỏ hoàn toàn hiện tượng nghẽn luồng hay giật cục âm thanh.
 
 ---
 
-## Kiến Trúc Kỹ Thuật
+## Kiến Trúc Kỹ Thuật & Sơ Đồ Cấu Trúc
+
+### Sơ Đồ Luồng Hoạt Động Cấp Cao
 
 ```text
 [ Người Dùng Discord ]
@@ -43,53 +45,111 @@ Hệ thống được thiết kế và tinh chỉnh chuyên sâu cho môi trư�
 [ Discord Gateway / Slash Commands ] <---> [ Discord Voice Gateway (libsodium) ]
        |                                                    ^
        v                                                    |
-[ Bộ Điều Phối Lệnh & Phân Quyền ]                          |
+[ Bộ Điều Phối Lệnh & Sự Kiện ]                             |
        |                                                    |
        v                                                    |
-[ MusicQueue Manager ] ---> [ Bộ Trích Xuất Âm Thanh ] -----+
+[ MusicQueue Engine ] ---> [ VoiceConnectionManager & Guard ]
        |                           |
        |                           +---> [ Bộ Nhớ Đệm SSD Cục Bộ (2GB LRU) ]
        |                           +---> [ Đường Ống yt-dlp / FFmpeg (-ss / -t) ]
        |                           +---> [ API Cắt Đoạn MV SponsorBlock ]
        |
+       +---> [ Các Nhà Cung Cấp Âm Thanh Module Hóa ]
+       |           +---> Trích xuất YouTube
+       |           +---> Trích xuất Spotify (Phạt lũy tiến)
+       |           +---> Trích xuất Apple Music
+       |           +---> Bộ điều phối Semaphore giới hạn tải CPU
+       |
        +---> [ Bộ Máy Lời Bài Hát 4 Tầng ]
-       |           |
        |           +---> Tầng 1: Phụ Đề Gốc YouTube CC (Đa ngôn ngữ chuẩn)
        |           +---> Tầng 2: Zing MP3 API (Phản hồi siêu tốc cho nhạc Việt)
        |           +---> Tầng 3: Cơ Sở Dữ Liệu Mở LRCLIB (Quốc tế / Spotify)
        |           +---> Tầng 4: Python Microservice (syncedlyrics / Musixmatch / NetEase)
        |
-       +---> [ Express Web Server (Port 3000) ] <---> [ Cloudflare Tunnel ] <---> [ Web Player UI ]
+       +---> [ Express Web Server Module Hóa (Cổng 3000) ] <---> [ Cloudflare Tunnel ] <---> [ Web Player UI ]
+       |           +---> Định tuyến Player, Guild, Playlist, Lyrics & Middleware Xác Thực
        |
-       +---> [ MongoDB Atlas ] (Cài Đặt Máy Chủ, Playlist, Bài Hát Yêu Thích, Lịch Sử)
+       +---> [ MongoDB Atlas ] (Cài Đặt Máy Chủ, Playlist, Bài Hát Yêu Thích, Bộ Đệm Lời)
+```
+
+### Cấu Trúc Thư Mục Dự Án
+
+```text
+anna-music-bot/
+├── data/                   # Bộ nhớ đệm SSD, file phiên và cookie lưu trữ
+├── lyrics-service/         # Microservice Python FastAPI cào lời bài hát đồng bộ
+├── src/
+│   ├── commands/           # Các lệnh Slash Command (/play, /queue, /web, /join, /volume, v.v.)
+│   ├── database/           # Mongoose schemas & Trình quản lý kết nối MongoDB
+│   │   └── models/         # FavoriteSong, GuildSettings, LyricCache, UserPlaylist
+│   ├── events/             # Các trình xử lý sự kiện Discord module hóa
+│   │   ├── ready.js                # Khởi động bot, khóa kênh thoại & thiết lập presence
+│   │   ├── interactionCreate.js    # Điều phối Slash Command & tương tác nút bấm
+│   │   ├── voiceStateUpdate.js     # Theo dõi chuyển kênh thoại & tự động ngắt kết nối
+│   │   ├── guildEvents.js          # Tham gia/rời máy chủ & dọn dẹp cache
+│   │   └── messageEvents.js        # Xử lý tin nhắn dự phòng
+│   ├── providers/          # Bộ trích xuất âm thanh và nguồn lời bài hát chuyên biệt
+│   │   ├── audio/          # YoutubeExtractor, SpotifyExtractor, AppleMusicExtractor, SemaphoreManager
+│   │   └── lyrics/         # LrclibProvider, ZingMp3Provider, YoutubeCcProvider, lyricsTextUtils
+│   ├── routes/             # Bộ định tuyến REST API Express module hóa
+│   │   ├── middlewares/    # authMiddleware (Xác thực token HMAC & bảo vệ brute-force mã PIN)
+│   │   ├── guildRoutes.js          # Cài đặt máy chủ & đồng bộ trạng thái
+│   │   ├── lyricsRoutes.js         # API tra cứu lời bài hát đa tầng
+│   │   ├── playerRoutes.js         # Các lệnh điều khiển phát nhạc (play, pause, skip, seek, v.v.)
+│   │   ├── playlistRoutes.js       # CRUD danh sách phát & API ảnh bìa Bento
+│   │   └── routeState.js           # Trạng thái dùng chung giữa các router
+│   ├── structures/         # Các cỗ máy điều phối hàng đợi và phát nhạc
+│   │   ├── queue/          # QueuePlaybackEngine, DiscordCardRenderer, VoiceConnectionManager
+│   │   ├── MusicQueue.js           # Bộ điều phối chính kết nối các engine thành phần
+│   │   ├── SettingsManager.js      # Bộ đệm và lưu trữ cài đặt máy chủ
+│   │   └── UserPlaylistManager.js  # Quản lý danh sách phát và bài hát yêu thích người dùng
+│   ├── utils/              # Bộ tạo Embed, hệ thống Emoji tùy chỉnh, công cụ tìm kiếm
+│   ├── config.js           # Cấu hình biến môi trường và hằng số hệ thống
+│   ├── deploy-commands.js  # Script đăng ký lệnh Slash Command lên Discord API
+│   └── index.js            # Điểm khởi chạy ứng dụng Bot và máy chủ HTTP REST
+├── package.json
+└── README.md
 ```
 
 ---
 
 ## Các Năng Lực Nổi Bật
 
-### 1. Đường Ống Âm Thanh Hiệu Suất Cao
-- Tải trước không độ trễ (0ms Preload): Tự động nạp trước luồng âm thanh và lời bài hát của bài kế tiếp vào bộ nhớ RAM trước khi bài hiện tại kết thúc 18 giây.
-- Lưu đệm cục bộ trên ổ cứng SSD (Local Audio Cache): Tự động lưu các bài hát nghe nhiều vào ổ cứng máy chủ theo thuật toán LRU với dung lượng tối đa 2GB, bỏ qua thời gian tải từ YouTube.
-- Giới hạn tải cho VPS 1-core: Sử dụng Semaphore kiểm soát số lượng luồng tải đồng thời, ngăn chặn việc CPU bị chiếm dụng 100%.
-- Ngắt mạch tự động (Circuit Breaker): Tự động phát hiện luồng phát âm thanh bị nghẽn và chuyển đổi nguồn dự phòng trong vòng 3 giây.
+### 1. Đường Ống Âm Thanh Hiệu Suất Cao & Voice Readiness Guard
+- **Cơ chế bảo vệ kết nối thoại (Voice Readiness Guard)**: Bắt buộc kết nối đạt trạng thái `VoiceConnectionStatus.Ready` trước khi liên kết trình phát (`subscribe`) và bơm luồng âm thanh, triệt tiêu hoàn toàn lỗi bot bị mất tiếng khi người dùng chuyển bài liên tục hoặc socket UDP đang bắt tay lại.
+- **Tải trước không độ trễ (0ms Preload)**: Tự động nạp trước luồng âm thanh và lời bài hát của bài kế tiếp vào bộ nhớ RAM trước khi bài hiện tại kết thúc 18 giây.
+- **Lưu đệm cục bộ trên ổ cứng SSD (Local Audio Cache)**: Tự động lưu các bài hát nghe nhiều vào ổ cứng máy chủ theo thuật toán LRU với dung lượng tối đa 2GB, bỏ qua thời gian tải từ YouTube.
+- **Giới hạn tải cho VPS 1-core**: Sử dụng Semaphore kiểm soát số lượng luồng tải đồng thời, ngăn chặn việc CPU bị chiếm dụng 100%.
+- **Ngắt mạch tự động (Circuit Breaker)**: Tự động phát hiện luồng phát âm thanh bị nghẽn và chuyển đổi nguồn dự phòng trong vòng 3 giây.
 
 ### 2. Tự Động Cắt Đoạn Kịch Bản MV & Đồng Bộ Timeline
 - Tích hợp cơ sở dữ liệu SponsorBlock `music_offtopic` để tự động cắt bỏ từ 30 giây đến hơn 2 phút cảnh dạo đầu, tiểu phẩm kịch bản và danh đề kết thúc của các Video ca nhạc.
 - Cắt trực tiếp bằng FFmpeg: Truyền trực tiếp tham số `-ss` và `-t` vào tiến trình giải mã luồng, bài hát cất tiếng ngay lập tức tại nốt nhạc đầu tiên.
 - Tự động căn chỉnh timeline phụ đề: Trừ lùi mốc thời gian phụ đề YouTube CC tương ứng với đoạn mở đầu đã cắt, đảm bảo lời hát khớp 100% với tiếng nhạc.
 
-### 3. Giao Diện Web Điều Khiển Vantage Monochrome
+### 3. Kiến Trúc Module Hóa (Độc Lập Trách Nhiệm)
+- Phân tách hoàn toàn mã nguồn thành các module độc lập: Router API, Sự kiện Discord Gateway, Bộ trích xuất âm thanh, Engine lời nhạc, và Cỗ máy điều phối phát nhạc.
+- Đảm bảo tính chịu lỗi cao: Bất kỳ sự cố nào ở một nhà cung cấp phụ trợ đều được cô lập và không làm ảnh hưởng đến tiến trình phát nhạc chính.
+
+### 4. Hệ Thống Emoji Frosted Glass Tùy Chỉnh & Discord Components v2
+- Tích hợp đồng bộ hệ thống Application Emoji custom chuẩn Frosted Glass (`<:tag:id>`) với cơ chế tự động fallback trên toàn bộ thẻ thông tin Embed, nút bấm điều khiển và tin nhắn thông báo.
+- Tone màu nền tối đồng nhất sang trọng (`0x2B2D31`) cùng bố cục các hàng nút hành động tinh gọn.
+
+### 5. Ưu Tiên Kênh Voice Khóa Cố Định & Tự Động Kết Nối Lại
+- Tự động duy trì và ưu tiên kênh thoại cố định đã khóa của máy chủ (`lockedVoiceChannelId`), ngăn ngừa hiện tượng bot bị trôi phiên khi khởi động lại.
+- Đồng bộ phiên thông minh: Tự động nhận diện và đồng hành cùng phòng thoại của người dùng khi có tương tác hợp lệ.
+
+### 6. Bảng Điều Khiển Web Vantage Monochrome & Ảnh Bìa Bento
 - Bảng điều khiển kép thời gian thực (Dual-Panel): Giao diện tối giản hiện đại bằng React 18 và Tailwind CSS, hiển thị mượt mà trên cả máy tính và điện thoại.
 - Xác thực an toàn bằng mã PIN & Magic Token: Sử dụng mã PIN 6 số dùng một lần (hết hạn sau 2 phút) và mã phiên HMAC-SHA256 (hiệu lực 24 giờ).
+- Ảnh bìa Playlist kiểu Bento Grid: Tự động ghép 4 ảnh bìa dạng Bento Grid hoặc hỗ trợ người dùng tự tải URL ảnh bìa tùy chỉnh.
 - Cơ chế chống vét cạn mã PIN (Anti-Brute-Force): Tự động khóa địa chỉ IP trong 5 phút nếu nhập sai quá 5 lần liên tiếp.
-- Quản lý hàng chờ thông minh: Kéo thả sắp xếp bài hát trong hàng đợi, mở menu ngữ cảnh chuột phải và tạo playlist cá nhân trực tiếp trên web.
 
-### 4. Đài Phát Thanh Lofi 24/7
+### 7. Đài Phát Thanh Lofi 24/7
 - Tự động chuyển tiếp mượt mà sang các bản nhạc lofi thư giãn không lời khi hàng đợi bài hát kết thúc.
 - Cơ chế nhường chỗ tức thì: Khi người dùng thêm bài hát mới vào hàng đợi, bot lập tức chuyển sang bài của người dùng mà không làm ngắt kết nối kênh voice.
 
-### 5. Cô Lập Đa Máy Chủ & Phân Quyền Chặt Chẽ
+### 8. Cô Lập Đa Máy Chủ & Phân Quyền Chặt Chẽ
 - Cô lập hoàn toàn hàng chờ giữa các máy chủ Discord khác nhau, ngăn chặn can thiệp chéo tài nguyên.
 - Phân cấp quyền hạn nghiêm ngặt: Chủ Máy Chủ > Quản Trị Viên > Vai Trò DJ > Thành Viên Thường.
 
@@ -99,23 +159,23 @@ Hệ thống được thiết kế và tinh chỉnh chuyên sâu cho môi trư�
 
 Bot sử dụng thuật toán tìm kiếm đa tầng kết hợp so khớp thông minh:
 
-1. Tầng 1: Phụ Đề Chính Thức YouTube CC
+1. **Tầng 1: Phụ Đề Chính Thức YouTube CC**
    - Ưu tiên kiểm tra và bóc tách phụ đề gốc do nghệ sĩ hoặc kênh phát hành cung cấp (giữ nguyên chữ tiếng Hàn Hangul, tiếng Nhật Kanji/Kana, v.v.).
    - Trả lời tức thì với độ trễ 0ms.
 
-2. Tầng 2: Hệ Thống Lời Zing MP3
+2. **Tầng 2: Hệ Thống Lời Zing MP3**
    - Tìm kiếm với độ trễ cực thấp (100ms - 250ms) cho các bài hát V-Pop và nhạc trẻ Việt Nam.
    - Hỗ trợ định dạng lời chạy từng từ (Word-by-word Karaoke).
 
-3. Tầng 3: Cơ Sở Dữ Liệu Mở LRCLIB
+3. **Tầng 3: Cơ Sở Dữ Liệu Mở LRCLIB**
    - Thư viện dữ liệu cộng đồng cho các bài hát quốc tế, Spotify và Apple Music.
 
-4. Tầng 4: Microservice Python Dự Phòng (syncedlyrics)
+4. **Tầng 4: Microservice Python Dự Phòng (syncedlyrics)**
    - Chạy độc lập trên cổng nội bộ `127.0.0.1:8787` thông qua framework FastAPI.
    - Tìm kiếm nâng cao trên Musixmatch và NetEase cho các bài hát quốc tế hiếm hoặc nhạc Anime.
    - Thư viện mã nguồn mở: [syncedlyrics](https://github.com/moehmeni/syncedlyrics).
 
-- Thuật toán phát hiện khoảng trống lời hát (Gap Detection): Khi lời bài hát bị thiếu một đoạn dài từ 22 giây trở lên (ví dụ bài hát có đoạn rap của khách mời nhưng bị bỏ sót), hệ thống tự động loại bỏ và chọn ứng viên hoàn chỉnh hơn.
+- **Thuật toán phát hiện khoảng trống lời hát (Gap Detection)**: Khi lời bài hát bị thiếu một đoạn dài từ 22 giây trở lên (ví dụ bài hát có đoạn rap của khách mời nhưng bị bỏ sót), hệ thống tự động loại bỏ và chọn ứng viên hoàn chỉnh hơn.
 
 ---
 
@@ -167,6 +227,9 @@ Hệ thống cung cấp các cổng API cho giao diện Web Player:
   - Tham số `?fresh=1`: Bỏ qua bộ nhớ RAM cache và đọc trực tiếp từ MongoDB.
 - `POST /api/guilds/:guildId/play`: Đặt bài hát hoặc playlist mới từ thanh tìm kiếm trên Web.
 - `POST /api/guilds/:guildId/action`: Thực thi các lệnh điều khiển (`pause`, `resume`, `skip`, `previous`, `seek`, `volume`, `loop`, `shuffle`, `toggleFavorite`, `toggleLofiMode`).
+- `GET /api/guilds/:guildId/playlists`: Lấy danh sách phát của người dùng theo máy chủ.
+- `POST /api/guilds/:guildId/playlists`: Tạo danh sách phát cá nhân mới.
+- `PUT /api/guilds/:guildId/playlists/:id/cover`: Cập nhật ảnh bìa tùy chỉnh hoặc chọn từ danh sách bài hát.
 - `GET /api/search?q=<query>`: API tìm kiếm bài hát trực tiếp (có rate-limit chống quá tải).
 - `GET /api/lyrics?title=<t>&artist=<a>`: API tra cứu lời bài hát đa tầng.
 - `GET /api/health`: Kiểm tra sức khỏe hệ thống phục vụ giám sát và telemetry.
@@ -269,7 +332,7 @@ pm2 startup
 
 ### 3. Kiểm Tra Đồng Bộ Dữ Liệu
 - Kiểm tra chuỗi kết nối MongoDB Atlas trong `.env`.
-- Đảm bảo các collection `guildsettings`, `favoritesongs`, `userplaylists` đã được đánh index đầy đủ.
+- Đảm bảo các collection `guildsettings`, `favoritesongs`, `userplaylists`, và `lyriccaches` đã được đánh index đầy đủ.
 
 ---
 
