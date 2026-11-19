@@ -425,6 +425,24 @@ function createNowPlayingCard(song, queue) {
     ? (isEn ? `Next: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} tracks in queue)` : `Tiếp theo: ${formatMarkdownTitle(userSongs[0].title, 40)} (+${userSongsCount} bài trong hàng chờ)`)
     : (isEn ? 'No more songs in the queue' : 'Hàng chờ hiện đang trống');
 
+  let webPlayerUrl = config.webUrl || 'https://anna-music-bot-ui.pages.dev';
+  try {
+    const { getActiveTunnelUrl } = require('./statusNotifier');
+    const { signTunnelUrl } = require('./tokenHelper');
+    const tunnelUrl = getActiveTunnelUrl();
+    const gid = queue?.guild?.id;
+    const tunnelSig = tunnelUrl && config.webJwtSecret ? signTunnelUrl(tunnelUrl, config.webJwtSecret) : '';
+    const params = [];
+    if (gid) params.push(`guild=${gid}`);
+    if (tunnelUrl) {
+      params.push(`tunnel=${encodeURIComponent(tunnelUrl)}`);
+      if (tunnelSig) params.push(`tsig=${tunnelSig}`);
+    }
+    if (params.length > 0) {
+      webPlayerUrl = `${webPlayerUrl}/?${params.join('&')}`;
+    }
+  } catch (_) {}
+
   // 1. Header & Lời bài hát: Gộp lời bài hát vào trong Section để lấp đầy khoảng trống cạnh Thumbnail
   const trimBadge = (song?.skippedIntroSec > 0)
     ? (isEn ? `\n-# ✂️ Automatically skipped ${song.skippedIntroSec}s of intro` : `\n-# ✂️ Đã tự động bỏ qua ${song.skippedIntroSec}s kịch mở đầu`)
@@ -451,8 +469,8 @@ function createNowPlayingCard(song, queue) {
   } else {
     // Nếu có Lời bài hát, gộp trực tiếp vào Section ngay dưới URL bài hát
     const sectionBody = lyricsBlock
-      ? `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}\n${lyricsBlock}`
-      : `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n**[${safeTitle}](${songUrl})**${trimBadge}`;
+      ? `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n[**${safeTitle}**](${songUrl})${trimBadge}\n${lyricsBlock}`
+      : `### ${isEn ? 'Now Playing — Requested by:' : 'Đang phát — Yêu cầu bởi:'} ${requesterDisplay}\n[**${safeTitle}**](${songUrl})${trimBadge}`;
 
     headerComponent = {
       type: 9, // Section
@@ -526,8 +544,8 @@ function createNowPlayingCard(song, queue) {
       {
         type: 10,
         content: isEn
-          ? `-# Manage your music more professionally at Web Player: [Click here!](https://anna-music-bot-ui.pages.dev)\n-# ${nextSongText}`
-          : `-# Quản lý âm nhạc chuyên nghiệp hơn tại Web Player: [Nhấn vào đây!](https://anna-music-bot-ui.pages.dev)\n-# ${nextSongText}`
+          ? `-# Manage your music more professionally at Web Player: [Click here!](${webPlayerUrl})\n-# ${nextSongText}`
+          : `-# Quản lý âm nhạc chuyên nghiệp hơn tại Web Player: [Nhấn vào đây!](${webPlayerUrl})\n-# ${nextSongText}`
       }
     ]
   };
