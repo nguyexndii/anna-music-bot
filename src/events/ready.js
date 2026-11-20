@@ -114,9 +114,12 @@ async function handleReady(client) {
     console.warn('[Session Sync Error]:', syncErr.message);
   }
 
-  // 🧹 Định kỳ dọn dẹp bộ nhớ RAM và giám sát tiến trình mỗi 5 phút
+  // 🧹 Định kỳ dọn dẹp bộ nhớ RAM và giám sát tiến trình mỗi 3 phút
   setInterval(() => {
     try {
+      const memBefore = process.memoryUsage();
+      const heapMBBefore = Math.round(memBefore.heapUsed / 1024 / 1024);
+
       if (global.gc) {
         let anyPlaying = false;
         if (musicManager && musicManager.queues) {
@@ -127,7 +130,8 @@ async function handleReady(client) {
             }
           }
         }
-        if (!anyPlaying) {
+        // Luôn chạy GC nếu heap vượt quá 180MB (chống tích tụ tràn bộ nhớ 512MB) hoặc khi phòng nghỉ
+        if (!anyPlaying || heapMBBefore > 180) {
           global.gc();
         }
       }
@@ -136,7 +140,7 @@ async function handleReady(client) {
       const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
       console.log(`[Memory Monitor] RAM Sử dụng: RSS=${rssMB}MB | HeapUsed=${heapMB}MB`);
     } catch (e) {}
-  }, 5 * 60 * 1000);
+  }, 3 * 60 * 1000);
 
   console.log('✨ Anna Music Bot đã sẵn sàng nhận lệnh 24/7!');
 }

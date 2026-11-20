@@ -365,10 +365,20 @@ class QueuePlaybackEngine {
   }
 
   _cleanupResource(resource) {
-    if (resource && typeof resource.destroy === 'function') {
+    if (!resource) return;
+    if (typeof resource.destroy === 'function') {
       try {
         resource.destroy();
       } catch (e) {}
+    }
+    if (resource.playStream && typeof resource.playStream.destroy === 'function') {
+      try { resource.playStream.destroy(); } catch (e) {}
+    }
+    if (resource.volume && typeof resource.volume.destroy === 'function') {
+      try { resource.volume.destroy(); } catch (e) {}
+    }
+    if (resource.readable && typeof resource.readable.destroy === 'function') {
+      try { resource.readable.destroy(); } catch (e) {}
     }
   }
 
@@ -1206,6 +1216,9 @@ class QueuePlaybackEngine {
     if (this.currentResource) {
       this._cleanupResource(this.currentResource);
       this.currentResource = null;
+    }
+    if (global.gc) {
+      try { global.gc(); } catch (e) {}
     }
 
     const activeChannel = this.queue.voiceManager.getVoiceChannel();
