@@ -1427,7 +1427,7 @@ class QueuePlaybackEngine {
 
   async _play247BackgroundLofi() {
     this.queue.cardRenderer.clearLiveLyrics();
-    if (!this.queue.mode247 || this.currentSong) return;
+    if (!this.queue.mode247 || this.currentSong || this.queue._is247Loading) return;
     try {
       this.queue._is247Loading = true;
       const lang = settingsManager.get(this.guild.id)?.language;

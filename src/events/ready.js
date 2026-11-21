@@ -71,40 +71,46 @@ async function handleReady(client) {
         const textChannel = session.textChannelId ? guild.channels.cache.get(session.textChannelId) : null;
 
         console.log(`[Auto-Recovery] Đang tự động kết nối lại phòng: ${voiceChannel.name} tại máy chủ ${guild.name}...`);
+        const savedSongs = Array.isArray(session.songs) ? session.songs.filter(Boolean).map(s => ({ ...s })) : [];
+        const savedCurrent = session.currentSong ? { ...session.currentSong } : null;
+        const positionSec = Number(session.position) || 0;
+
         const q = musicManager.getOrCreate(guild, textChannel, voiceChannel);
-        await q.connect();
+        q._isRecoveringSession = true;
 
-        if (session.mode247) {
-          const lang = settingsManager.get(guild.id)?.language;
-          const statusText = lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio';
-          logAction('VOICE_STATUS_UPDATE', {
-            source: 'ready.js/24x7-recovery',
-            channelId: voiceChannel.id,
-            status: statusText
-          });
-          setVoiceChannelStatus(voiceChannel, statusText);
-        }
-
-        // Khôi phục bài hát đang nghe dở và danh sách hàng chờ nếu có
-        const savedSongs = Array.isArray(session.songs) ? session.songs.filter(Boolean) : [];
-        const savedCurrent = session.currentSong || null;
-        if (savedCurrent || savedSongs.length > 0) {
-          console.log(`[Auto-Recovery] Khôi phục hàng chờ (${savedSongs.length} bài) cho máy chủ ${guild.name}`);
-          q.songs = [...savedSongs];
-          if (savedCurrent) {
-            const isLofi = Boolean(savedCurrent.is247 || savedCurrent.requestedBy === 'Auto (24/7)');
-            const positionSec = Number(session.position) || 0;
-            const durSec = savedCurrent.duration ? parseDurationToSeconds(savedCurrent.duration) : 0;
-            if (!isLofi && positionSec > 5 && (!durSec || positionSec < durSec - 5)) {
-              console.log(`[Auto-Recovery] Phục hồi vị trí phát tiếp ở giây thứ ${positionSec}s cho bài "${savedCurrent.title}"`);
-              savedCurrent.initialSeekSeconds = positionSec;
+        try {
+          if (savedCurrent || savedSongs.length > 0) {
+            console.log(`[Auto-Recovery] Khôi phục hàng chờ (${savedSongs.length} bài) cho máy chủ ${guild.name}`);
+            q.songs = [...savedSongs];
+            if (savedCurrent) {
+              const isLofi = Boolean(savedCurrent.is247 || savedCurrent.requestedBy === 'Auto (24/7)');
+              const durSec = savedCurrent.duration ? parseDurationToSeconds(savedCurrent.duration) : 0;
+              if (!isLofi && positionSec > 5 && (!durSec || positionSec < durSec - 5)) {
+                console.log(`[Auto-Recovery] Phục hồi vị trí phát tiếp ở giây thứ ${positionSec}s cho bài "${savedCurrent.title}"`);
+                savedCurrent.initialSeekSeconds = positionSec;
+              }
+              q.songs.unshift(savedCurrent);
             }
-            q.songs.unshift(savedCurrent);
           }
-          await q.playNext();
-          q.enrichMissingThumbnails?.().catch(() => {});
-        } else if (session.mode247) {
-          await q._play247BackgroundLofi();
+
+          await q.connect();
+
+          if (q.songs.length > 0) {
+            await q.playNext();
+            q.enrichMissingThumbnails?.().catch(() => {});
+          } else if (session.mode247) {
+            const lang = settingsManager.get(guild.id)?.language;
+            const statusText = lang === 'en' ? '♾️ 24/7 Lofi Mode' : '♾️ 24/7 Lofi Radio';
+            logAction('VOICE_STATUS_UPDATE', {
+              source: 'ready.js/24x7-recovery',
+              channelId: voiceChannel.id,
+              status: statusText
+            });
+            setVoiceChannelStatus(voiceChannel, statusText);
+            await q._play247BackgroundLofi();
+          }
+        } finally {
+          q._isRecoveringSession = false;
         }
       } catch (recErr) {
         console.warn(`[Auto-Recovery Error for Guild ${session.guildId}]:`, recErr.message);

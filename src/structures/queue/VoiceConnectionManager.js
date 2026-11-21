@@ -158,7 +158,9 @@ class VoiceConnectionManager {
       if (this.queue.player && this.connection) {
         this.connection.subscribe(this.queue.player);
       }
-      this.queue._saveSessionState();
+      if (!this.queue._isRecoveringSession) {
+        this.queue._saveSessionState();
+      }
     });
 
     this.connection.on(VoiceConnectionStatus.Disconnected, async () => {

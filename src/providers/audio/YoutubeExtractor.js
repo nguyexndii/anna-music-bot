@@ -687,7 +687,8 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
     let ytdlpStreamProcess = null;
     try {
       ytdlpStreamProcess = ytdlp.exec('', ytdlpOptions, {
-        detached: process.platform !== 'win32'
+        detached: process.platform !== 'win32',
+        buffer: false
       });
       if (ytdlpStreamProcess) {
         ytdlpStreamProcess.catch?.(() => {}); // prevent unhandledRejection when killProcess is called

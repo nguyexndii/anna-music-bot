@@ -166,7 +166,7 @@ async function handleVoiceStateUpdate(client, oldState, newState) {
         });
         queue.clearEmptyRoomTimer();
         // Đánh thức luồng phát nhạc 24/7 khi có người bước vào phòng đang Sleep Mode (xử lý cả khi còn bài dở)
-        if (queue.mode247 && !queue.currentSong && !queue._isPlayingNext) {
+        if (queue.mode247 && !queue.currentSong && !queue._isPlayingNext && !queue._isRecoveringSession && !queue._is247Loading) {
           queue.isQueueOnHold = false;
           if (queue.songs.length > 0) {
             queue.playNext().catch(() => {});
