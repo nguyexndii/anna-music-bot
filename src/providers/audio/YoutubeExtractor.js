@@ -17,6 +17,7 @@ const { executeSearch } = require('../../utils/searchService');
 const {
   getCookiesFile,
   YTDLP_EXTRACTOR_ARGS,
+  applyGgcMirrorFallback,
   registerProcess,
   killProcess,
   isYouTubeCircuitOpen,
@@ -370,7 +371,18 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
       err.name = 'AbortError';
       return reject(err);
     }
+    const finalStreamUrl = applyGgcMirrorFallback(streamUrl);
+    let userAgent = 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip';
+    if (/[?&]c=IOS\b/i.test(finalStreamUrl)) {
+      userAgent = 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)';
+    } else if (/[?&]c=MWEB\b/i.test(finalStreamUrl)) {
+      userAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    } else if (/[?&]c=WEB\b/i.test(finalStreamUrl)) {
+      userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+    }
+
     const ffmpegArgs = [
+      '-user_agent', userAgent,
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
@@ -382,7 +394,7 @@ function createDirectFfmpegStream(streamUrl, seekSeconds = 0, playDurationSec = 
     }
     ffmpegArgs.push(
       '-thread_queue_size', '512',
-      '-i', streamUrl,
+      '-i', finalStreamUrl,
       '-vn',
       '-c:a', 'pcm_s16le',
       '-f', 's16le',
@@ -664,8 +676,8 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
       noPlaylist: true,
       noWarnings: true,
       noProgress: true,
-      socketTimeout: 10,
-      retries: 2,
+      socketTimeout: 6,
+      retries: 1,
       bufferSize: '64K',
       httpChunkSize: '10M',
       concurrentFragments: 1,
@@ -787,8 +799,14 @@ async function createSingleStream(targetQueryOrUrl, crossfadeSeconds = 0, seekSe
 
     let ytdlpStderr = '';
     ytdlpStreamProcess.stderr.on('data', (chunk) => {
-      ytdlpStderr += chunk.toString();
+      const str = chunk.toString();
+      ytdlpStderr += str;
       if (ytdlpStderr.length > 4000) ytdlpStderr = ytdlpStderr.slice(-2000);
+      if (!firstChunkReceived && !manuallyDestroyed && /Network is unreachable|Connection timed out|Got error: timed out/i.test(str)) {
+        try { ytdlpStreamProcess.stdout.unpipe(ffmpegProcess.stdin); } catch (e) {}
+        killProcess(ytdlpStreamProcess);
+        killProcess(ffmpegProcess);
+      }
     });
 
     ffmpegProcess.stdin.on('error', (err) => {

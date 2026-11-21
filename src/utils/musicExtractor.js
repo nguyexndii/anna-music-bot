@@ -44,6 +44,7 @@ const {
   MAX_STREAM_CACHE_SIZE,
   getCachedStreamUrl,
   setCachedStreamUrl,
+  applyGgcMirrorFallback,
   resolveDirectStreamUrl,
   isYouTubeCircuitOpen,
   recordYouTubeFailure,
@@ -762,6 +763,23 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     return await createSoundCloudFailoverStream(trackItem, cleanTitle, trackTitle, crossfadeSeconds, effectiveSeek, playDurationSec, options);
   }
 
+  // TẦNG 0.5: Nếu URL googlevideo.com đã được phân giải sẵn trong RAM Cache, phát tức thì qua FFmpeg (~0.3s)
+  const cachedDirectUrl = getCachedStreamUrl(targetUrl);
+  if (cachedDirectUrl) {
+    try {
+      const fastRes = await createDirectFfmpegStream(cachedDirectUrl, effectiveSeek, playDurationSec, options);
+      cacheOptions?.onAbort?.();
+      recordYouTubeSuccess();
+      return fastRes;
+    } catch (fastErr) {
+      if (fastErr.name === 'AbortError' || options?.signal?.aborted) {
+        cacheOptions?.onAbort?.();
+        throw fastErr;
+      }
+      streamUrlCache.delete(targetUrl);
+    }
+  }
+
   // TẦNG 1: Thử phát từ YouTube URL chính
   try {
     const res = await createSingleStream(targetUrl, crossfadeSeconds, effectiveSeek, false, false, playDurationSec, cacheOptions, options);
@@ -774,6 +792,22 @@ async function _doCreateResource(trackItem, crossfadeSeconds = 0, seekSeconds = 
     }
     const errMsg = ytErr.message.split('\n')[0];
     console.warn(`[YouTube Stream Blocked/Failed for "${trackTitle}"]: ${errMsg}`);
+
+    // TẦNG 1.1: Chuyển sang máy chủ Google CDN Mirror dự phòng (rr<fvip>---<mn[1]>.googlevideo.com) cho chính video gốc
+    try {
+      const directUrl = await resolveDirectStreamUrl(targetUrl, true);
+      if (directUrl) {
+        const mirrorUrl = applyGgcMirrorFallback(directUrl, true);
+        setCachedStreamUrl(targetUrl, mirrorUrl);
+        console.log(`[YouTube GGC Mirror] Phát trực tiếp video gốc "${trackTitle}" qua CDN dự phòng...`);
+        const mirrorRes = await createDirectFfmpegStream(mirrorUrl, effectiveSeek, playDurationSec, options);
+        recordYouTubeSuccess();
+        return mirrorRes;
+      }
+    } catch (mirrorErr) {
+      if (mirrorErr.name === 'AbortError' || options?.signal?.aborted) throw mirrorErr;
+      console.warn(`[YouTube GGC Mirror Failed]: ${mirrorErr.message.split('\n')[0]}`);
+    }
 
     const isCookieBotError = /sign in to confirm|confirm you're not a bot|this content isn't available|login|cookie|bot verification|403|429/i.test(errMsg);
     if (isCookieBotError) {

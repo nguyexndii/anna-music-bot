@@ -171,16 +171,50 @@ function setCachedStreamUrl(targetUrl, streamUrl) {
   streamUrlCache.set(targetUrl, { streamUrl, expiresAt });
 }
 
+// Danh sách cụm Google Global Cache (GGC) nội địa đang bị đứt định tuyến từ VPS
+const DEAD_GGC_NODES = ['sn-42u-i5osl'];
+
+/**
+ * Tự động chuyển đổi hostname của googlevideo.com sang máy chủ Mirror dự phòng (rr<fvip>---<mn[1]>.googlevideo.com)
+ * khi cụm GGC chính bị đứt mạng hoặc khi forceFallback = true.
+ */
+function applyGgcMirrorFallback(streamUrl, forceFallback = false) {
+  if (!streamUrl || typeof streamUrl !== 'string') return streamUrl;
+  try {
+    const parsed = new URL(streamUrl);
+    if (!parsed.hostname.endsWith('.googlevideo.com')) return streamUrl;
+    const isKnownDeadNode = DEAD_GGC_NODES.some(node => parsed.hostname.includes(node));
+    if (!forceFallback && !isKnownDeadNode) return streamUrl;
+
+    const fvip = parsed.searchParams.get('fvip');
+    const mnRaw = parsed.searchParams.get('mn');
+    if (fvip && mnRaw) {
+      const mirrors = mnRaw.split(',').map(s => s.trim()).filter(Boolean);
+      if (mirrors.length >= 2 && !parsed.hostname.includes(mirrors[1])) {
+        const newHost = `rr${fvip}---${mirrors[1]}.googlevideo.com`;
+        console.log(`[YouTube GGC Failover] Chuyển đổi CDN từ ${parsed.hostname} -> ${newHost}`);
+        parsed.hostname = newHost;
+        return parsed.toString();
+      }
+    }
+  } catch (e) {}
+  return streamUrl;
+}
+
 /**
  * Phân giải Direct Stream URL (googlevideo.com) ngầm qua yt-dlp và lưu vào streamUrlCache
  */
-async function resolveDirectStreamUrl(targetUrl) {
+async function resolveDirectStreamUrl(targetUrl, forceMirror = false) {
   if (!targetUrl || typeof targetUrl !== 'string') return null;
   const cleanTarget = targetUrl.trim();
   if (!cleanTarget) return null;
 
   const cached = getCachedStreamUrl(cleanTarget);
-  if (cached) return cached;
+  if (cached) {
+    const finalCached = applyGgcMirrorFallback(cached, forceMirror);
+    if (finalCached !== cached) setCachedStreamUrl(cleanTarget, finalCached);
+    return finalCached;
+  }
 
   const baseOpts = {
     getUrl: true,
@@ -188,9 +222,8 @@ async function resolveDirectStreamUrl(targetUrl) {
     noPlaylist: true,
     noWarnings: true,
     preferFreeFormats: true,
-    socketTimeout: 10,
+    socketTimeout: 6,
     retries: 1,
-    extractorArgs: YTDLP_EXTRACTOR_ARGS,
     jsRuntimes: `node:${process.execPath}`,
     noCheckCertificates: true,
     '--': [cleanTarget]
@@ -202,28 +235,32 @@ async function resolveDirectStreamUrl(targetUrl) {
     return lines.find(s => s.startsWith('http')) || null;
   };
 
+  // Ưu tiên 1: Dùng player_client=android không cookie (nhanh ~2s, không cần deno giải JS challenge)
   try {
-    const opts = { ...baseOpts };
-    const cFile = getCookiesFile();
-    if (cFile) opts.cookies = cFile;
-    const directUrl = await ytdlp('', opts);
-    const urlStr = parseUrl(directUrl);
+    const fastOpts = { ...baseOpts, extractorArgs: 'youtube:player_client=android' };
+    const directUrl = await ytdlp('', fastOpts);
+    let urlStr = parseUrl(directUrl);
     if (urlStr) {
+      urlStr = applyGgcMirrorFallback(urlStr, forceMirror);
       setCachedStreamUrl(cleanTarget, urlStr);
       return urlStr;
     }
-  } catch (e) {
-    // Thử lại không cookie với player client dự phòng nếu lần đầu lỗi
-    try {
-      const retryOpts = { ...baseOpts, extractorArgs: 'youtube:player_client=ios,android' };
-      const directUrl = await ytdlp('', retryOpts);
-      const urlStr = parseUrl(directUrl);
-      if (urlStr) {
-        setCachedStreamUrl(cleanTarget, urlStr);
-        return urlStr;
-      }
-    } catch (retryErr) {}
-  }
+  } catch (fastErr) {}
+
+  // Ưu tiên 2: Dùng cookies + YTDLP_EXTRACTOR_ARGS (dành cho video giới hạn tuổi / yêu cầu đăng nhập)
+  try {
+    const opts = { ...baseOpts, extractorArgs: YTDLP_EXTRACTOR_ARGS };
+    const cFile = getCookiesFile();
+    if (cFile) opts.cookies = cFile;
+    const directUrl = await ytdlp('', opts);
+    let urlStr = parseUrl(directUrl);
+    if (urlStr) {
+      urlStr = applyGgcMirrorFallback(urlStr, forceMirror);
+      setCachedStreamUrl(cleanTarget, urlStr);
+      return urlStr;
+    }
+  } catch (e) {}
+
   return null;
 }
 
@@ -326,6 +363,7 @@ module.exports = {
   MAX_STREAM_CACHE_SIZE,
   getCachedStreamUrl,
   setCachedStreamUrl,
+  applyGgcMirrorFallback,
   resolveDirectStreamUrl,
   isYouTubeCircuitOpen,
   recordYouTubeFailure,
