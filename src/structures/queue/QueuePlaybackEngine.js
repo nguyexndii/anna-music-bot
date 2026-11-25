@@ -757,6 +757,11 @@ class QueuePlaybackEngine {
     if (this.queue._isPlayingNext) return;
     this.queue._isPlayingNext = true;
     const playEpoch = ++this.queue._playbackEpoch;
+    if (this.queue._playNextAbortController) {
+      try { this.queue._playNextAbortController.abort(); } catch (e) {}
+    }
+    const playAbortController = new AbortController();
+    this.queue._playNextAbortController = playAbortController;
     if (this.queue._seekAbortController) {
       try { this.queue._seekAbortController.abort(); } catch (e) {}
       this.queue._seekAbortController = null;
@@ -903,13 +908,15 @@ class QueuePlaybackEngine {
           this.queue.preloadedResource = null;
           this.queue.preloadedSongUrl = null;
         }
-        resource = await createResource(this.currentSong, 0, initialSeekSeconds, { priority: 'high' });
+        resource = await createResource(this.currentSong, 0, initialSeekSeconds, {
+          priority: 'high',
+          signal: playAbortController.signal
+        });
       }
 
       // Task 2.3 & Task 3.1: Chặn Ghost Playback & Epoch Guard
       if (this.queue.isStopped || this.queue.isDestroyed || this.queue._playbackEpoch !== playEpoch) {
         if (resource) this._cleanupResource(resource);
-        this.queue._isPlayingNext = false;
         return;
       }
 
@@ -1113,6 +1120,9 @@ class QueuePlaybackEngine {
         } catch (npErr) {}
       }
     } catch (error) {
+      if (error?.name === 'AbortError' || playAbortController.signal.aborted || this.queue._playbackEpoch !== playEpoch || this.queue.isDestroyed || this.queue.isStopped) {
+        return;
+      }
       console.error(`[Play Error] ${this.currentSong?.title || 'Unknown'}:`, error);
       const failedSong = this.currentSong;
       const is247Lofi = Boolean(failedSong?.requestedBy === 'Auto (24/7)' || failedSong?.is247);
@@ -1149,7 +1159,12 @@ class QueuePlaybackEngine {
       this.queue._isPlayingNext = false;
       await this._handleSongEnd();
     } finally {
-      this.queue._isPlayingNext = false;
+      if (this.queue._playNextAbortController === playAbortController) {
+        this.queue._playNextAbortController = null;
+      }
+      if (this.queue._playbackEpoch === playEpoch) {
+        this.queue._isPlayingNext = false;
+      }
     }
   }
 
@@ -2122,6 +2137,11 @@ class QueuePlaybackEngine {
 
   async switchTo247Lofi() {
     this.queue._playbackEpoch++;
+    if (this.queue._playNextAbortController) {
+      try { this.queue._playNextAbortController.abort(); } catch (e) {}
+      this.queue._playNextAbortController = null;
+    }
+    this.queue._isPlayingNext = false;
     if (this.queue._seekAbortController) {
       try { this.queue._seekAbortController.abort(); } catch (e) {}
       this.queue._seekAbortController = null;
